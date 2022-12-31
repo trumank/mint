@@ -1,0 +1,21 @@
+[package]
+name = "modloader-rs"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+anyhow = "1.0.68"
+dotenv = "0.15.0"
+futures = "0.3.25"
+hex = "0.4.3"
+indexmap = "1.9.2"
+md-5 = "0.10.5"
+modio = "0.7.1"
+serde = { version = "1.0.151", features = ["derive"] }
+serde_json = "1.0.91"
+tokio = { version = "1.23.0", features = ["full"] }
+ue4pak = { path = "ue4pak-rs" }
+u4pak = { path = "rust-u4pak" }
+zip = "0.6.3"
