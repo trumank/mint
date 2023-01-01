@@ -1,5 +1,5 @@
 [package]
-name = "modloader-rs"
+name = "drg-mod-integration"
 version = "0.1.0"
 edition = "2021"
 

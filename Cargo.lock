@@ -215,6 +215,25 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "77c90badedccf4105eca100756a0b1289e191f6fcbdadd3cee1d2f614f97da8f"
 
 [[package]]
+name = "drg-mod-integration"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "dotenv",
+ "futures",
+ "hex",
+ "indexmap",
+ "md-5",
+ "modio",
+ "serde",
+ "serde_json",
+ "tokio",
+ "uesave",
+ "zip",
+]
+
+[[package]]
 name = "encoding_rs"
 version = "0.8.31"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -718,25 +737,6 @@ dependencies = [
  "tokio-util",
  "tracing",
  "url",
-]
-
-[[package]]
-name = "modloader-rs"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "clap",
- "dotenv",
- "futures",
- "hex",
- "indexmap",
- "md-5",
- "modio",
- "serde",
- "serde_json",
- "tokio",
- "uesave",
- "zip",
 ]
 
 [[package]]
