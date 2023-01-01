@@ -5,7 +5,7 @@ use anyhow::Result;
 use anyhow::anyhow;
 use std::fs::{self, OpenOptions, File};
 use std::str::FromStr;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use std::io::{Read, Write, BufReader};
 
@@ -14,23 +14,102 @@ use modio::filter::prelude::*;
 use modio::download::DownloadAction;
 use tokio::task::JoinSet;
 
+use uesave::Save;
+use uesave::PropertyMeta::Str;
+
+use clap::{Parser, Subcommand};
+
+struct Env {
+    modio_key: String,
+    game_id: u32,
+    paks_dir: PathBuf,
+    mod_config_save: PathBuf,
+}
+
+fn get_env() -> Result<Env> {
+    let fsd_install = std::path::PathBuf::from(std::env::var("FSD_INSTALL").expect("Missing path to game root directory"));
+
+    Ok(Env {
+        modio_key: std::env::var("MODIO_KEY").expect("Missing Mod.io API key"),
+        //game_id: std::env::var("MODIO_GAME_ID").expect("Missing Mod.io game id").parse()?,
+        game_id: 2475,
+        paks_dir: fsd_install.join("FSD/Content/Paks"),
+        mod_config_save: fsd_install.join("FSD/Saved/SaveGames/Mods/ModIntegration.sav"),
+    })
+}
+
+#[derive(Parser, Debug)]
+struct ActionInstall {
+   #[arg(required = true, index = 1)]
+   config: String,
+
+   #[arg(short, long)]
+   update: bool,
+}
+
+#[derive(Parser, Debug)]
+struct ActionSync {}
+
+#[derive(Subcommand, Debug)]
+enum Action {
+   /// Install mods with specified config
+   Install(ActionInstall),
+   /// Sync mods with host using config saved in ModIntegration.sav
+   Sync(ActionSync),
+}
+
+#[derive(Parser, Debug)]
+#[command(author, version)]
+struct Args {
+   #[command(subcommand)]
+   action: Action,
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     dotenv::dotenv().ok();
+    let env = get_env()?;
 
-    let key = std::env::var("MODIO_KEY").expect("Missing Mod.io API key");
-    let game_id: u32 = std::env::var("MODIO_GAME_ID").expect("Missing Mod.io game id").parse()?;
-    let paks_dir_str = &std::env::var("PAKS").expect("Missing path to game's Paks directory");
-    let paks_dir = Path::new(paks_dir_str);
+    match Args::parse().action {
+        Action::Install(args) => install(&env, args).await,
+        Action::Sync(args) => sync(&env, args).await,
+    }
+}
 
-    let arg = &std::env::args().nth(1).unwrap();
-    let config_path = std::path::Path::new(arg);
+async fn sync(env: &Env, args: ActionSync) -> Result<()> {
+    println!("syncing nothing");
 
-    let file = File::open(config_path).unwrap();
-    let mods: Mods = serde_json::from_reader(file).unwrap();
+    let save_buffer = std::fs::read(&env.mod_config_save)?;
+    let json = extract_config_from_save(&save_buffer)?;
+    let mods: Mods = serde_json::from_str(&json)?;
     println!("{:#?}", mods);
 
-    let modio = Modio::new(Credentials::new(key))?;
+    let config = install_config(env, mods).await?;
+
+    Ok(())
+}
+
+async fn install(env: &Env, args: ActionInstall) -> Result<()> {
+    let config_path = std::path::Path::new(&args.config);
+
+    let file = File::open(config_path)?;
+    let mods: Mods = serde_json::from_reader(file)?;
+    println!("{:#?}", mods);
+
+    let config = install_config(env, mods).await?;
+
+    if args.update {
+        let file = File::create(config_path).unwrap();
+        serde_json::to_writer_pretty(file, &config).unwrap();
+    }
+
+    Ok(())
+}
+
+/// Take config, validate against mod.io, install, return populated config
+async fn install_config(env: &Env, mods: Mods) -> Result<Mods> {
+    println!("installing config={:#?}", mods);
+    let modio = Modio::new(Credentials::new(&env.modio_key))?;
 
     let mut config_map: indexmap::IndexMap<_, _> = mods.mods.into_iter().map(|m| (m.id.parse::<u32>().unwrap(), m)).collect();
 
@@ -43,12 +122,12 @@ async fn main() -> Result<()> {
         let mut dependency_reqs = JoinSet::new();
 
         for id in to_check.iter().copied() {
-            let deps = modio.mod_(game_id, id).dependencies();
+            let deps = modio.mod_(env.game_id, id).dependencies();
             dependency_reqs.spawn(async move { (id, deps.list().await) });
         }
 
         println!("requesting mods");
-        let mods_res = modio.game(game_id).mods().search(Id::_in(to_check.iter().copied().collect::<Vec<_>>())).collect().await?;
+        let mods_res = modio.game(env.game_id).mods().search(Id::_in(to_check.iter().copied().collect::<Vec<_>>())).collect().await?;
         to_check.clear();
         for res in mods_res.into_iter() {
             let mut config = config_map.get_mut(&res.id).unwrap();
@@ -78,11 +157,14 @@ async fn main() -> Result<()> {
         }
     }
 
-    let config = config_map.into_iter().map(|(_, v)| v).collect::<Vec<_>>();
-    let file = File::create(config_path).unwrap();
-    serde_json::to_writer_pretty(file, &Mods { mods: config }).unwrap();
+    let config = Mods {
+        mods: config_map.into_iter().map(|(_, v)| v).collect::<Vec<_>>(),
+        request_sync: false
+    };
 
     let mut paks = vec![];
+
+    fs::create_dir("mods").ok();
 
     for (id, mod_) in modio_data {
         if let Some(file) = mod_.modfile {
@@ -109,10 +191,10 @@ async fn main() -> Result<()> {
             panic!("mod id={} does not have a file uploaded", id);
         }
     }
-    let loader = include_bytes!("../../../packed-mods/native-spawner.pak").to_vec();
+    let loader = include_bytes!("../mod-integration.pak").to_vec();
     paks.push(("loader".to_string(), loader));
 
-    for entry in fs::read_dir(paks_dir).expect("Unable to list") {
+    for entry in fs::read_dir(&env.paks_dir).expect("Unable to list") {
         let entry = entry.expect("unable to get entry");
         if entry.file_type()?.is_dir() { continue };
         if let Some(name) = entry.file_name().to_str() {
@@ -133,14 +215,23 @@ async fn main() -> Result<()> {
             .write(true)
             .create(true)
             .truncate(true)
-            .open(paks_dir.join(name))?;
+            .open(&env.paks_dir.join(name))?;
         out_file.write_all(&buf)?;
     }
 
+    // write config to mod integration save file
+    let mut out_save = OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .open(&env.mod_config_save)?;
+    out_save.write_all(&wrap_config(serde_json::to_string(&config)?)?)?;
+
     println!("mods installed");
 
-    Ok(())
+    Ok(config)
 }
+
 fn contains(source: &[u8], needle: &[u8]) -> bool {
     'outer: for i in 0..(source.len() - needle.len() + 1) {
         for j in 0..needle.len() {
@@ -200,6 +291,8 @@ fn is_required(mod_: &modio::mods::Mod) -> bool {
 #[derive(Debug, Serialize, Deserialize)]
 struct Mods {
     mods: Vec<ModEntry>,
+    #[serde(default)]
+    request_sync: bool,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -230,5 +323,30 @@ impl FromStr for Approval {
             "Sandbox"  => Ok(Approval::Sandbox),
             _ => Err(()),
         }
+    }
+}
+
+fn extract_config_from_save(buffer: &[u8]) -> Result<String> {
+    let mut save_rdr = std::io::Cursor::new(&buffer[..]);
+    let save = Save::read(&mut save_rdr)?;
+
+    if let Str{ value: json, .. } = &save.root.root[0].value {
+        Ok(json.to_string())
+    } else {
+        Err(anyhow!(""))
+    }
+}
+fn wrap_config(config: String) -> Result<Vec<u8>> {
+    let buffer = include_bytes!("../ModIntegration.sav");
+    let mut save_rdr = std::io::Cursor::new(&buffer[..]);
+    let mut save = Save::read(&mut save_rdr)?;
+
+    if let Str{ value: json, .. } = &mut save.root.root[0].value {
+        *json = config;
+        let mut out_buffer = vec![];
+        save.write(&mut out_buffer)?;
+        Ok(out_buffer)
+    } else {
+        Err(anyhow!(""))
     }
 }
