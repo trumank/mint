@@ -54,6 +54,7 @@ async fn main() -> Result<()> {
             let mut config = config_map.get_mut(&res.id).unwrap();
             config.name = Some(res.name.to_owned());
             config.approval = Some(get_approval(&res));
+            config.required = Some(is_required(&res));
             if let Some(modfile) = &res.modfile {
                 config.version = Some(modfile.id.to_string());
             }
@@ -69,6 +70,7 @@ async fn main() -> Result<()> {
                         name: None,
                         version: None,
                         approval: None,
+                        required: None,
                     });
                     to_check.insert(dep.mod_id);
                 }
@@ -186,6 +188,15 @@ fn get_approval(mod_: &modio::mods::Mod) -> Approval {
     Approval::Sandbox
 }
 
+fn is_required(mod_: &modio::mods::Mod) -> bool {
+    for tag in &mod_.tags {
+        if tag.name == "RequiredByAll" {
+            return true;
+        }
+    }
+    false
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 struct Mods {
     mods: Vec<ModEntry>,
@@ -197,6 +208,7 @@ struct ModEntry {
     name: Option<String>,
     version: Option<String>,
     approval: Option<Approval>,
+    required: Option<bool>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
