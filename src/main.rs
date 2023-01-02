@@ -40,8 +40,9 @@ fn get_env() -> Result<Env> {
 
 #[derive(Parser, Debug)]
 struct ActionInstall {
-   #[arg(required = true, index = 1)]
-   config: String,
+    /// Path to mod config. If empty, will install the mod integration without any mods.
+   #[arg(index = 1)]
+   config: Option<String>,
 
    #[arg(short, long)]
    update: bool,
@@ -90,17 +91,26 @@ async fn sync(env: &Env, args: ActionSync) -> Result<()> {
 }
 
 async fn install(env: &Env, args: ActionInstall) -> Result<()> {
-    let config_path = std::path::Path::new(&args.config);
+    let mods = if let Some(path) = &args.config {
+        let config_path = std::path::Path::new(path);
 
-    let file = File::open(config_path)?;
-    let mods: Mods = serde_json::from_reader(file)?;
+        let file = File::open(config_path)?;
+        serde_json::from_reader(file)?
+    } else {
+        Mods {
+            mods: vec![],
+            request_sync: true
+        }
+    };
     println!("{:#?}", mods);
 
     let config = install_config(env, mods).await?;
 
     if args.update {
-        let file = File::create(config_path).unwrap();
-        serde_json::to_writer_pretty(file, &config).unwrap();
+        if let Some(path) = &args.config {
+            let file = File::create(path).unwrap();
+            serde_json::to_writer_pretty(file, &config).unwrap();
+        }
     }
 
     Ok(())
@@ -215,7 +225,7 @@ async fn install_config(env: &Env, mods: Mods) -> Result<Mods> {
             .write(true)
             .create(true)
             .truncate(true)
-            .open(&env.paks_dir.join(name))?;
+            .open(env.paks_dir.join(name))?;
         out_file.write_all(&buf)?;
     }
 
@@ -327,7 +337,7 @@ impl FromStr for Approval {
 }
 
 fn extract_config_from_save(buffer: &[u8]) -> Result<String> {
-    let mut save_rdr = std::io::Cursor::new(&buffer[..]);
+    let mut save_rdr = std::io::Cursor::new(buffer);
     let save = Save::read(&mut save_rdr)?;
 
     if let Str{ value: json, .. } = &save.root.root[0].value {
