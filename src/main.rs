@@ -53,12 +53,20 @@ struct ActionInstall {
 #[derive(Parser, Debug)]
 struct ActionSync {}
 
+#[derive(Parser, Debug)]
+struct ActionRun {
+   #[arg(index = 1, trailing_var_arg = true, allow_hyphen_values = true)]
+   args: Vec<String>,
+}
+
 #[derive(Subcommand, Debug)]
 enum Action {
    /// Install mods with specified config
    Install(ActionInstall),
    /// Sync mods with host using config saved in ModIntegration.sav
    Sync(ActionSync),
+   /// Passthrough from steam to directly launch the game
+   Run(ActionRun),
 }
 
 #[derive(Parser, Debug)]
@@ -70,13 +78,45 @@ struct Args {
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    let mut path = std::env::current_exe()?;
+    path.pop();
+    std::env::set_current_dir(path)?;
+    //std::env::set_current_dir(Path::new("/home/truman/projects/drg-modding/tools/modloader-rs"))?;
     dotenv::dotenv().ok();
     let env = get_env()?;
 
     match Args::parse().action {
         Action::Install(args) => install(&env, args).await,
         Action::Sync(args) => sync(&env, args).await,
+        Action::Run(args) => run(&env, args).await,
     }
+}
+
+async fn run(env: &Env, args: ActionRun) -> Result<()> {
+    use std::process::Command;
+    if let Some((cmd, args)) = args.args.split_first() {
+        //install(&env, ActionInstall { config: None, update: false }).await?;
+        loop {
+            Command::new(cmd)
+                    .args(args)
+                    .arg("-disablemodding")
+                    .spawn()
+                    .expect("failed to execute process")
+                    .wait()?;
+
+            let save_buffer = std::fs::read(&env.mod_config_save)?;
+            let json = extract_config_from_save(&save_buffer)?;
+            if serde_json::from_str::<Mods>(&json)?.request_sync {
+                sync(&env, ActionSync {}).await?;
+            } else {
+                break;
+            }
+        }
+    } else {
+        return Err(anyhow!("missing command"))
+    }
+
+    Ok(())
 }
 
 async fn sync(env: &Env, args: ActionSync) -> Result<()> {
