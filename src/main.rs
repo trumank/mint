@@ -20,9 +20,10 @@ use uesave::PropertyMeta::Str;
 use clap::{Parser, Subcommand};
 
 struct Env {
-    modio_key: String,
+    modio: modio::Modio,
     game_id: u32,
     paks_dir: PathBuf,
+    mod_cache_dir: PathBuf,
     mod_config_save: PathBuf,
 }
 
@@ -30,10 +31,11 @@ fn get_env() -> Result<Env> {
     let fsd_install = std::path::PathBuf::from(std::env::var("FSD_INSTALL").expect("Missing path to game root directory"));
 
     Ok(Env {
-        modio_key: std::env::var("MODIO_KEY").expect("Missing Mod.io API key"),
+        modio: Modio::new(Credentials::new(std::env::var("MODIO_KEY").expect("Missing Mod.io API key")))?,
         //game_id: std::env::var("MODIO_GAME_ID").expect("Missing Mod.io game id").parse()?,
         game_id: 2475,
         paks_dir: fsd_install.join("FSD/Content/Paks"),
+        mod_cache_dir: PathBuf::from("mods"),
         mod_config_save: fsd_install.join("FSD/Saved/SaveGames/Mods/ModIntegration.sav"),
     })
 }
@@ -78,14 +80,12 @@ async fn main() -> Result<()> {
 }
 
 async fn sync(env: &Env, args: ActionSync) -> Result<()> {
-    println!("syncing nothing");
-
     let save_buffer = std::fs::read(&env.mod_config_save)?;
     let json = extract_config_from_save(&save_buffer)?;
     let mods: Mods = serde_json::from_str(&json)?;
     println!("{:#?}", mods);
 
-    let config = install_config(env, mods).await?;
+    let config = install_config(env, mods, false).await?;
 
     Ok(())
 }
@@ -104,7 +104,7 @@ async fn install(env: &Env, args: ActionInstall) -> Result<()> {
     };
     println!("{:#?}", mods);
 
-    let config = install_config(env, mods).await?;
+    let config = install_config(env, mods, args.update).await?;
 
     if args.update {
         if let Some(path) = &args.config {
@@ -116,38 +116,36 @@ async fn install(env: &Env, args: ActionInstall) -> Result<()> {
     Ok(())
 }
 
-/// Take config, validate against mod.io, install, return populated config
-async fn install_config(env: &Env, mods: Mods) -> Result<Mods> {
-    println!("installing config={:#?}", mods);
-    let modio = Modio::new(Credentials::new(&env.modio_key))?;
-
+async fn populate_config(env: &Env, mods: Mods, update: bool, mod_hashes: &mut HashMap<u32, String>) -> Result<Mods> {
     let mut config_map: indexmap::IndexMap<_, _> = mods.mods.into_iter().map(|m| (m.id.parse::<u32>().unwrap(), m)).collect();
 
     let mut to_check: HashSet<u32> = config_map.keys().copied().collect();
-
-    let mut modio_data = HashMap::new();
 
     while !to_check.is_empty() {
         println!("to check: {:?}", &to_check);
         let mut dependency_reqs = JoinSet::new();
 
         for id in to_check.iter().copied() {
-            let deps = modio.mod_(env.game_id, id).dependencies();
+            let deps = env.modio.mod_(env.game_id, id).dependencies();
             dependency_reqs.spawn(async move { (id, deps.list().await) });
         }
 
         println!("requesting mods");
-        let mods_res = modio.game(env.game_id).mods().search(Id::_in(to_check.iter().copied().collect::<Vec<_>>())).collect().await?;
+        let mods_res = env.modio.game(env.game_id).mods().search(Id::_in(to_check.iter().copied().collect::<Vec<_>>())).collect().await?;
         to_check.clear();
         for res in mods_res.into_iter() {
             let mut config = config_map.get_mut(&res.id).unwrap();
             config.name = Some(res.name.to_owned());
             config.approval = Some(get_approval(&res));
             config.required = Some(is_required(&res));
-            if let Some(modfile) = &res.modfile {
-                config.version = Some(modfile.id.to_string());
+            if let Some(modfile) = res.modfile {
+                mod_hashes.insert(modfile.id, modfile.filehash.md5);
+                if config.version.is_none() || update {
+                    config.version = Some(modfile.id.to_string());
+                }
+            } else {
+                return Err(anyhow!("mod={} does not have any modfiles", config.id));
             }
-            modio_data.insert(res.id, res);
         }
         println!("requesting dependencies");
         while let Some(Ok(res)) = dependency_reqs.join_next().await {
@@ -167,38 +165,58 @@ async fn install_config(env: &Env, mods: Mods) -> Result<Mods> {
         }
     }
 
-    let config = Mods {
+    Ok(Mods {
         mods: config_map.into_iter().map(|(_, v)| v).collect::<Vec<_>>(),
         request_sync: false
-    };
+    })
+}
+
+/// Take config, validate against mod.io, install, return populated config
+async fn install_config(env: &Env, mods: Mods, update: bool) -> Result<Mods> {
+    println!("installing config={:#?}", mods);
+
+    let mut mod_hashes = HashMap::new();
+    let config = populate_config(env, mods, update, &mut mod_hashes).await?;
 
     let mut paks = vec![];
 
-    fs::create_dir("mods").ok();
+    fs::create_dir(&env.mod_cache_dir).ok();
 
-    for (id, mod_) in modio_data {
-        if let Some(file) = mod_.modfile {
-            let path_str = format!("mods/{}.zip", file.id);
-            let path = Path::new(&path_str);
-            let hash = file.filehash.md5.to_owned();
-            if !path.exists() {
-                println!("downloading mod id={} path={}", id, path.display());
-                modio.download(DownloadAction::FileObj(Box::new(file))).save_to_file(&path).await?;
+    for entry in &config.mods {
+        let mod_id = entry.id.parse::<u32>()?;
+        if let Some(version) = &entry.version {
+            let file_id = version.parse::<u32>()?;
+            let file_path = &env.mod_cache_dir.join(format!("{}.zip", file_id));
+            if !file_path.exists() {
+                println!("downloading mod={} version={} path={}", mod_id, file_id, file_path.display());
+                env.modio.download(DownloadAction::File {
+                    game_id: env.game_id,
+                    mod_id,
+                    file_id,
+                }).save_to_file(&file_path).await?;
             }
 
-            use md5::{Md5, Digest};
+            let modfile;
+            let hash = if let Some(hash) = mod_hashes.get(&file_id) {
+                hash
+            } else {
+                println!("requesting modfile={}", file_id);
+                modfile = env.modio.game(env.game_id).mod_(mod_id).file(file_id).get().await?;
+                &modfile.filehash.md5
+            };
 
-            let mut local_file = File::open(&path)?;
+            use md5::{Md5, Digest};
             let mut hasher = Md5::new();
-            std::io::copy(&mut local_file, &mut hasher)?;
+            std::io::copy(&mut File::open(&file_path)?, &mut hasher)?;
             let local_hash = hex::encode(hasher.finalize());
             println!("checking file hash modio={} local={}", hash, local_hash);
-            assert_eq!(hash, local_hash);
+            assert_eq!(hash, &local_hash);
 
-            let buf = get_pak_from_file(path)?;
-            paks.push((format!("{}", mod_.id), buf));
+
+            let buf = get_pak_from_file(file_path)?;
+            paks.push((format!("{}", mod_id), buf));
         } else {
-            panic!("mod id={} does not have a file uploaded", id);
+            panic!("unreachable");
         }
     }
     let loader = include_bytes!("../mod-integration.pak").to_vec();
@@ -343,7 +361,7 @@ fn extract_config_from_save(buffer: &[u8]) -> Result<String> {
     if let Str{ value: json, .. } = &save.root.root[0].value {
         Ok(json.to_string())
     } else {
-        Err(anyhow!(""))
+        Err(anyhow!("Malformed save file"))
     }
 }
 fn wrap_config(config: String) -> Result<Vec<u8>> {
@@ -357,6 +375,6 @@ fn wrap_config(config: String) -> Result<Vec<u8>> {
         save.write(&mut out_buffer)?;
         Ok(out_buffer)
     } else {
-        Err(anyhow!(""))
+        Err(anyhow!("Malformed save file"))
     }
 }
