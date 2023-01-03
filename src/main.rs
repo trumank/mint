@@ -52,7 +52,7 @@ fn main() -> Result<()> {
         ..Default::default()
     };
     let (tx, rx) = std::sync::mpsc::channel();
-    Ok(eframe::run_native(
+    eframe::run_native(
         "My egui App",
         options,
         Box::new(|_cc| Box::new(MyApp {
@@ -67,16 +67,12 @@ fn main() -> Result<()> {
             settings_dialog: None,
             config,
         })),
-    ))
+    );
+    Ok(())
 }
 
+#[derive(Default)]
 struct RequestCounter(u32);
-
-impl Default for RequestCounter {
-    fn default() -> Self {
-        RequestCounter(0)
-    }
-}
 
 impl RequestCounter {
     fn next(&mut self) -> u32 {
@@ -117,14 +113,14 @@ where T: std::cmp::PartialEq + std::clone::Clone {
     fn get_err(&self) -> Option<&String> {
         match &self.validation_result {
             Ok(_) => None,
-            Err(msg) => if self.is_modified() { None } else { Some(&msg) },
+            Err(msg) => if self.is_modified() { None } else { Some(msg) },
         }
     }
     /// Returns whether the value is unmodified and if it is valid
     fn is_valid(&self) -> bool {
         match &self.validation_result {
             Ok(_) => !self.is_modified(),
-            Err(msg) => false,
+            Err(_) => false,
         }
     }
 }
@@ -135,19 +131,10 @@ struct SettingsDialog {
     validated_fsd_install: ValidatedSetting<String>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Default, Serialize, Deserialize)]
 struct Config {
     modio_key: Option<String>,
     fsd_install: Option<String>,
-}
-
-impl Default for Config {
-    fn default() -> Self {
-        Config {
-            modio_key: None,
-            fsd_install: None,
-        }
-    }
 }
 
 impl Config {
@@ -373,7 +360,7 @@ impl eframe::App for MyApp {
                             self.mods.mods = mods.into_iter().map(mod_entry_from_modio).collect::<Result<Vec<ModEntry>>>().ok().unwrap();
                         },
                         Err(err) => {
-                            log(format!("request failed: {}", err.to_string()));
+                            log(format!("request failed: {}", err));
                         }
                     }
                 },
@@ -545,9 +532,9 @@ fn get_env() -> Result<Env> {
     let fsd_install = std::path::PathBuf::from(std::env::var("FSD_INSTALL").expect("Missing path to game root directory"));
 
     let name = env!("CARGO_PKG_NAME");
-    let data_dir = PathBuf::from(dirs::data_dir().expect("Could not find user home directory")).join(name);
+    let data_dir = dirs::data_dir().expect("Could not find user home directory").join(name);
     fs::create_dir(&data_dir).ok();
-    let cache_dir = PathBuf::from(dirs::cache_dir().expect("Could not find user cache directory")).join(name);
+    let cache_dir = dirs::cache_dir().expect("Could not find user cache directory").join(name);
     fs::create_dir(&cache_dir).ok();
 
     Ok(Env {
@@ -630,7 +617,7 @@ async fn run(env: &Env, args: ActionRun) -> Result<()> {
             let save_buffer = std::fs::read(&env.mod_config_save)?;
             let json = extract_config_from_save(&save_buffer)?;
             if serde_json::from_str::<Mods>(&json)?.request_sync {
-                sync(&env, ActionSync {}).await?;
+                sync(env, ActionSync {}).await?;
             } else {
                 break;
             }
@@ -784,7 +771,7 @@ async fn install_config(env: &Env, mods: Mods, update: bool) -> Result<Mods> {
 
             use md5::{Md5, Digest};
             let mut hasher = Md5::new();
-            std::io::copy(&mut File::open(&file_path)?, &mut hasher)?;
+            std::io::copy(&mut File::open(file_path)?, &mut hasher)?;
             let local_hash = hex::encode(hasher.finalize());
             println!("checking file hash modio={} local={}", hash, local_hash);
             assert_eq!(hash, &local_hash);
@@ -811,7 +798,7 @@ async fn install_config(env: &Env, mods: Mods, update: bool) -> Result<Mods> {
 
     let ar_search = "AssetRegistry.bin".as_bytes();
     for (id, buf) in paks {
-        let name = if contains(&buf, &ar_search) {
+        let name = if contains(&buf, ar_search) {
             format!("{}.pak", id)
         } else {
             format!("{}_P.pak", id)
