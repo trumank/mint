@@ -36,7 +36,7 @@ fn main() -> Result<()> {
     // Log to stdout (if you run with `RUST_LOG=debug`).
     //tracing_subscriber::fmt::init();
     //
-    dotenv::dotenv().ok();
+    dotenvy::dotenv().ok();
     let env = get_env()?;
 
     let config = Config::load_or_create_default(&env.config_path)?;
@@ -592,7 +592,7 @@ async fn asdfmain() -> Result<()> {
     path.pop();
     //std::env::set_current_dir(path)?;
     //std::env::set_current_dir(Path::new("/home/truman/projects/drg-modding/tools/modloader-rs"))?;
-    dotenv::dotenv().ok();
+    dotenvy::dotenv().ok();
     let env = get_env()?;
 
     match Args::parse().action {
