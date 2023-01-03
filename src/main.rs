@@ -45,7 +45,8 @@ fn main() -> Result<()> {
     println!("{:#?}", mods);
 
     let options = eframe::NativeOptions {
-        initial_window_size: Some(egui::vec2(320.0, 240.0)),
+        initial_window_size: Some(egui::vec2(500.0, 300.0)),
+        min_window_size: Some(egui::vec2(500.0, 300.0)),
         ..Default::default()
     };
     let (tx, rx) = std::sync::mpsc::channel();
@@ -55,25 +56,52 @@ fn main() -> Result<()> {
         Box::new(|_cc| Box::new(MyApp {
             tx,
             rx,
-            name: "*custom*".to_owned(),
-            age: 42,
+            request_counter: Default::default(),
+            name: "custom".to_owned(),
             log: "asdf".to_owned(),
             mods,
             env,
             showing_about: false,
+            settings_dialog: None,
+            modio_key: "DEADBEEFCAFE".to_owned(),
         })),
     ))
+}
+
+struct RequestCounter(u32);
+
+impl Default for RequestCounter {
+    fn default() -> Self {
+        RequestCounter(0)
+    }
+}
+
+impl RequestCounter {
+    fn next(&mut self) -> u32 {
+        let id = self.0;
+        self.0 += 1;
+        id
+    }
+}
+
+struct SettingsDialog {
+    modio_key: String,
+    validated: bool,
+    validation_rid: Option<u32>,
+    validation_error: Option<String>,
 }
 
 struct MyApp {
     tx: Sender<Msg>,
     rx: Receiver<Msg>,
+    request_counter: RequestCounter,
     name: String,
-    age: u32,
     log: String,
     mods: Mods,
     env: Env,
     showing_about: bool,
+    settings_dialog: Option<SettingsDialog>,
+    modio_key: String,
 }
 
 /*
@@ -94,6 +122,103 @@ impl Default for MyApp {
     }
 }
 */
+
+fn is_committed(res: &egui::Response) -> bool {
+    res.lost_focus() && res.ctx.input().key_pressed(egui::Key::Enter)
+}
+
+impl MyApp {
+    fn about_dialog(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
+        if ui.button("About").clicked() {
+            self.showing_about = true;
+        }
+        if self.showing_about {
+            egui::Window::new("About")
+                .auto_sized()
+                .collapsible(false)
+                .open(&mut self.showing_about)
+                .show(ctx, |ui| {
+                ui.heading(format!("DRG Mod Integration v{}", env!("CARGO_PKG_VERSION")));
+
+                ui.horizontal(|ui| {
+                    ui.label("data dir:");
+                    if ui.link(&self.env.data_dir.display().to_string()).clicked() {
+                        opener::open(&self.env.data_dir).ok();
+                    }
+                });
+                ui.horizontal(|ui| {
+                    ui.label("cache dir:");
+                    if ui.link(&self.env.cache_dir.display().to_string()).clicked() {
+                        opener::open(&self.env.cache_dir).ok();
+                    }
+                });
+            });
+        }
+    }
+    fn settings_dialog(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
+        if ui.button("Settings").clicked() {
+            self.settings_dialog = Some(SettingsDialog {
+                modio_key: self.modio_key.clone(),
+                validated: false,
+                validation_rid: None,
+                validation_error: None,
+            });
+        }
+        ui.label(format!("modio key: {}", &self.modio_key));
+        let (rc, settings) = (&mut self.request_counter, &mut self.settings_dialog);
+        if let Some(settings) = settings {
+            let mut open = true;
+            let mut try_save = false;
+            egui::Window::new("Settings")
+                .auto_sized()
+                .collapsible(false)
+                .open(&mut open)
+                .show(ctx, |ui| {
+
+                ui.horizontal(|ui| {
+                    let label = ui.hyperlink_to("mod.io API key:", "https://mod.io/me/access#api");
+                    ui.add_enabled_ui(settings.validation_rid.is_none(), |ui| {
+                        let key_box = ui.add(egui::TextEdit::singleline(&mut settings.modio_key).password(true))
+                            .labelled_by(label.id);
+                        if is_committed(&key_box) {
+                            try_save = true;
+                        }
+                    });
+                    if settings.validation_rid.is_some() {
+                        ui.spinner();
+                    }
+                });
+                if let Some(err) = &settings.validation_error {
+                    ui.horizontal(|ui| {
+                        ui.style_mut().visuals.override_text_color = Some(egui::Color32::RED);
+                        ui.label(err);
+                    });
+                }
+                if settings.validated {
+                    ui.horizontal(|ui| {
+                        ui.style_mut().visuals.override_text_color = Some(egui::Color32::GREEN);
+                        ui.label("Success");
+                    });
+                }
+                ui.horizontal(|ui| {
+                    ui.set_enabled(settings.modio_key != self.modio_key);
+                    if ui.button("Save").clicked() {
+                        try_save = true;
+                    }
+                });
+                if try_save {
+                    settings.validation_rid = Some(check_key(rc.next(), settings.modio_key.clone(), self.tx.clone(), ctx.clone(), self.env.clone()));
+                }
+            });
+            if !open {
+                if settings.validated {
+                    self.modio_key = settings.modio_key.clone();
+                }
+                self.settings_dialog = None;
+            }
+        }
+    }
+}
 
 impl eframe::App for MyApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
@@ -117,43 +242,45 @@ impl eframe::App for MyApp {
                         }
                     }
                 },
+                Msg::KeyCheck(rid, res) => {
+                    let (modio_key, settings) = (&mut self.modio_key, &mut self.settings_dialog);
+                    if let Some(settings) = &mut self.settings_dialog {
+                        if let Some(srid) = settings.validation_rid {
+                            if srid == rid {
+                                settings.validation_rid = None;
+                                match res {
+                                    Ok(_) => {
+                                        settings.validated = true;
+                                        settings.validation_error = None;
+                                        *modio_key = settings.modio_key.clone();
+                                        self.settings_dialog = None;
+                                        // TODO persist to file
+                                    },
+                                    Err(err) => {
+                                        settings.validated = false;
+                                        settings.validation_error = Some(err.to_string());
+                                    },
+                                }
+                            }
+                        }
+                    }
+                },
             }
         }
 
         egui::CentralPanel::default().show(ctx, |ui| {
             ui.heading("DRG Mod Integration");
 
-            if ui.button("About").clicked() {
-                self.showing_about = true;
-            }
-            if self.showing_about {
-                egui::Window::new("About")
-                    .auto_sized()
-                    .collapsible(false)
-                    .open(&mut self.showing_about)
-                    .show(ctx, |ui| {
-                   ui.heading(format!("DRG Mod Integration v{}", env!("CARGO_PKG_VERSION")));
-
-                    ui.horizontal(|ui| {
-                        ui.label("data dir:");
-                        if ui.link(&self.env.data_dir.display().to_string()).clicked() {
-                            opener::open(&self.env.data_dir).ok();
-                        }
-                    });
-                    ui.horizontal(|ui| {
-                        ui.label("cache dir:");
-                        if ui.link(&self.env.cache_dir.display().to_string()).clicked() {
-                            opener::open(&self.env.cache_dir).ok();
-                        }
-                    });
-                });
-            }
+            ui.horizontal(|ui| {
+                self.about_dialog(ui, &ctx);
+                self.settings_dialog(ui, &ctx);
+            });
 
             ui.horizontal(|ui| {
                 let name_label = ui.label("mod query: ");
                 let search_box = ui.text_edit_singleline(&mut self.name)
                     .labelled_by(name_label.id);
-                if search_box.lost_focus() && ctx.input().key_pressed(egui::Key::Enter) {
+                if is_committed(&search_box) {
                     search_box.request_focus();
                     search(self.name.clone(), self.tx.clone(), ctx.clone(), self.env.clone());
                 }
@@ -244,10 +371,26 @@ fn search(name: String, tx: Sender<Msg>, ctx: egui::Context, env: Env) {
         ctx.request_repaint();
     });
 }
+fn check_key(rid: u32, key: String, tx: Sender<Msg>, ctx: egui::Context, env: Env) -> u32 {
+    tokio::spawn(async move {
+        let r = check_key_async(key, env.game_id).await.map_err(anyhow::Error::msg);
+        let _ = tx.send(Msg::KeyCheck(rid, r));
+        ctx.request_repaint();
+    });
+    rid
+}
+
+async fn check_key_async(key: String, game_id: u32) -> Result<modio::games::Game> {
+    Ok(modio::Modio::new(modio::Credentials::new(key))?
+        .game(game_id)
+        .get().await?)
+}
+
 #[derive(Debug)]
 enum Msg {
     Log(String),
     SearchResult(Result<Vec<modio::mods::Mod>>),
+    KeyCheck(u32, Result<modio::games::Game>),
 }
 
 #[derive(Debug, Clone)]
