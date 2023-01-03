@@ -1,4 +1,7 @@
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+
 use std::collections::{HashMap, HashSet};
+use egui::ScrollArea;
 use serde::{Deserialize, Serialize};
 //use serde_json::Result;
 use anyhow::Result;
@@ -18,6 +21,147 @@ use uesave::Save;
 use uesave::PropertyMeta::Str;
 
 use clap::{Parser, Subcommand};
+
+use eframe::egui;
+
+fn main() -> Result<()> {
+    // Log to stdout (if you run with `RUST_LOG=debug`).
+    //tracing_subscriber::fmt::init();
+    //
+    dotenv::dotenv().ok();
+    let env = get_env()?;
+
+    let save_buffer = std::fs::read(&env.mod_config_save)?;
+    let json = extract_config_from_save(&save_buffer)?;
+    let mods: Mods = serde_json::from_str(&json)?;
+    println!("{:#?}", mods);
+
+    let options = eframe::NativeOptions {
+        initial_window_size: Some(egui::vec2(320.0, 240.0)),
+        ..Default::default()
+    };
+    Ok(eframe::run_native(
+        "My egui App",
+        options,
+        Box::new(|_cc| Box::new(MyApp {
+            name: "Arthur".to_owned(),
+            age: 42,
+            log: "asdf".to_owned(),
+            mods,
+        })),
+    ))
+}
+
+struct MyApp {
+    name: String,
+    age: u32,
+    log: String,
+    mods: Mods,
+}
+
+impl Default for MyApp {
+    fn default() -> Self {
+        Self {
+            name: "Arthur".to_owned(),
+            age: 42,
+            log: "asdf".to_owned(),
+            mods: Mods {
+                mods: vec![],
+                request_sync: false
+            },
+        }
+    }
+}
+
+impl eframe::App for MyApp {
+    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        egui::CentralPanel::default().show(ctx, |ui| {
+            ui.heading("My egui Application");
+            ui.horizontal(|ui| {
+                let name_label = ui.label("Your name: ");
+                ui.text_edit_singleline(&mut self.name)
+                    .labelled_by(name_label.id);
+            });
+            ui.add(egui::Slider::new(&mut self.age, 0..=120).text("age"));
+            if ui.button("Click each year").clicked() {
+                self.age += 1;
+            }
+            ui.label(format!("Hello '{}', age {}", self.name, self.age));
+            //ui.label(&self.log);
+
+            ui.separator();
+
+            ui.push_id(0, |ui| {
+                ScrollArea::both()
+                    .auto_shrink([false; 2])
+                    .show(ui, |ui| {
+                        egui::Grid::new("my_grid")
+                            .num_columns(5)
+                            //.spacing([40.0, 4.0])
+                            .striped(true)
+                            .show(ui, |ui| {
+                                ui.label("mod");
+                                ui.label("version");
+                                ui.label("approval");
+                                ui.label("required");
+                                ui.end_row();
+
+
+                                for mod_ in &mut self.mods.mods {
+                                    let name = &mod_.name.as_ref().unwrap_or(&mod_.id);
+                                    ui.add(doc_link_label(name, name));
+
+                                    let empty = "-".to_string();
+
+                                    let version = mod_.version.as_ref().unwrap_or(&empty);
+                                    ui.label(version);
+
+                                    let approval = match mod_.approval {
+                                        Some(Approval::Verified) => "Verified",
+                                        Some(Approval::Approved) => "Approved",
+                                        Some(Approval::Sandbox) => "Sandbox",
+                                        None => "-"
+                                    };
+                                    ui.label(approval);
+
+                                    let mut required = mod_.required.unwrap_or_default();
+                                    ui.add_enabled(false, egui::Checkbox::new(&mut required, ""));
+                                    mod_.required = Some(required);
+
+
+                                    ui.allocate_space(ui.available_size());
+                                    ui.end_row();
+                                }
+                            });
+
+                    });
+            });
+
+            ui.separator();
+
+            ui.push_id(1, |ui| {
+                ScrollArea::vertical()
+                    .auto_shrink([false; 2])
+                    .stick_to_bottom(true)
+                    .show(ui, |ui| ui.label(&self.log));
+                self.log.push_str("\nasdf");
+            });
+        });
+    }
+}
+
+fn doc_link_label<'a>(title: &'a str, search_term: &'a str) -> impl egui::Widget + 'a {
+    let label = format!("{}:", title);
+    let url = format!("https://drg.old.mod.io/?filter=t&kw={}", search_term);
+    move |ui: &mut egui::Ui| {
+        ui.hyperlink_to(label, url).on_hover_ui(|ui| {
+            ui.horizontal_wrapped(|ui| {
+                ui.label("Search egui docs for");
+                ui.code(search_term);
+            });
+        })
+    }
+}
 
 struct Env {
     modio: modio::Modio,
@@ -77,10 +221,10 @@ struct Args {
 }
 
 #[tokio::main]
-async fn main() -> Result<()> {
+async fn asdfmain() -> Result<()> {
     let mut path = std::env::current_exe()?;
     path.pop();
-    std::env::set_current_dir(path)?;
+    //std::env::set_current_dir(path)?;
     //std::env::set_current_dir(Path::new("/home/truman/projects/drg-modding/tools/modloader-rs"))?;
     dotenv::dotenv().ok();
     let env = get_env()?;
