@@ -60,6 +60,7 @@ fn main() -> Result<()> {
             log: "asdf".to_owned(),
             mods,
             env,
+            showing_about: false,
         })),
     ))
 }
@@ -72,6 +73,7 @@ struct MyApp {
     log: String,
     mods: Mods,
     env: Env,
+    showing_about: bool,
 }
 
 /*
@@ -120,6 +122,33 @@ impl eframe::App for MyApp {
 
         egui::CentralPanel::default().show(ctx, |ui| {
             ui.heading("DRG Mod Integration");
+
+            if ui.button("About").clicked() {
+                self.showing_about = true;
+            }
+            if self.showing_about {
+                egui::Window::new("About")
+                    .auto_sized()
+                    .collapsible(false)
+                    .open(&mut self.showing_about)
+                    .show(ctx, |ui| {
+                   ui.heading(format!("DRG Mod Integration v{}", env!("CARGO_PKG_VERSION")));
+
+                    ui.horizontal(|ui| {
+                        ui.label("data dir:");
+                        if ui.link(&self.env.data_dir.display().to_string()).clicked() {
+                            opener::open(&self.env.data_dir).ok();
+                        }
+                    });
+                    ui.horizontal(|ui| {
+                        ui.label("cache dir:");
+                        if ui.link(&self.env.cache_dir.display().to_string()).clicked() {
+                            opener::open(&self.env.cache_dir).ok();
+                        }
+                    });
+                });
+            }
+
             ui.horizontal(|ui| {
                 let name_label = ui.label("mod query: ");
                 let search_box = ui.text_edit_singleline(&mut self.name)
@@ -225,6 +254,8 @@ enum Msg {
 struct Env {
     modio: modio::Modio,
     game_id: u32,
+    data_dir: PathBuf,
+    cache_dir: PathBuf,
     paks_dir: PathBuf,
     mod_cache_dir: PathBuf,
     mod_config_save: PathBuf,
@@ -233,13 +264,21 @@ struct Env {
 fn get_env() -> Result<Env> {
     let fsd_install = std::path::PathBuf::from(std::env::var("FSD_INSTALL").expect("Missing path to game root directory"));
 
+    let name = env!("CARGO_PKG_NAME");
+    let data_dir = PathBuf::from(dirs::data_dir().expect("Could not find user home directory")).join(name);
+    fs::create_dir(&data_dir).ok();
+    let cache_dir = PathBuf::from(dirs::cache_dir().expect("Could not find user cache directory")).join(name);
+    fs::create_dir(&cache_dir).ok();
+
     Ok(Env {
         modio: Modio::new(Credentials::new(std::env::var("MODIO_KEY").expect("Missing Mod.io API key")))?,
         //game_id: std::env::var("MODIO_GAME_ID").expect("Missing Mod.io game id").parse()?,
         game_id: 2475,
         paks_dir: fsd_install.join("FSD/Content/Paks"),
-        mod_cache_dir: PathBuf::from("mods"),
+        mod_cache_dir: cache_dir.join("mods"),
         mod_config_save: fsd_install.join("FSD/Saved/SaveGames/Mods/ModIntegration.sav"),
+        data_dir,
+        cache_dir,
     })
 }
 
