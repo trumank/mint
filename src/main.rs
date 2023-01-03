@@ -39,6 +39,8 @@ fn main() -> Result<()> {
     dotenv::dotenv().ok();
     let env = get_env()?;
 
+    let config = Config::load_or_create_default(&env.config_path)?;
+
     let save_buffer = std::fs::read(&env.mod_config_save)?;
     let json = extract_config_from_save(&save_buffer)?;
     let mods: Mods = serde_json::from_str(&json)?;
@@ -63,7 +65,7 @@ fn main() -> Result<()> {
             env,
             showing_about: false,
             settings_dialog: None,
-            modio_key: "DEADBEEFCAFE".to_owned(),
+            config,
         })),
     ))
 }
@@ -84,11 +86,93 @@ impl RequestCounter {
     }
 }
 
+
+#[derive(Debug)]
+struct ValidatedSetting<T: std::cmp::PartialEq + std::clone::Clone> {
+    current_value: T,
+    validated_value: T,
+    validation_result: Result<(), String>,
+}
+
+impl<T> ValidatedSetting<T>
+where T: std::cmp::PartialEq + std::clone::Clone {
+    /// Create new validated setting that defaults to valid
+    fn new(value: T) -> Self {
+        ValidatedSetting {
+            current_value: value.clone(),
+            validated_value: value,
+            validation_result: Ok(()),
+        }
+    }
+    /// Returns whether the current value is the same as the validated value
+    fn is_modified(&self) -> bool {
+        self.current_value != self.validated_value
+    }
+    /// Sets the result of validation and updates the validated value
+    fn set_validation_result(&mut self, result: Result<(), String>) {
+        self.validated_value = self.current_value.clone();
+        self.validation_result = result;
+    }
+    /// Get validation error if unmodified and exists
+    fn get_err(&self) -> Option<&String> {
+        match &self.validation_result {
+            Ok(_) => None,
+            Err(msg) => if self.is_modified() { None } else { Some(&msg) },
+        }
+    }
+    /// Returns whether the value is unmodified and if it is valid
+    fn is_valid(&self) -> bool {
+        match &self.validation_result {
+            Ok(_) => !self.is_modified(),
+            Err(msg) => false,
+        }
+    }
+}
+
 struct SettingsDialog {
-    modio_key: String,
-    validated: bool,
+    validated_key: ValidatedSetting<String>,
     validation_rid: Option<u32>,
-    validation_error: Option<String>,
+    validated_fsd_install: ValidatedSetting<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct Config {
+    modio_key: Option<String>,
+    fsd_install: Option<String>,
+}
+
+impl Default for Config {
+    fn default() -> Self {
+        Config {
+            modio_key: None,
+            fsd_install: None,
+        }
+    }
+}
+
+impl Config {
+    fn load<P: AsRef<Path>>(path: P) -> Result<Self> {
+        Ok(serde_json::from_reader::<_, Config>(File::open(path)?)?)
+    }
+    fn load_or_create_default<P: AsRef<Path>>(path: P) -> Result<Self> {
+        match File::open(&path) {
+            Ok(f) => {
+                Ok(serde_json::from_reader::<_, Config>(f)?)
+            },
+            Err(ref e) if e.kind() == std::io::ErrorKind::NotFound => {
+                let config = Config::default();
+                config.save(path)?;
+                Ok(config)
+            },
+            Err(err) => {
+                Err(err.into())
+            }
+        }
+    }
+    fn save<P: AsRef<Path>>(&self, path: P) -> Result<()> {
+        serde_json::to_writer_pretty(File::create(path)?, &self)?;
+        Ok(())
+    }
 }
 
 struct MyApp {
@@ -101,7 +185,7 @@ struct MyApp {
     env: Env,
     showing_about: bool,
     settings_dialog: Option<SettingsDialog>,
-    modio_key: String,
+    config: Config,
 }
 
 /*
@@ -127,8 +211,12 @@ fn is_committed(res: &egui::Response) -> bool {
     res.lost_focus() && res.ctx.input().key_pressed(egui::Key::Enter)
 }
 
+fn is_valid_fsd_install(path: &String) -> bool {
+    Path::exists(&Path::new(path).join("FSD/Content/Paks/FSD-WindowsNoEditor.pak"))
+}
+
 impl MyApp {
-    fn about_dialog(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
+    fn about_dialog(&mut self, ui: &mut egui::Ui) {
         if ui.button("About").clicked() {
             self.showing_about = true;
         }
@@ -137,7 +225,7 @@ impl MyApp {
                 .auto_sized()
                 .collapsible(false)
                 .open(&mut self.showing_about)
-                .show(ctx, |ui| {
+                .show(ui.ctx(), |ui| {
                 ui.heading(format!("DRG Mod Integration v{}", env!("CARGO_PKG_VERSION")));
 
                 ui.horizontal(|ui| {
@@ -155,16 +243,14 @@ impl MyApp {
             });
         }
     }
-    fn settings_dialog(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
+    fn settings_dialog(&mut self, ui: &mut egui::Ui) {
         if ui.button("Settings").clicked() {
             self.settings_dialog = Some(SettingsDialog {
-                modio_key: self.modio_key.clone(),
-                validated: false,
+                validated_key: ValidatedSetting::new(self.config.modio_key.as_ref().map_or_else(|| "".to_string(), |p| p.clone())),
                 validation_rid: None,
-                validation_error: None,
+                validated_fsd_install: ValidatedSetting::new(self.config.fsd_install.as_ref().map_or_else(|| "".to_string(), |p| p.clone())),
             });
         }
-        ui.label(format!("modio key: {}", &self.modio_key));
         let (rc, settings) = (&mut self.request_counter, &mut self.settings_dialog);
         if let Some(settings) = settings {
             let mut open = true;
@@ -173,47 +259,96 @@ impl MyApp {
                 .auto_sized()
                 .collapsible(false)
                 .open(&mut open)
-                .show(ctx, |ui| {
+                .show(ui.ctx(), |ui| {
 
-                ui.horizontal(|ui| {
+                egui::Grid::new("settings_grid")
+                    .num_columns(2)
+                    .show(ui, |ui| {
+
+                    // modio API key
                     let label = ui.hyperlink_to("mod.io API key:", "https://mod.io/me/access#api");
                     ui.add_enabled_ui(settings.validation_rid.is_none(), |ui| {
-                        let key_box = ui.add(egui::TextEdit::singleline(&mut settings.modio_key).password(true))
+                        let color = if !settings.validated_key.is_modified() {
+                            match &settings.validated_key.validation_result {
+                                Ok(_) => Some(egui::Color32::GREEN),
+                                Err(_) => Some(egui::Color32::RED),
+                            }
+                        } else { None };
+                        let mut key_box = egui::TextEdit::singleline(&mut settings.validated_key.current_value)
+                            .password(true);
+                        if let Some(color) = color {
+                            key_box = key_box.text_color(color);
+                        }
+                        let mut key_box_res = ui.add(key_box)
                             .labelled_by(label.id);
-                        if is_committed(&key_box) {
+
+                        key_box_res = if let Some(err) = settings.validated_key.get_err() {
+                            key_box_res.on_hover_ui(|ui| {
+                                ui.horizontal_wrapped(|ui| {
+                                    ui.colored_label(ui.visuals().error_fg_color, err);
+                                });
+                            })
+                        } else {
+                            key_box_res
+                        };
+
+                        if is_committed(&key_box_res) {
                             try_save = true;
                         }
                     });
-                    if settings.validation_rid.is_some() {
-                        ui.spinner();
+                    ui.end_row();
+
+                    // fsd_install
+                    let fsd_install_label = ui.label("DRG install: ");
+                    let color = if !settings.validated_fsd_install.is_modified() {
+                        match &settings.validated_fsd_install.validation_result {
+                            Ok(_) => Some(egui::Color32::GREEN),
+                            Err(_) => Some(egui::Color32::RED),
+                        }
+                    } else { None };
+                    let mut fsd_path_box = egui::TextEdit::singleline(&mut settings.validated_fsd_install.current_value);
+                    if let Some(color) = color {
+                        fsd_path_box = fsd_path_box.text_color(color);
                     }
-                });
-                if let Some(err) = &settings.validation_error {
-                    ui.horizontal(|ui| {
-                        ui.style_mut().visuals.override_text_color = Some(egui::Color32::RED);
-                        ui.label(err);
-                    });
-                }
-                if settings.validated {
-                    ui.horizontal(|ui| {
-                        ui.style_mut().visuals.override_text_color = Some(egui::Color32::GREEN);
-                        ui.label("Success");
-                    });
-                }
-                ui.horizontal(|ui| {
-                    ui.set_enabled(settings.modio_key != self.modio_key);
-                    if ui.button("Save").clicked() {
+                    let mut fsd_path_box_res = ui.add(fsd_path_box)
+                        .labelled_by(fsd_install_label.id);
+                    fsd_path_box_res = if let Some(err) = settings.validated_fsd_install.get_err() {
+                        fsd_path_box_res.on_hover_ui(|ui| {
+                            ui.horizontal_wrapped(|ui| {
+                                ui.colored_label(ui.visuals().error_fg_color, err);
+                            });
+                        })
+                    } else {
+                        fsd_path_box_res
+                    };
+                    if is_committed(&fsd_path_box_res) {
                         try_save = true;
                     }
+                    ui.end_row();
+
+                    ui.horizontal(|ui| {
+                        ui.set_enabled(settings.validated_key.get_err().is_none() && settings.validated_fsd_install.get_err().is_none());
+                        if ui.button("Save").clicked() {
+                            try_save = true;
+                        }
+                        if settings.validation_rid.is_some() {
+                            ui.spinner();
+                        }
+                    });
+
+                    if try_save {
+                        settings.validation_rid = Some(check_key(rc.next(), settings.validated_key.current_value.clone(), self.tx.clone(), ui.ctx().clone(), self.env.clone()));
+                        settings.validated_fsd_install.set_validation_result(
+                            if is_valid_fsd_install(&settings.validated_fsd_install.current_value) {
+                                Ok(())
+                            } else {
+                                Err("not valid because reasons".to_owned())
+                            }
+                        );
+                    }
                 });
-                if try_save {
-                    settings.validation_rid = Some(check_key(rc.next(), settings.modio_key.clone(), self.tx.clone(), ctx.clone(), self.env.clone()));
-                }
             });
             if !open {
-                if settings.validated {
-                    self.modio_key = settings.modio_key.clone();
-                }
                 self.settings_dialog = None;
             }
         }
@@ -243,23 +378,23 @@ impl eframe::App for MyApp {
                     }
                 },
                 Msg::KeyCheck(rid, res) => {
-                    let (modio_key, settings) = (&mut self.modio_key, &mut self.settings_dialog);
                     if let Some(settings) = &mut self.settings_dialog {
                         if let Some(srid) = settings.validation_rid {
                             if srid == rid {
                                 settings.validation_rid = None;
                                 match res {
                                     Ok(_) => {
-                                        settings.validated = true;
-                                        settings.validation_error = None;
-                                        *modio_key = settings.modio_key.clone();
-                                        self.settings_dialog = None;
-                                        // TODO persist to file
+                                        settings.validated_key.set_validation_result(Ok(()));
                                     },
                                     Err(err) => {
-                                        settings.validated = false;
-                                        settings.validation_error = Some(err.to_string());
+                                        settings.validated_key.set_validation_result(Err(err.to_string()));
                                     },
+                                }
+                                if settings.validated_key.is_valid() && settings.validated_fsd_install.is_valid() {
+                                    self.config.modio_key = Some(settings.validated_key.current_value.clone());
+                                    self.config.fsd_install = Some(settings.validated_fsd_install.current_value.clone());
+                                    self.settings_dialog = None;
+                                    self.config.save(&self.env.config_path).unwrap();
                                 }
                             }
                         }
@@ -272,8 +407,8 @@ impl eframe::App for MyApp {
             ui.heading("DRG Mod Integration");
 
             ui.horizontal(|ui| {
-                self.about_dialog(ui, &ctx);
-                self.settings_dialog(ui, &ctx);
+                self.about_dialog(ui);
+                self.settings_dialog(ui);
             });
 
             ui.horizontal(|ui| {
@@ -399,6 +534,8 @@ struct Env {
     game_id: u32,
     data_dir: PathBuf,
     cache_dir: PathBuf,
+
+    config_path: PathBuf,
     paks_dir: PathBuf,
     mod_cache_dir: PathBuf,
     mod_config_save: PathBuf,
@@ -418,6 +555,7 @@ fn get_env() -> Result<Env> {
         //game_id: std::env::var("MODIO_GAME_ID").expect("Missing Mod.io game id").parse()?,
         game_id: 2475,
         paks_dir: fsd_install.join("FSD/Content/Paks"),
+        config_path: data_dir.join("config.json"),
         mod_cache_dir: cache_dir.join("mods"),
         mod_config_save: fsd_install.join("FSD/Saved/SaveGames/Mods/ModIntegration.sav"),
         data_dir,
