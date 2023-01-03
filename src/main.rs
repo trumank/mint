@@ -22,9 +22,17 @@ use uesave::PropertyMeta::Str;
 
 use clap::{Parser, Subcommand};
 
+use std::sync::mpsc::{Receiver, Sender};
+
 use eframe::egui;
 
 fn main() -> Result<()> {
+    let rt = tokio::runtime::Runtime::new().expect("Unable to create Runtime");
+    let _enter = rt.enter();
+    std::thread::spawn(move || {
+        rt.block_on(std::future::pending::<()>());
+    });
+
     // Log to stdout (if you run with `RUST_LOG=debug`).
     //tracing_subscriber::fmt::init();
     //
@@ -40,28 +48,39 @@ fn main() -> Result<()> {
         initial_window_size: Some(egui::vec2(320.0, 240.0)),
         ..Default::default()
     };
+    let (tx, rx) = std::sync::mpsc::channel();
     Ok(eframe::run_native(
         "My egui App",
         options,
         Box::new(|_cc| Box::new(MyApp {
-            name: "Arthur".to_owned(),
+            tx,
+            rx,
+            name: "*custom*".to_owned(),
             age: 42,
             log: "asdf".to_owned(),
             mods,
+            env,
         })),
     ))
 }
 
 struct MyApp {
+    tx: Sender<Msg>,
+    rx: Receiver<Msg>,
     name: String,
     age: u32,
     log: String,
     mods: Mods,
+    env: Env,
 }
 
+/*
 impl Default for MyApp {
     fn default() -> Self {
+        let (tx, rx) = std::sync::mpsc::channel();
         Self {
+            tx,
+            rx,
             name: "Arthur".to_owned(),
             age: 42,
             log: "asdf".to_owned(),
@@ -72,28 +91,51 @@ impl Default for MyApp {
         }
     }
 }
+*/
 
 impl eframe::App for MyApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        egui::CentralPanel::default().show(ctx, |ui| {
-            ui.heading("My egui Application");
-            ui.horizontal(|ui| {
-                let name_label = ui.label("Your name: ");
-                ui.text_edit_singleline(&mut self.name)
-                    .labelled_by(name_label.id);
-            });
-            ui.add(egui::Slider::new(&mut self.age, 0..=120).text("age"));
-            if ui.button("Click each year").clicked() {
-                self.age += 1;
+        let mut log = |msg: String| {
+            println!("{}", msg);
+            self.log.push_str(&format!("\n{}", msg));
+        };
+        if let Ok(msg) = self.rx.try_recv() {
+            match msg {
+                Msg::Log(msg) => {
+                    log(msg)
+                },
+                Msg::SearchResult(mods_res) => {
+                    match mods_res {
+                        Ok(mods) => {
+                            log("request complete".to_owned());
+                            self.mods.mods = mods.into_iter().map(mod_entry_from_modio).collect::<Result<Vec<ModEntry>>>().ok().unwrap();
+                        },
+                        Err(err) => {
+                            log(format!("request failed: {}", err.to_string()));
+                        }
+                    }
+                },
             }
-            ui.label(format!("Hello '{}', age {}", self.name, self.age));
+        }
+
+        egui::CentralPanel::default().show(ctx, |ui| {
+            ui.heading("DRG Mod Integration");
+            ui.horizontal(|ui| {
+                let name_label = ui.label("mod query: ");
+                let search_box = ui.text_edit_singleline(&mut self.name)
+                    .labelled_by(name_label.id);
+                if search_box.lost_focus() && ctx.input().key_pressed(egui::Key::Enter) {
+                    search_box.request_focus();
+                    search(self.name.clone(), self.tx.clone(), ctx.clone(), self.env.clone());
+                }
+            });
             //ui.label(&self.log);
 
             ui.separator();
 
             ui.push_id(0, |ui| {
                 ScrollArea::both()
-                    .auto_shrink([false; 2])
+                    .auto_shrink([false, true])
                     .show(ui, |ui| {
                         egui::Grid::new("my_grid")
                             .num_columns(5)
@@ -144,7 +186,6 @@ impl eframe::App for MyApp {
                     .auto_shrink([false; 2])
                     .stick_to_bottom(true)
                     .show(ui, |ui| ui.label(&self.log));
-                self.log.push_str("\nasdf");
             });
         });
     }
@@ -163,6 +204,24 @@ fn doc_link_label<'a>(title: &'a str, search_term: &'a str) -> impl egui::Widget
     }
 }
 
+fn search(name: String, tx: Sender<Msg>, ctx: egui::Context, env: Env) {
+    tokio::spawn(async move {
+        let mods_res = env.modio
+            .game(env.game_id)
+            .mods()
+            .search(Name::like(format!("*{}*", name)))
+            .collect().await;
+        let _ = tx.send(Msg::SearchResult(mods_res.map_err(anyhow::Error::msg)));
+        ctx.request_repaint();
+    });
+}
+#[derive(Debug)]
+enum Msg {
+    Log(String),
+    SearchResult(Result<Vec<modio::mods::Mod>>),
+}
+
+#[derive(Debug, Clone)]
 struct Env {
     modio: modio::Modio,
     game_id: u32,
@@ -298,6 +357,20 @@ async fn install(env: &Env, args: ActionInstall) -> Result<()> {
     }
 
     Ok(())
+}
+
+fn mod_entry_from_modio(mod_: modio::mods::Mod) -> Result<ModEntry> {
+    Ok(ModEntry {
+        id: mod_.id.to_string(),
+        name: Some(mod_.name.to_owned()),
+        approval: Some(get_approval(&mod_)),
+        required: Some(is_required(&mod_)),
+        version: if let Some(modfile) = mod_.modfile {
+            Ok(Some(mod_.id.to_string()))
+        } else {
+            Err(anyhow!("mod={} does not have any modfiles", mod_.id))
+        }?
+    })
 }
 
 async fn populate_config(env: &Env, mods: Mods, update: bool, mod_hashes: &mut HashMap<u32, String>) -> Result<Mods> {
