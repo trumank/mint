@@ -72,7 +72,7 @@ fn main() -> Result<()> {
             )?;
             let json = extract_config_from_save(&save_buffer)?;
             let mods: Mods = serde_json::from_str(&json)?;
-            println!("{:#?}", mods);
+            println!("{mods:#?}");
 
             std::thread::spawn(move || {
                 rt.block_on(std::future::pending::<()>());
@@ -450,8 +450,8 @@ impl App {
 impl eframe::App for App {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         let mut log = |msg: String| {
-            println!("{}", msg);
-            self.log.push_str(&format!("\n{}", msg));
+            println!("{msg}");
+            self.log.push_str(&format!("\n{msg}"));
         };
         if let Ok(msg) = self.rx.try_recv() {
             match msg {
@@ -467,7 +467,7 @@ impl eframe::App for App {
                             .unwrap();
                     }
                     Err(err) => {
-                        log(format!("request failed: {}", err));
+                        log(format!("request failed: {err}"));
                     }
                 },
                 Msg::KeyCheck(rid, res) => {
@@ -585,8 +585,8 @@ impl eframe::App for App {
 }
 
 fn doc_link_label<'a>(title: &'a str, search_term: &'a str) -> impl egui::Widget + 'a {
-    let label = format!("{}:", title);
-    let url = format!("https://drg.old.mod.io/?filter=t&kw={}", search_term);
+    let label = format!("{title}:");
+    let url = format!("https://drg.old.mod.io/?filter=t&kw={search_term}");
     move |ui: &mut egui::Ui| {
         ui.hyperlink_to(label, url).on_hover_ui(|ui| {
             ui.horizontal_wrapped(|ui| {
@@ -604,7 +604,7 @@ fn search(name: String, tx: Sender<Msg>, ctx: egui::Context, settings: Settings)
             .expect("could not get modio object")
             .game(STATIC_SETTINGS.game_id)
             .mods()
-            .search(Name::like(format!("*{}*", name)))
+            .search(Name::like(format!("*{name}*")))
             .collect()
             .await;
         let _ = tx.send(Msg::SearchResult(mods_res.map_err(anyhow::Error::msg)));
@@ -713,7 +713,7 @@ async fn sync(settings: &Settings, args: ActionSync) -> Result<()> {
     )?;
     let json = extract_config_from_save(&save_buffer)?;
     let mods: Mods = serde_json::from_str(&json)?;
-    println!("{:#?}", mods);
+    println!("{mods:#?}");
 
     let mod_config = install_config(settings, mods, false).await?;
 
@@ -732,7 +732,7 @@ async fn install(settings: &Settings, args: ActionInstall) -> Result<()> {
             request_sync: true,
         }
     };
-    println!("{:#?}", mods);
+    println!("{mods:#?}");
 
     let mod_config = install_config(settings, mods, args.update).await?;
 
@@ -814,7 +814,7 @@ async fn populate_config(
         println!("requesting dependencies");
         while let Some(Ok(res)) = dependency_reqs.join_next().await {
             for dep in res.1? {
-                println!("found dependency {:?}", dep);
+                println!("found dependency {dep:?}");
                 if !config_map.contains_key(&dep.mod_id) {
                     config_map.insert(
                         dep.mod_id,
@@ -840,7 +840,7 @@ async fn populate_config(
 
 /// Take config, validate against mod.io, install, return populated config
 async fn install_config(settings: &Settings, mods: Mods, update: bool) -> Result<Mods> {
-    println!("installing config={:#?}", mods);
+    println!("installing config={mods:#?}");
 
     let mut mod_hashes = HashMap::new();
     let mod_config = populate_config(settings, mods, update, &mut mod_hashes).await?;
@@ -853,9 +853,7 @@ async fn install_config(settings: &Settings, mods: Mods, update: bool) -> Result
         let mod_id = entry.id.parse::<u32>()?;
         if let Some(version) = &entry.version {
             let file_id = version.parse::<u32>()?;
-            let file_path = &STATIC_SETTINGS
-                .mod_cache_dir
-                .join(format!("{}.zip", file_id));
+            let file_path = &STATIC_SETTINGS.mod_cache_dir.join(format!("{file_id}.zip"));
             if !file_path.exists() {
                 println!(
                     "downloading mod={} version={} path={}",
@@ -879,7 +877,7 @@ async fn install_config(settings: &Settings, mods: Mods, update: bool) -> Result
             let hash = if let Some(hash) = mod_hashes.get(&file_id) {
                 hash
             } else {
-                println!("requesting modfile={}", file_id);
+                println!("requesting modfile={file_id}");
                 modfile = settings
                     .modio()
                     .expect("could not create modio object")
@@ -895,11 +893,11 @@ async fn install_config(settings: &Settings, mods: Mods, update: bool) -> Result
             let mut hasher = Md5::new();
             std::io::copy(&mut File::open(file_path)?, &mut hasher)?;
             let local_hash = hex::encode(hasher.finalize());
-            println!("checking file hash modio={} local={}", hash, local_hash);
+            println!("checking file hash modio={hash} local={local_hash}");
             assert_eq!(hash, &local_hash);
 
             let buf = get_pak_from_file(file_path)?;
-            paks.push((format!("{}", mod_id), buf));
+            paks.push((format!("{mod_id}"), buf));
         } else {
             panic!("unreachable");
         }
@@ -924,9 +922,9 @@ async fn install_config(settings: &Settings, mods: Mods, update: bool) -> Result
     let ar_search = "AssetRegistry.bin".as_bytes();
     for (id, buf) in paks {
         let name = if contains(&buf, ar_search) {
-            format!("{}.pak", id)
+            format!("{id}.pak")
         } else {
-            format!("{}_P.pak", id)
+            format!("{id}_P.pak")
         };
         let mut out_file = OpenOptions::new()
             .write(true)
@@ -982,7 +980,7 @@ fn get_pak_from_file(path: &Path) -> Result<Vec<u8>> {
         match file.enclosed_name() {
             Some(path) => path,
             None => {
-                println!("Entry {} has a suspicious path", raw_path);
+                println!("Entry {raw_path} has a suspicious path");
                 continue;
             }
         };
