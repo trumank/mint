@@ -673,6 +673,7 @@ dependencies = [
  "egui",
  "hex",
  "indexmap",
+ "lazy_static",
  "md-5",
  "modio",
  "opener",

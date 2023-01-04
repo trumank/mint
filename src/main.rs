@@ -26,6 +26,35 @@ use std::sync::mpsc::{Receiver, Sender};
 
 use eframe::egui;
 
+
+#[derive(Debug, Clone)]
+struct StaticSettings {
+    game_id: u32,
+    data_dir: PathBuf,
+    cache_dir: PathBuf,
+
+    config_path: PathBuf,
+    mod_cache_dir: PathBuf,
+}
+
+lazy_static::lazy_static! {
+    static ref STATIC_SETTINGS: StaticSettings = {
+        let name = env!("CARGO_PKG_NAME");
+        let data_dir = dirs::data_dir().expect("Could not find user home directory").join(name);
+        fs::create_dir(&data_dir).ok();
+        let cache_dir = dirs::cache_dir().expect("Could not find user cache directory").join(name);
+        fs::create_dir(&cache_dir).ok();
+
+        StaticSettings {
+            game_id: 2475,
+            config_path: data_dir.join("config.json"),
+            mod_cache_dir: cache_dir.join("mods"),
+            data_dir,
+            cache_dir,
+        }
+    };
+}
+
 fn main() -> Result<()> {
     let rt = tokio::runtime::Runtime::new().expect("Unable to create Runtime");
     let _enter = rt.enter();
@@ -33,9 +62,7 @@ fn main() -> Result<()> {
     // Log to stdout (if you run with `RUST_LOG=debug`).
     //tracing_subscriber::fmt::init();
     //
-    let env = get_env()?;
-
-    let config = Config::load_or_create_default(&env.config_path)?;
+    let config = Settings::load_or_create_default(&STATIC_SETTINGS.config_path)?;
 
     let command = Args::parse().action;
     match command {
@@ -57,14 +84,13 @@ fn main() -> Result<()> {
             eframe::run_native(
                 "DRG Mod Integration",
                 options,
-                Box::new(|_cc| Box::new(MyApp {
+                Box::new(|_cc| Box::new(App {
                     tx,
                     rx,
                     request_counter: Default::default(),
                     name: "custom".to_owned(),
                     log: "asdf".to_owned(),
                     mods,
-                    env,
                     showing_about: false,
                     settings_dialog: None,
                     config,
@@ -75,9 +101,9 @@ fn main() -> Result<()> {
         _ => {
             rt.block_on(async {
                 match command {
-                    Action::Install(args) => install(&env, &config, args).await,
-                    Action::Sync(args) => sync(&env, &config, args).await,
-                    Action::Run(args) => run(&env, &config, args).await,
+                    Action::Install(args) => install(&config, args).await,
+                    Action::Sync(args) => sync(&config, args).await,
+                    Action::Run(args) => run(&config, args).await,
                     Action::Gui(_) => panic!("unreachable"),
                 }
             })
@@ -146,22 +172,22 @@ struct SettingsDialog {
 }
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
-struct Config {
+struct Settings {
     modio_key: Option<String>,
     fsd_install: Option<String>,
 }
 
-impl Config {
+impl Settings {
     fn load<P: AsRef<Path>>(path: P) -> Result<Self> {
-        Ok(serde_json::from_reader::<_, Config>(File::open(path)?)?)
+        Ok(serde_json::from_reader::<_, Settings>(File::open(path)?)?)
     }
     fn load_or_create_default<P: AsRef<Path>>(path: P) -> Result<Self> {
         match File::open(&path) {
             Ok(f) => {
-                Ok(serde_json::from_reader::<_, Config>(f)?)
+                Ok(serde_json::from_reader::<_, Settings>(f)?)
             },
             Err(ref e) if e.kind() == std::io::ErrorKind::NotFound => {
-                let config = Config::default();
+                let config = Settings::default();
                 config.save(path)?;
                 Ok(config)
             },
@@ -185,17 +211,16 @@ impl Config {
     }
 }
 
-struct MyApp {
+struct App {
     tx: Sender<Msg>,
     rx: Receiver<Msg>,
     request_counter: RequestCounter,
     name: String,
     log: String,
     mods: Mods,
-    env: Env,
     showing_about: bool,
     settings_dialog: Option<SettingsDialog>,
-    config: Config,
+    config: Settings,
 }
 
 /*
@@ -225,7 +250,7 @@ fn is_valid_fsd_install(path: &String) -> bool {
     Path::exists(&Path::new(path).join("FSD/Content/Paks/FSD-WindowsNoEditor.pak"))
 }
 
-impl MyApp {
+impl App {
     fn about_dialog(&mut self, ui: &mut egui::Ui) {
         if ui.button("About").clicked() {
             self.showing_about = true;
@@ -240,14 +265,14 @@ impl MyApp {
 
                 ui.horizontal(|ui| {
                     ui.label("data dir:");
-                    if ui.link(&self.env.data_dir.display().to_string()).clicked() {
-                        opener::open(&self.env.data_dir).ok();
+                    if ui.link(STATIC_SETTINGS.data_dir.display().to_string()).clicked() {
+                        opener::open(&STATIC_SETTINGS.data_dir).ok();
                     }
                 });
                 ui.horizontal(|ui| {
                     ui.label("cache dir:");
-                    if ui.link(&self.env.cache_dir.display().to_string()).clicked() {
-                        opener::open(&self.env.cache_dir).ok();
+                    if ui.link(STATIC_SETTINGS.cache_dir.display().to_string()).clicked() {
+                        opener::open(&STATIC_SETTINGS.cache_dir).ok();
                     }
                 });
             });
@@ -347,7 +372,7 @@ impl MyApp {
                     });
 
                     if try_save {
-                        settings.validation_rid = Some(check_key(rc.next(), settings.validated_key.current_value.clone(), self.tx.clone(), ui.ctx().clone(), self.env.clone()));
+                        settings.validation_rid = Some(check_key(rc.next(), settings.validated_key.current_value.clone(), self.tx.clone(), ui.ctx().clone()));
                         settings.validated_fsd_install.set_validation_result(
                             if is_valid_fsd_install(&settings.validated_fsd_install.current_value) {
                                 Ok(())
@@ -365,7 +390,7 @@ impl MyApp {
     }
 }
 
-impl eframe::App for MyApp {
+impl eframe::App for App {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         let mut log = |msg: String| {
             println!("{}", msg);
@@ -404,7 +429,7 @@ impl eframe::App for MyApp {
                                     self.config.modio_key = Some(settings.validated_key.current_value.clone());
                                     self.config.fsd_install = Some(settings.validated_fsd_install.current_value.clone());
                                     self.settings_dialog = None;
-                                    self.config.save(&self.env.config_path).unwrap();
+                                    self.config.save(&STATIC_SETTINGS.config_path).unwrap();
                                 }
                             }
                         }
@@ -427,7 +452,7 @@ impl eframe::App for MyApp {
                     .labelled_by(name_label.id);
                 if is_committed(&search_box) {
                     search_box.request_focus();
-                    search(self.name.clone(), self.tx.clone(), ctx.clone(), self.env.clone(), self.config.clone());
+                    search(self.name.clone(), self.tx.clone(), ctx.clone(), self.config.clone());
                 }
             });
             //ui.label(&self.log);
@@ -505,10 +530,10 @@ fn doc_link_label<'a>(title: &'a str, search_term: &'a str) -> impl egui::Widget
     }
 }
 
-fn search(name: String, tx: Sender<Msg>, ctx: egui::Context, env: Env, config: Config) {
+fn search(name: String, tx: Sender<Msg>, ctx: egui::Context, config: Settings) {
     tokio::spawn(async move {
         let mods_res = config.modio().expect("could not get modio object")
-            .game(env.game_id)
+            .game(STATIC_SETTINGS.game_id)
             .mods()
             .search(Name::like(format!("*{}*", name)))
             .collect().await;
@@ -516,18 +541,18 @@ fn search(name: String, tx: Sender<Msg>, ctx: egui::Context, env: Env, config: C
         ctx.request_repaint();
     });
 }
-fn check_key(rid: u32, key: String, tx: Sender<Msg>, ctx: egui::Context, env: Env) -> u32 {
+fn check_key(rid: u32, key: String, tx: Sender<Msg>, ctx: egui::Context) -> u32 {
     tokio::spawn(async move {
-        let r = check_key_async(key, env.game_id).await.map_err(anyhow::Error::msg);
+        let r = check_key_async(key).await.map_err(anyhow::Error::msg);
         let _ = tx.send(Msg::KeyCheck(rid, r));
         ctx.request_repaint();
     });
     rid
 }
 
-async fn check_key_async(key: String, game_id: u32) -> Result<modio::games::Game> {
+async fn check_key_async(key: String) -> Result<modio::games::Game> {
     Ok(modio::Modio::new(modio::Credentials::new(key))?
-        .game(game_id)
+        .game(STATIC_SETTINGS.game_id)
         .get().await?)
 }
 
@@ -536,32 +561,6 @@ enum Msg {
     Log(String),
     SearchResult(Result<Vec<modio::mods::Mod>>),
     KeyCheck(u32, Result<modio::games::Game>),
-}
-
-#[derive(Debug, Clone)]
-struct Env {
-    game_id: u32,
-    data_dir: PathBuf,
-    cache_dir: PathBuf,
-
-    config_path: PathBuf,
-    mod_cache_dir: PathBuf,
-}
-
-fn get_env() -> Result<Env> {
-    let name = env!("CARGO_PKG_NAME");
-    let data_dir = dirs::data_dir().expect("Could not find user home directory").join(name);
-    fs::create_dir(&data_dir).ok();
-    let cache_dir = dirs::cache_dir().expect("Could not find user cache directory").join(name);
-    fs::create_dir(&cache_dir).ok();
-
-    Ok(Env {
-        game_id: 2475,
-        config_path: data_dir.join("config.json"),
-        mod_cache_dir: cache_dir.join("mods"),
-        data_dir,
-        cache_dir,
-    })
 }
 
 #[derive(Parser, Debug)]
@@ -604,7 +603,7 @@ struct Args {
    action: Action,
 }
 
-async fn run(env: &Env, config: &Config, args: ActionRun) -> Result<()> {
+async fn run(config: &Settings, args: ActionRun) -> Result<()> {
     use std::process::Command;
     if let Some((cmd, args)) = args.args.split_first() {
         //install(&env, ActionInstall { config: None, update: false }).await?;
@@ -619,7 +618,7 @@ async fn run(env: &Env, config: &Config, args: ActionRun) -> Result<()> {
             let save_buffer = std::fs::read(&config.mod_config_save().ok_or_else(|| anyhow!("mod config save not found"))?)?;
             let json = extract_config_from_save(&save_buffer)?;
             if serde_json::from_str::<Mods>(&json)?.request_sync {
-                sync(env, config, ActionSync {}).await?;
+                sync(config, ActionSync {}).await?;
             } else {
                 break;
             }
@@ -631,18 +630,18 @@ async fn run(env: &Env, config: &Config, args: ActionRun) -> Result<()> {
     Ok(())
 }
 
-async fn sync(env: &Env, config: &Config, args: ActionSync) -> Result<()> {
+async fn sync(config: &Settings, args: ActionSync) -> Result<()> {
     let save_buffer = std::fs::read(&config.mod_config_save().ok_or_else(|| anyhow!("mod config save not found"))?)?;
     let json = extract_config_from_save(&save_buffer)?;
     let mods: Mods = serde_json::from_str(&json)?;
     println!("{:#?}", mods);
 
-    let mod_config = install_config(env, config, mods, false).await?;
+    let mod_config = install_config(config, mods, false).await?;
 
     Ok(())
 }
 
-async fn install(env: &Env, config: &Config, args: ActionInstall) -> Result<()> {
+async fn install(config: &Settings, args: ActionInstall) -> Result<()> {
     let mods = if let Some(path) = &args.config {
         let config_path = std::path::Path::new(path);
 
@@ -656,7 +655,7 @@ async fn install(env: &Env, config: &Config, args: ActionInstall) -> Result<()> 
     };
     println!("{:#?}", mods);
 
-    let mod_config = install_config(env, config, mods, args.update).await?;
+    let mod_config = install_config(config, mods, args.update).await?;
 
     if args.update {
         if let Some(path) = &args.config {
@@ -682,7 +681,7 @@ fn mod_entry_from_modio(mod_: modio::mods::Mod) -> Result<ModEntry> {
     })
 }
 
-async fn populate_config(env: &Env, config: &Config, mods: Mods, update: bool, mod_hashes: &mut HashMap<u32, String>) -> Result<Mods> {
+async fn populate_config(config: &Settings, mods: Mods, update: bool, mod_hashes: &mut HashMap<u32, String>) -> Result<Mods> {
     let mut config_map: indexmap::IndexMap<_, _> = mods.mods.into_iter().map(|m| (m.id.parse::<u32>().unwrap(), m)).collect();
 
     let mut to_check: HashSet<u32> = config_map.keys().copied().collect();
@@ -692,12 +691,12 @@ async fn populate_config(env: &Env, config: &Config, mods: Mods, update: bool, m
         let mut dependency_reqs = JoinSet::new();
 
         for id in to_check.iter().copied() {
-            let deps = config.modio().expect("could not create modio object").mod_(env.game_id, id).dependencies();
+            let deps = config.modio().expect("could not create modio object").mod_(STATIC_SETTINGS.game_id, id).dependencies();
             dependency_reqs.spawn(async move { (id, deps.list().await) });
         }
 
         println!("requesting mods");
-        let mods_res = config.modio().expect("could not create modio object").game(env.game_id).mods().search(Id::_in(to_check.iter().copied().collect::<Vec<_>>())).collect().await?;
+        let mods_res = config.modio().expect("could not create modio object").game(STATIC_SETTINGS.game_id).mods().search(Id::_in(to_check.iter().copied().collect::<Vec<_>>())).collect().await?;
         to_check.clear();
         for res in mods_res.into_iter() {
             let mut mod_config = config_map.get_mut(&res.id).unwrap();
@@ -738,25 +737,25 @@ async fn populate_config(env: &Env, config: &Config, mods: Mods, update: bool, m
 }
 
 /// Take config, validate against mod.io, install, return populated config
-async fn install_config(env: &Env, config: &Config, mods: Mods, update: bool) -> Result<Mods> {
+async fn install_config(config: &Settings, mods: Mods, update: bool) -> Result<Mods> {
     println!("installing config={:#?}", mods);
 
     let mut mod_hashes = HashMap::new();
-    let mod_config = populate_config(env, config, mods, update, &mut mod_hashes).await?;
+    let mod_config = populate_config(config, mods, update, &mut mod_hashes).await?;
 
     let mut paks = vec![];
 
-    fs::create_dir(&env.mod_cache_dir).ok();
+    fs::create_dir(&STATIC_SETTINGS.mod_cache_dir).ok();
 
     for entry in &mod_config.mods {
         let mod_id = entry.id.parse::<u32>()?;
         if let Some(version) = &entry.version {
             let file_id = version.parse::<u32>()?;
-            let file_path = &env.mod_cache_dir.join(format!("{}.zip", file_id));
+            let file_path = &STATIC_SETTINGS.mod_cache_dir.join(format!("{}.zip", file_id));
             if !file_path.exists() {
                 println!("downloading mod={} version={} path={}", mod_id, file_id, file_path.display());
                 config.modio().expect("could not create modio object").download(DownloadAction::File {
-                    game_id: env.game_id,
+                    game_id: STATIC_SETTINGS.game_id,
                     mod_id,
                     file_id,
                 }).save_to_file(&file_path).await?;
@@ -767,7 +766,7 @@ async fn install_config(env: &Env, config: &Config, mods: Mods, update: bool) ->
                 hash
             } else {
                 println!("requesting modfile={}", file_id);
-                modfile = config.modio().expect("could not create modio object").game(env.game_id).mod_(mod_id).file(file_id).get().await?;
+                modfile = config.modio().expect("could not create modio object").game(STATIC_SETTINGS.game_id).mod_(mod_id).file(file_id).get().await?;
                 &modfile.filehash.md5
             };
 
@@ -778,8 +777,7 @@ async fn install_config(env: &Env, config: &Config, mods: Mods, update: bool) ->
             println!("checking file hash modio={} local={}", hash, local_hash);
             assert_eq!(hash, &local_hash);
 
-
-            let buf = get_pak_from_file(file_path)?;
+            let buf = get_pak_from_file(&file_path)?;
             paks.push((format!("{}", mod_id), buf));
         } else {
             panic!("unreachable");
