@@ -59,13 +59,14 @@ fn main() -> Result<()> {
     // Log to stdout (if you run with `RUST_LOG=debug`).
     //tracing_subscriber::fmt::init();
     //
-    let config = Settings::load_or_create_default(&STATIC_SETTINGS.config_path)?;
+    let config = Config::load_or_create_default(&STATIC_SETTINGS.config_path)?;
 
     let command = Args::parse().action;
     match command {
         Action::Gui(_) => {
             let save_buffer = std::fs::read(
                 config
+                    .settings
                     .mod_config_save()
                     .expect("could not find mod config save"),
             )?;
@@ -103,9 +104,9 @@ fn main() -> Result<()> {
         }
         _ => rt.block_on(async {
             match command {
-                Action::Install(args) => install(&config, args).await,
-                Action::Sync(args) => sync(&config, args).await,
-                Action::Run(args) => run(&config, args).await,
+                Action::Install(args) => install(&config.settings, args).await,
+                Action::Sync(args) => sync(&config.settings, args).await,
+                Action::Run(args) => run(&config.settings, args).await,
                 Action::Gui(_) => panic!("unreachable"),
             }
         }),
@@ -179,21 +180,27 @@ struct SettingsDialog {
     validated_fsd_install: ValidatedSetting<String>,
 }
 
+#[derive(Debug, Default, Serialize, Deserialize)]
+struct Config {
+    settings: Settings,
+    mod_profiles: HashMap<String, Mods>,
+}
+
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 struct Settings {
     modio_key: Option<String>,
     fsd_install: Option<String>,
 }
 
-impl Settings {
+impl Config {
     fn load<P: AsRef<Path>>(path: P) -> Result<Self> {
-        Ok(serde_json::from_reader::<_, Settings>(File::open(path)?)?)
+        Ok(serde_json::from_reader::<_, Config>(File::open(path)?)?)
     }
     fn load_or_create_default<P: AsRef<Path>>(path: P) -> Result<Self> {
         match File::open(&path) {
-            Ok(f) => Ok(serde_json::from_reader::<_, Settings>(f)?),
+            Ok(f) => Ok(serde_json::from_reader::<_, Config>(f)?),
             Err(ref e) if e.kind() == std::io::ErrorKind::NotFound => {
-                let config = Settings::default();
+                let config = Config::default();
                 config.save(path)?;
                 Ok(config)
             }
@@ -204,6 +211,8 @@ impl Settings {
         serde_json::to_writer_pretty(File::create(path)?, &self)?;
         Ok(())
     }
+}
+impl Settings {
     fn paks_dir(&self) -> Option<PathBuf> {
         self.fsd_install
             .as_ref()
@@ -230,7 +239,7 @@ struct App {
     mods: Mods,
     showing_about: bool,
     settings_dialog: Option<SettingsDialog>,
-    config: Settings,
+    config: Config,
 }
 
 /*
@@ -302,6 +311,7 @@ impl App {
             self.settings_dialog = Some(SettingsDialog {
                 validated_key: ValidatedSetting::new(
                     self.config
+                        .settings
                         .modio_key
                         .as_ref()
                         .map_or_else(|| "".to_string(), |p| p.clone()),
@@ -309,6 +319,7 @@ impl App {
                 validation_rid: None,
                 validated_fsd_install: ValidatedSetting::new(
                     self.config
+                        .settings
                         .fsd_install
                         .as_ref()
                         .map_or_else(|| "".to_string(), |p| p.clone()),
@@ -477,9 +488,9 @@ impl eframe::App for App {
                                 if settings.validated_key.is_valid()
                                     && settings.validated_fsd_install.is_valid()
                                 {
-                                    self.config.modio_key =
+                                    self.config.settings.modio_key =
                                         Some(settings.validated_key.current_value.clone());
-                                    self.config.fsd_install =
+                                    self.config.settings.fsd_install =
                                         Some(settings.validated_fsd_install.current_value.clone());
                                     self.settings_dialog = None;
                                     self.config.save(&STATIC_SETTINGS.config_path).unwrap();
@@ -510,7 +521,7 @@ impl eframe::App for App {
                         self.name.clone(),
                         self.tx.clone(),
                         ctx.clone(),
-                        self.config.clone(),
+                        self.config.settings.clone(),
                     );
                 }
             });
@@ -586,9 +597,9 @@ fn doc_link_label<'a>(title: &'a str, search_term: &'a str) -> impl egui::Widget
     }
 }
 
-fn search(name: String, tx: Sender<Msg>, ctx: egui::Context, config: Settings) {
+fn search(name: String, tx: Sender<Msg>, ctx: egui::Context, settings: Settings) {
     tokio::spawn(async move {
-        let mods_res = config
+        let mods_res = settings
             .modio()
             .expect("could not get modio object")
             .game(STATIC_SETTINGS.game_id)
@@ -663,7 +674,7 @@ struct Args {
     action: Action,
 }
 
-async fn run(config: &Settings, args: ActionRun) -> Result<()> {
+async fn run(settings: &Settings, args: ActionRun) -> Result<()> {
     use std::process::Command;
     if let Some((cmd, args)) = args.args.split_first() {
         //install(&env, ActionInstall { config: None, update: false }).await?;
@@ -676,13 +687,13 @@ async fn run(config: &Settings, args: ActionRun) -> Result<()> {
                 .wait()?;
 
             let save_buffer = std::fs::read(
-                config
+                settings
                     .mod_config_save()
                     .ok_or_else(|| anyhow!("mod config save not found"))?,
             )?;
             let json = extract_config_from_save(&save_buffer)?;
             if serde_json::from_str::<Mods>(&json)?.request_sync {
-                sync(config, ActionSync {}).await?;
+                sync(settings, ActionSync {}).await?;
             } else {
                 break;
             }
@@ -694,9 +705,9 @@ async fn run(config: &Settings, args: ActionRun) -> Result<()> {
     Ok(())
 }
 
-async fn sync(config: &Settings, args: ActionSync) -> Result<()> {
+async fn sync(settings: &Settings, args: ActionSync) -> Result<()> {
     let save_buffer = std::fs::read(
-        config
+        settings
             .mod_config_save()
             .ok_or_else(|| anyhow!("mod config save not found"))?,
     )?;
@@ -704,12 +715,12 @@ async fn sync(config: &Settings, args: ActionSync) -> Result<()> {
     let mods: Mods = serde_json::from_str(&json)?;
     println!("{:#?}", mods);
 
-    let mod_config = install_config(config, mods, false).await?;
+    let mod_config = install_config(settings, mods, false).await?;
 
     Ok(())
 }
 
-async fn install(config: &Settings, args: ActionInstall) -> Result<()> {
+async fn install(settings: &Settings, args: ActionInstall) -> Result<()> {
     let mods = if let Some(path) = &args.config {
         let config_path = std::path::Path::new(path);
 
@@ -723,7 +734,7 @@ async fn install(config: &Settings, args: ActionInstall) -> Result<()> {
     };
     println!("{:#?}", mods);
 
-    let mod_config = install_config(config, mods, args.update).await?;
+    let mod_config = install_config(settings, mods, args.update).await?;
 
     if args.update {
         if let Some(path) = &args.config {
@@ -750,7 +761,7 @@ fn mod_entry_from_modio(mod_: modio::mods::Mod) -> Result<ModEntry> {
 }
 
 async fn populate_config(
-    config: &Settings,
+    settings: &Settings,
     mods: Mods,
     update: bool,
     mod_hashes: &mut HashMap<u32, String>,
@@ -768,7 +779,7 @@ async fn populate_config(
         let mut dependency_reqs = tokio::task::JoinSet::new();
 
         for id in to_check.iter().copied() {
-            let deps = config
+            let deps = settings
                 .modio()
                 .expect("could not create modio object")
                 .mod_(STATIC_SETTINGS.game_id, id)
@@ -777,7 +788,7 @@ async fn populate_config(
         }
 
         println!("requesting mods");
-        let mods_res = config
+        let mods_res = settings
             .modio()
             .expect("could not create modio object")
             .game(STATIC_SETTINGS.game_id)
@@ -828,11 +839,11 @@ async fn populate_config(
 }
 
 /// Take config, validate against mod.io, install, return populated config
-async fn install_config(config: &Settings, mods: Mods, update: bool) -> Result<Mods> {
+async fn install_config(settings: &Settings, mods: Mods, update: bool) -> Result<Mods> {
     println!("installing config={:#?}", mods);
 
     let mut mod_hashes = HashMap::new();
-    let mod_config = populate_config(config, mods, update, &mut mod_hashes).await?;
+    let mod_config = populate_config(settings, mods, update, &mut mod_hashes).await?;
 
     let mut paks = vec![];
 
@@ -852,7 +863,7 @@ async fn install_config(config: &Settings, mods: Mods, update: bool) -> Result<M
                     file_id,
                     file_path.display()
                 );
-                config
+                settings
                     .modio()
                     .expect("could not create modio object")
                     .download(DownloadAction::File {
@@ -869,7 +880,7 @@ async fn install_config(config: &Settings, mods: Mods, update: bool) -> Result<M
                 hash
             } else {
                 println!("requesting modfile={}", file_id);
-                modfile = config
+                modfile = settings
                     .modio()
                     .expect("could not create modio object")
                     .game(STATIC_SETTINGS.game_id)
@@ -896,7 +907,7 @@ async fn install_config(config: &Settings, mods: Mods, update: bool) -> Result<M
     let loader = include_bytes!("../mod-integration.pak").to_vec();
     paks.push(("loader".to_string(), loader));
 
-    for entry in fs::read_dir(config.paks_dir().expect("could not find paks directory"))
+    for entry in fs::read_dir(settings.paks_dir().expect("could not find paks directory"))
         .expect("Unable to list")
     {
         let entry = entry.expect("unable to get entry");
@@ -922,7 +933,7 @@ async fn install_config(config: &Settings, mods: Mods, update: bool) -> Result<M
             .create(true)
             .truncate(true)
             .open(
-                config
+                settings
                     .paks_dir()
                     .expect("could not find paks dir")
                     .join(name),
@@ -936,7 +947,7 @@ async fn install_config(config: &Settings, mods: Mods, update: bool) -> Result<M
         .create(true)
         .truncate(true)
         .open(
-            config
+            settings
                 .mod_config_save()
                 .expect("could not find mod config save"),
         )?;
