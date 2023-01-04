@@ -29,46 +29,60 @@ use eframe::egui;
 fn main() -> Result<()> {
     let rt = tokio::runtime::Runtime::new().expect("Unable to create Runtime");
     let _enter = rt.enter();
-    std::thread::spawn(move || {
-        rt.block_on(std::future::pending::<()>());
-    });
 
     // Log to stdout (if you run with `RUST_LOG=debug`).
     //tracing_subscriber::fmt::init();
     //
-    dotenvy::dotenv().ok();
     let env = get_env()?;
 
     let config = Config::load_or_create_default(&env.config_path)?;
 
-    let save_buffer = std::fs::read(&env.mod_config_save)?;
-    let json = extract_config_from_save(&save_buffer)?;
-    let mods: Mods = serde_json::from_str(&json)?;
-    println!("{:#?}", mods);
+    let command = Args::parse().action;
+    match command {
+        Action::Gui(_) => {
+            let save_buffer = std::fs::read(&config.mod_config_save().expect("could not find mod config save"))?;
+            let json = extract_config_from_save(&save_buffer)?;
+            let mods: Mods = serde_json::from_str(&json)?;
+            println!("{:#?}", mods);
 
-    let options = eframe::NativeOptions {
-        initial_window_size: Some(egui::vec2(500.0, 300.0)),
-        min_window_size: Some(egui::vec2(500.0, 300.0)),
-        ..Default::default()
-    };
-    let (tx, rx) = std::sync::mpsc::channel();
-    eframe::run_native(
-        "My egui App",
-        options,
-        Box::new(|_cc| Box::new(MyApp {
-            tx,
-            rx,
-            request_counter: Default::default(),
-            name: "custom".to_owned(),
-            log: "asdf".to_owned(),
-            mods,
-            env,
-            showing_about: false,
-            settings_dialog: None,
-            config,
-        })),
-    );
-    Ok(())
+            std::thread::spawn(move || {
+                rt.block_on(std::future::pending::<()>());
+            });
+            let options = eframe::NativeOptions {
+                initial_window_size: Some(egui::vec2(500.0, 300.0)),
+                min_window_size: Some(egui::vec2(500.0, 300.0)),
+                ..Default::default()
+            };
+            let (tx, rx) = std::sync::mpsc::channel();
+            eframe::run_native(
+                "DRG Mod Integration",
+                options,
+                Box::new(|_cc| Box::new(MyApp {
+                    tx,
+                    rx,
+                    request_counter: Default::default(),
+                    name: "custom".to_owned(),
+                    log: "asdf".to_owned(),
+                    mods,
+                    env,
+                    showing_about: false,
+                    settings_dialog: None,
+                    config,
+                })),
+            );
+            Ok(())
+        },
+        _ => {
+            rt.block_on(async {
+                match command {
+                    Action::Install(args) => install(&env, &config, args).await,
+                    Action::Sync(args) => sync(&env, &config, args).await,
+                    Action::Run(args) => run(&env, &config, args).await,
+                    Action::Gui(_) => panic!("unreachable"),
+                }
+            })
+        },
+    }
 }
 
 #[derive(Default)]
@@ -131,7 +145,7 @@ struct SettingsDialog {
     validated_fsd_install: ValidatedSetting<String>,
 }
 
-#[derive(Debug, Default, Serialize, Deserialize)]
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
 struct Config {
     modio_key: Option<String>,
     fsd_install: Option<String>,
@@ -159,6 +173,15 @@ impl Config {
     fn save<P: AsRef<Path>>(&self, path: P) -> Result<()> {
         serde_json::to_writer_pretty(File::create(path)?, &self)?;
         Ok(())
+    }
+    fn paks_dir(&self) -> Option<PathBuf> {
+        self.fsd_install.as_ref().map(|p| Path::new(p).join("FSD/Content/Paks"))
+    }
+    fn mod_config_save(&self) -> Option<PathBuf> {
+        self.fsd_install.as_ref().map(|p| Path::new(p).join("FSD/Saved/SaveGames/Mods/ModIntegration.sav"))
+    }
+    fn modio(&self) -> Option<modio::Modio> {
+        self.modio_key.as_ref().map(|k| modio::Modio::new(modio::Credentials::new(k)).ok()).flatten()
     }
 }
 
@@ -404,7 +427,7 @@ impl eframe::App for MyApp {
                     .labelled_by(name_label.id);
                 if is_committed(&search_box) {
                     search_box.request_focus();
-                    search(self.name.clone(), self.tx.clone(), ctx.clone(), self.env.clone());
+                    search(self.name.clone(), self.tx.clone(), ctx.clone(), self.env.clone(), self.config.clone());
                 }
             });
             //ui.label(&self.log);
@@ -482,9 +505,9 @@ fn doc_link_label<'a>(title: &'a str, search_term: &'a str) -> impl egui::Widget
     }
 }
 
-fn search(name: String, tx: Sender<Msg>, ctx: egui::Context, env: Env) {
+fn search(name: String, tx: Sender<Msg>, ctx: egui::Context, env: Env, config: Config) {
     tokio::spawn(async move {
-        let mods_res = env.modio
+        let mods_res = config.modio().expect("could not get modio object")
             .game(env.game_id)
             .mods()
             .search(Name::like(format!("*{}*", name)))
@@ -517,20 +540,15 @@ enum Msg {
 
 #[derive(Debug, Clone)]
 struct Env {
-    modio: modio::Modio,
     game_id: u32,
     data_dir: PathBuf,
     cache_dir: PathBuf,
 
     config_path: PathBuf,
-    paks_dir: PathBuf,
     mod_cache_dir: PathBuf,
-    mod_config_save: PathBuf,
 }
 
 fn get_env() -> Result<Env> {
-    let fsd_install = std::path::PathBuf::from(std::env::var("FSD_INSTALL").expect("Missing path to game root directory"));
-
     let name = env!("CARGO_PKG_NAME");
     let data_dir = dirs::data_dir().expect("Could not find user home directory").join(name);
     fs::create_dir(&data_dir).ok();
@@ -538,13 +556,9 @@ fn get_env() -> Result<Env> {
     fs::create_dir(&cache_dir).ok();
 
     Ok(Env {
-        modio: Modio::new(Credentials::new(std::env::var("MODIO_KEY").expect("Missing Mod.io API key")))?,
-        //game_id: std::env::var("MODIO_GAME_ID").expect("Missing Mod.io game id").parse()?,
         game_id: 2475,
-        paks_dir: fsd_install.join("FSD/Content/Paks"),
         config_path: data_dir.join("config.json"),
         mod_cache_dir: cache_dir.join("mods"),
-        mod_config_save: fsd_install.join("FSD/Saved/SaveGames/Mods/ModIntegration.sav"),
         data_dir,
         cache_dir,
     })
@@ -568,6 +582,8 @@ struct ActionRun {
    #[arg(index = 1, trailing_var_arg = true, allow_hyphen_values = true)]
    args: Vec<String>,
 }
+#[derive(Parser, Debug)]
+struct ActionGui {}
 
 #[derive(Subcommand, Debug)]
 enum Action {
@@ -577,6 +593,8 @@ enum Action {
    Sync(ActionSync),
    /// Passthrough from steam to directly launch the game
    Run(ActionRun),
+   /// Launch GUI
+   Gui(ActionGui),
 }
 
 #[derive(Parser, Debug)]
@@ -586,23 +604,7 @@ struct Args {
    action: Action,
 }
 
-#[tokio::main]
-async fn asdfmain() -> Result<()> {
-    let mut path = std::env::current_exe()?;
-    path.pop();
-    //std::env::set_current_dir(path)?;
-    //std::env::set_current_dir(Path::new("/home/truman/projects/drg-modding/tools/modloader-rs"))?;
-    dotenvy::dotenv().ok();
-    let env = get_env()?;
-
-    match Args::parse().action {
-        Action::Install(args) => install(&env, args).await,
-        Action::Sync(args) => sync(&env, args).await,
-        Action::Run(args) => run(&env, args).await,
-    }
-}
-
-async fn run(env: &Env, args: ActionRun) -> Result<()> {
+async fn run(env: &Env, config: &Config, args: ActionRun) -> Result<()> {
     use std::process::Command;
     if let Some((cmd, args)) = args.args.split_first() {
         //install(&env, ActionInstall { config: None, update: false }).await?;
@@ -614,10 +616,10 @@ async fn run(env: &Env, args: ActionRun) -> Result<()> {
                     .expect("failed to execute process")
                     .wait()?;
 
-            let save_buffer = std::fs::read(&env.mod_config_save)?;
+            let save_buffer = std::fs::read(&config.mod_config_save().ok_or_else(|| anyhow!("mod config save not found"))?)?;
             let json = extract_config_from_save(&save_buffer)?;
             if serde_json::from_str::<Mods>(&json)?.request_sync {
-                sync(env, ActionSync {}).await?;
+                sync(env, config, ActionSync {}).await?;
             } else {
                 break;
             }
@@ -629,18 +631,18 @@ async fn run(env: &Env, args: ActionRun) -> Result<()> {
     Ok(())
 }
 
-async fn sync(env: &Env, args: ActionSync) -> Result<()> {
-    let save_buffer = std::fs::read(&env.mod_config_save)?;
+async fn sync(env: &Env, config: &Config, args: ActionSync) -> Result<()> {
+    let save_buffer = std::fs::read(&config.mod_config_save().ok_or_else(|| anyhow!("mod config save not found"))?)?;
     let json = extract_config_from_save(&save_buffer)?;
     let mods: Mods = serde_json::from_str(&json)?;
     println!("{:#?}", mods);
 
-    let config = install_config(env, mods, false).await?;
+    let mod_config = install_config(env, config, mods, false).await?;
 
     Ok(())
 }
 
-async fn install(env: &Env, args: ActionInstall) -> Result<()> {
+async fn install(env: &Env, config: &Config, args: ActionInstall) -> Result<()> {
     let mods = if let Some(path) = &args.config {
         let config_path = std::path::Path::new(path);
 
@@ -654,12 +656,12 @@ async fn install(env: &Env, args: ActionInstall) -> Result<()> {
     };
     println!("{:#?}", mods);
 
-    let config = install_config(env, mods, args.update).await?;
+    let mod_config = install_config(env, config, mods, args.update).await?;
 
     if args.update {
         if let Some(path) = &args.config {
             let file = File::create(path).unwrap();
-            serde_json::to_writer_pretty(file, &config).unwrap();
+            serde_json::to_writer_pretty(file, &mod_config).unwrap();
         }
     }
 
@@ -680,7 +682,7 @@ fn mod_entry_from_modio(mod_: modio::mods::Mod) -> Result<ModEntry> {
     })
 }
 
-async fn populate_config(env: &Env, mods: Mods, update: bool, mod_hashes: &mut HashMap<u32, String>) -> Result<Mods> {
+async fn populate_config(env: &Env, config: &Config, mods: Mods, update: bool, mod_hashes: &mut HashMap<u32, String>) -> Result<Mods> {
     let mut config_map: indexmap::IndexMap<_, _> = mods.mods.into_iter().map(|m| (m.id.parse::<u32>().unwrap(), m)).collect();
 
     let mut to_check: HashSet<u32> = config_map.keys().copied().collect();
@@ -690,25 +692,25 @@ async fn populate_config(env: &Env, mods: Mods, update: bool, mod_hashes: &mut H
         let mut dependency_reqs = JoinSet::new();
 
         for id in to_check.iter().copied() {
-            let deps = env.modio.mod_(env.game_id, id).dependencies();
+            let deps = config.modio().expect("could not create modio object").mod_(env.game_id, id).dependencies();
             dependency_reqs.spawn(async move { (id, deps.list().await) });
         }
 
         println!("requesting mods");
-        let mods_res = env.modio.game(env.game_id).mods().search(Id::_in(to_check.iter().copied().collect::<Vec<_>>())).collect().await?;
+        let mods_res = config.modio().expect("could not create modio object").game(env.game_id).mods().search(Id::_in(to_check.iter().copied().collect::<Vec<_>>())).collect().await?;
         to_check.clear();
         for res in mods_res.into_iter() {
-            let mut config = config_map.get_mut(&res.id).unwrap();
-            config.name = Some(res.name.to_owned());
-            config.approval = Some(get_approval(&res));
-            config.required = Some(is_required(&res));
+            let mut mod_config = config_map.get_mut(&res.id).unwrap();
+            mod_config.name = Some(res.name.to_owned());
+            mod_config.approval = Some(get_approval(&res));
+            mod_config.required = Some(is_required(&res));
             if let Some(modfile) = res.modfile {
                 mod_hashes.insert(modfile.id, modfile.filehash.md5);
-                if config.version.is_none() || update {
-                    config.version = Some(modfile.id.to_string());
+                if mod_config.version.is_none() || update {
+                    mod_config.version = Some(modfile.id.to_string());
                 }
             } else {
-                return Err(anyhow!("mod={} does not have any modfiles", config.id));
+                return Err(anyhow!("mod={} does not have any modfiles", mod_config.id));
             }
         }
         println!("requesting dependencies");
@@ -736,24 +738,24 @@ async fn populate_config(env: &Env, mods: Mods, update: bool, mod_hashes: &mut H
 }
 
 /// Take config, validate against mod.io, install, return populated config
-async fn install_config(env: &Env, mods: Mods, update: bool) -> Result<Mods> {
+async fn install_config(env: &Env, config: &Config, mods: Mods, update: bool) -> Result<Mods> {
     println!("installing config={:#?}", mods);
 
     let mut mod_hashes = HashMap::new();
-    let config = populate_config(env, mods, update, &mut mod_hashes).await?;
+    let mod_config = populate_config(env, config, mods, update, &mut mod_hashes).await?;
 
     let mut paks = vec![];
 
     fs::create_dir(&env.mod_cache_dir).ok();
 
-    for entry in &config.mods {
+    for entry in &mod_config.mods {
         let mod_id = entry.id.parse::<u32>()?;
         if let Some(version) = &entry.version {
             let file_id = version.parse::<u32>()?;
             let file_path = &env.mod_cache_dir.join(format!("{}.zip", file_id));
             if !file_path.exists() {
                 println!("downloading mod={} version={} path={}", mod_id, file_id, file_path.display());
-                env.modio.download(DownloadAction::File {
+                config.modio().expect("could not create modio object").download(DownloadAction::File {
                     game_id: env.game_id,
                     mod_id,
                     file_id,
@@ -765,7 +767,7 @@ async fn install_config(env: &Env, mods: Mods, update: bool) -> Result<Mods> {
                 hash
             } else {
                 println!("requesting modfile={}", file_id);
-                modfile = env.modio.game(env.game_id).mod_(mod_id).file(file_id).get().await?;
+                modfile = config.modio().expect("could not create modio object").game(env.game_id).mod_(mod_id).file(file_id).get().await?;
                 &modfile.filehash.md5
             };
 
@@ -786,7 +788,7 @@ async fn install_config(env: &Env, mods: Mods, update: bool) -> Result<Mods> {
     let loader = include_bytes!("../mod-integration.pak").to_vec();
     paks.push(("loader".to_string(), loader));
 
-    for entry in fs::read_dir(&env.paks_dir).expect("Unable to list") {
+    for entry in fs::read_dir(&config.paks_dir().expect("could not find paks directory")).expect("Unable to list") {
         let entry = entry.expect("unable to get entry");
         if entry.file_type()?.is_dir() { continue };
         if let Some(name) = entry.file_name().to_str() {
@@ -807,7 +809,7 @@ async fn install_config(env: &Env, mods: Mods, update: bool) -> Result<Mods> {
             .write(true)
             .create(true)
             .truncate(true)
-            .open(env.paks_dir.join(name))?;
+            .open(config.paks_dir().expect("could not find paks dir").join(name))?;
         out_file.write_all(&buf)?;
     }
 
@@ -816,12 +818,12 @@ async fn install_config(env: &Env, mods: Mods, update: bool) -> Result<Mods> {
         .write(true)
         .create(true)
         .truncate(true)
-        .open(&env.mod_config_save)?;
-    out_save.write_all(&wrap_config(serde_json::to_string(&config)?)?)?;
+        .open(&config.mod_config_save().expect("could not find mod config save"))?;
+    out_save.write_all(&wrap_config(serde_json::to_string(&mod_config)?)?)?;
 
     println!("mods installed");
 
-    Ok(config)
+    Ok(mod_config)
 }
 
 fn contains(source: &[u8], needle: &[u8]) -> bool {

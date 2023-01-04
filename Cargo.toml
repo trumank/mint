@@ -7,7 +7,6 @@ edition = "2021"
 anyhow = "1.0.68"
 clap = { version = "4.0.32", features = ["derive"] }
 dirs = "4.0.0"
-dotenvy = "0.15.6"
 eframe = "0.20.1"
 egui = "0.20.1"
 hex = "0.4.3"
