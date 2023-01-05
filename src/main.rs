@@ -3,6 +3,8 @@
 
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
+use std::hash::Hash;
+use std::rc::Rc;
 
 use anyhow::anyhow;
 use anyhow::Result;
@@ -229,7 +231,7 @@ impl Settings {
 #[derive(Default)]
 struct ModSearch {
     query: String,
-    search_results: Option<Result<Vec<modio::mods::Mod>>>,
+    search_results: Option<Result<Vec<Rc<modio::mods::Mod>>>>,
     search_rid: Option<u32>,
 }
 enum ModSearchAction {
@@ -307,7 +309,7 @@ impl ModSearch {
             });
         action
     }
-    fn receive(&mut self, rid: u32, res: Result<Vec<modio::mods::Mod>>) {
+    fn receive(&mut self, rid: u32, res: Result<Vec<Rc<modio::mods::Mod>>>) {
         if let Some(id) = self.search_rid {
             if id == rid {
                 self.search_results = Some(res);
@@ -327,6 +329,7 @@ struct App {
     settings_dialog: Option<SettingsDialog>,
     config: Config,
     mod_search: ModSearch,
+    modio_mod_cache: HashMap<u32, Rc<modio::mods::Mod>>,
 }
 
 impl Default for App {
@@ -342,6 +345,7 @@ impl Default for App {
             settings_dialog: None,
             showing_about: false,
             mod_search: Default::default(),
+            modio_mod_cache: HashMap::new(),
         }
     }
 }
@@ -575,7 +579,18 @@ impl eframe::App for App {
                     }
                 },
                 Msg::SearchResultMods(rid, mods_res) => {
-                    self.mod_search.receive(rid, mods_res);
+                    self.mod_search.receive(
+                        rid,
+                        mods_res.map(|mods| {
+                            mods.into_iter()
+                                .map(|m| {
+                                    let rc: Rc<modio::mods::Mod> = m.into();
+                                    self.modio_mod_cache.insert(rc.id, rc.clone());
+                                    rc
+                                })
+                                .collect::<Vec<_>>()
+                        }),
+                    );
                 }
                 Msg::KeyCheck(rid, res) => {
                     if let Some(settings) = &mut self.settings_dialog {
@@ -618,7 +633,7 @@ impl eframe::App for App {
 
             ui.separator();
 
-            ui.columns(2, |columns| {
+            ui.columns(3, |columns| {
                 columns[0].group(|ui| {
                     ui.push_id(0, |ui| {
                         ui.heading("Loaded mods");
@@ -698,6 +713,12 @@ impl eframe::App for App {
                         None => {}
                     }
 
+                    ui.allocate_space(ui.available_size());
+                });
+                columns[2].group(|ui| {
+                    for (id, mod_) in &self.modio_mod_cache {
+                        ui.label(format!("{id} {}", mod_.name));
+                    }
                     ui.allocate_space(ui.available_size());
                 });
             });
