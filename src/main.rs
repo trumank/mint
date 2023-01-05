@@ -1,4 +1,5 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+#![feature(drain_filter)]
 
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
@@ -72,6 +73,8 @@ fn main() -> Result<()> {
             )?;
             let json = extract_config_from_save(&save_buffer)?;
             let mods: Mods = serde_json::from_str(&json)?;
+
+            //let mods = Mods { mods: vec![], request_sync: false };
             println!("{mods:#?}");
 
             std::thread::spawn(move || {
@@ -82,21 +85,14 @@ fn main() -> Result<()> {
                 min_window_size: Some(egui::vec2(500.0, 300.0)),
                 ..Default::default()
             };
-            let (tx, rx) = std::sync::mpsc::channel();
             eframe::run_native(
                 "DRG Mod Integration",
                 options,
                 Box::new(|_cc| {
                     Box::new(App {
-                        tx,
-                        rx,
-                        request_counter: Default::default(),
-                        name: "custom".to_owned(),
-                        log: "asdf".to_owned(),
-                        mods,
-                        showing_about: false,
-                        settings_dialog: None,
                         config,
+                        mods,
+                        ..Default::default()
                     })
                 }),
             );
@@ -230,16 +226,124 @@ impl Settings {
     }
 }
 
+#[derive(Default)]
+struct ModSearch {
+    query: String,
+    search_results: Option<Result<Vec<modio::mods::Mod>>>,
+    search_rid: Option<u32>,
+}
+enum ModSearchAction {
+    Add(ModEntry),
+}
+impl ModSearch {
+    #[must_use]
+    fn ui(
+        &mut self,
+        ui: &mut egui::Ui,
+        settings: &Settings,
+        tx: &Sender<Msg>,
+        rc: &mut RequestCounter,
+    ) -> Option<ModSearchAction> {
+        let mut action = None;
+        let search_res = ui.add_enabled(
+            true, //self.search_rid.is_none(),
+            egui::TextEdit::singleline(&mut self.query).hint_text("Search mods..."),
+        );
+        if is_committed(&search_res) {
+            search_res.request_focus();
+            let id = rc.next();
+            search_modio_mods(
+                id,
+                self.query.clone(),
+                tx.clone(),
+                ui.ctx().clone(),
+                settings.clone(),
+            );
+            self.search_rid = Some(id);
+        }
+        if let Some(search_rid) = self.search_rid {
+            ui.spinner();
+        }
+        egui::ScrollArea::both()
+            .auto_shrink([false, true])
+            .show(ui, |ui| {
+                egui::Grid::new("search_results")
+                    .num_columns(3)
+                    //.max_col_width(200.0)
+                    .striped(true)
+                    .show(ui, |ui| {
+                        ui.label("add");
+                        ui.label("mod");
+                        ui.label("approval");
+                        ui.end_row();
+
+                        if let Some(results) = &self.search_results {
+                            match results {
+                                Ok(mods) => {
+                                    for mod_ in mods {
+                                        if ui.button("<-").clicked() {
+                                            action = Some(ModSearchAction::Add(
+                                                mod_entry_from_modio(mod_).unwrap(),
+                                            ));
+                                        }
+                                        //ui.set_max_width(100.0);
+                                        //ui.add_sized([0.0, 0.0], egui::Hyperlink::from_label_and_url(&mod_.name, &mod_.profile_url));
+                                        ui.hyperlink_to(&mod_.name, &mod_.profile_url);
+                                        ui.label(match get_approval(mod_) {
+                                            Approval::Verified => "Verified",
+                                            Approval::Approved => "Approved",
+                                            Approval::Sandbox => "Sandbox",
+                                            // TODO auto verified
+                                        });
+                                        ui.end_row();
+                                    }
+                                }
+                                Err(err) => {
+                                    ui.colored_label(ui.visuals().error_fg_color, err.to_string());
+                                }
+                            }
+                        }
+                    });
+            });
+        action
+    }
+    fn receive(&mut self, rid: u32, res: Result<Vec<modio::mods::Mod>>) {
+        if let Some(id) = self.search_rid {
+            if id == rid {
+                self.search_results = Some(res);
+                self.search_rid = None;
+            }
+        }
+    }
+}
+
 struct App {
     tx: Sender<Msg>,
     rx: Receiver<Msg>,
     request_counter: RequestCounter,
-    name: String,
     log: String,
     mods: Mods,
     showing_about: bool,
     settings_dialog: Option<SettingsDialog>,
     config: Config,
+    mod_search: ModSearch,
+}
+
+impl Default for App {
+    fn default() -> Self {
+        let (tx, rx) = std::sync::mpsc::channel();
+        App {
+            tx,
+            rx,
+            request_counter: Default::default(),
+            log: "".to_owned(),
+            config: Default::default(),
+            mods: Default::default(),
+            settings_dialog: None,
+            showing_about: false,
+            mod_search: Default::default(),
+        }
+    }
 }
 
 /*
@@ -460,8 +564,8 @@ impl eframe::App for App {
                     Ok(mods) => {
                         log("request complete".to_owned());
                         self.mods.mods = mods
-                            .into_iter()
-                            .map(mod_entry_from_modio)
+                            .iter()
+                            .map(&mod_entry_from_modio)
                             .collect::<Result<Vec<ModEntry>>>()
                             .ok()
                             .unwrap();
@@ -470,6 +574,9 @@ impl eframe::App for App {
                         log(format!("request failed: {err}"));
                     }
                 },
+                Msg::SearchResultMods(rid, mods_res) => {
+                    self.mod_search.receive(rid, mods_res);
+                }
                 Msg::KeyCheck(rid, res) => {
                     if let Some(settings) = &mut self.settings_dialog {
                         if let Some(srid) = settings.validation_rid {
@@ -503,83 +610,106 @@ impl eframe::App for App {
         }
 
         egui::CentralPanel::default().show(ctx, |ui| {
-            ui.heading("DRG Mod Integration");
-
             ui.horizontal(|ui| {
+                ui.heading("DRG Mod Integration");
                 self.about_dialog(ui);
                 self.settings_dialog(ui);
             });
 
-            ui.horizontal(|ui| {
-                let name_label = ui.label("mod query: ");
-                let search_box = ui
-                    .text_edit_singleline(&mut self.name)
-                    .labelled_by(name_label.id);
-                if is_committed(&search_box) {
-                    search_box.request_focus();
-                    search(
-                        self.name.clone(),
-                        self.tx.clone(),
-                        ctx.clone(),
-                        self.config.settings.clone(),
-                    );
-                }
-            });
-            //ui.label(&self.log);
-
             ui.separator();
 
-            ui.push_id(0, |ui| {
-                egui::ScrollArea::both()
-                    .auto_shrink([false, true])
-                    .show(ui, |ui| {
-                        egui::Grid::new("my_grid")
-                            .num_columns(5)
-                            //.spacing([40.0, 4.0])
-                            .striped(true)
+            ui.columns(2, |columns| {
+                columns[0].group(|ui| {
+                    ui.push_id(0, |ui| {
+                        ui.heading("Loaded mods");
+                        egui::ScrollArea::both()
+                            .auto_shrink([false, true])
                             .show(ui, |ui| {
-                                ui.label("mod");
-                                ui.label("version");
-                                ui.label("approval");
-                                ui.label("required");
-                                ui.end_row();
+                                egui::Grid::new("my_grid")
+                                    .num_columns(6)
+                                    //.spacing([40.0, 4.0])
+                                    .striped(true)
+                                    .show(ui, |ui| {
+                                        ui.label("remove");
+                                        ui.label("mod");
+                                        ui.label("version");
+                                        ui.label("approval");
+                                        ui.label("required");
+                                        ui.end_row();
 
-                                for mod_ in &mut self.mods.mods {
-                                    let name = &mod_.name.as_ref().unwrap_or(&mod_.id);
-                                    ui.add(doc_link_label(name, name));
+                                        //for mod_ in &mut self.mods.mods {
+                                        //self.mods.mods.drain_filter(|mod_| {
+                                        let mods = &mut self.mods.mods;
+                                        let mut i = 0;
+                                        while i < mods.len() {
+                                            if {
+                                                let mut mod_ = &mut mods[i];
+                                                let remove = ui.button("x").clicked();
+                                                let name = &mod_.name.as_ref().unwrap_or(&mod_.id);
+                                                ui.add(doc_link_label(name, name));
 
-                                    let empty = "-".to_string();
+                                                let empty = "-".to_string();
 
-                                    let version = mod_.version.as_ref().unwrap_or(&empty);
-                                    ui.label(version);
+                                                let version =
+                                                    mod_.version.as_ref().unwrap_or(&empty);
+                                                ui.label(version);
 
-                                    let approval = match mod_.approval {
-                                        Some(Approval::Verified) => "Verified",
-                                        Some(Approval::Approved) => "Approved",
-                                        Some(Approval::Sandbox) => "Sandbox",
-                                        None => "-",
-                                    };
-                                    ui.label(approval);
+                                                let approval = match mod_.approval {
+                                                    Some(Approval::Verified) => "Verified",
+                                                    Some(Approval::Approved) => "Approved",
+                                                    Some(Approval::Sandbox) => "Sandbox",
+                                                    None => "-",
+                                                };
+                                                ui.label(approval);
 
-                                    let mut required = mod_.required.unwrap_or_default();
-                                    ui.add_enabled(false, egui::Checkbox::new(&mut required, ""));
-                                    mod_.required = Some(required);
+                                                let mut required =
+                                                    mod_.required.unwrap_or_default();
+                                                ui.add_enabled(
+                                                    true,
+                                                    egui::Checkbox::new(&mut required, ""),
+                                                );
+                                                mod_.required = Some(required);
 
-                                    ui.allocate_space(ui.available_size());
-                                    ui.end_row();
-                                }
+                                                ui.allocate_space(ui.available_size());
+                                                ui.end_row();
+                                                remove
+                                            } {
+                                                mods.remove(i);
+                                            } else {
+                                                i += 1;
+                                            }
+                                        }
+                                    });
                             });
                     });
+                    ui.allocate_space(ui.available_size());
+                });
+                columns[1].group(|ui| {
+                    let action = self.mod_search.ui(
+                        ui,
+                        &self.config.settings,
+                        &self.tx,
+                        &mut self.request_counter,
+                    );
+                    match action {
+                        Some(ModSearchAction::Add(mod_)) => {
+                            self.mods.mods.push(mod_);
+                        }
+                        None => {}
+                    }
+
+                    ui.allocate_space(ui.available_size());
+                });
             });
 
-            ui.separator();
-
+            /*
             ui.push_id(1, |ui| {
                 egui::ScrollArea::vertical()
                     .auto_shrink([false; 2])
                     .stick_to_bottom(true)
                     .show(ui, |ui| ui.label(&self.log));
             });
+            */
         });
     }
 }
@@ -595,6 +725,30 @@ fn doc_link_label<'a>(title: &'a str, search_term: &'a str) -> impl egui::Widget
             });
         })
     }
+}
+
+fn search_modio_mods(
+    rid: u32,
+    query: String,
+    tx: Sender<Msg>,
+    ctx: egui::Context,
+    settings: Settings,
+) {
+    tokio::spawn(async move {
+        let mods_res = settings
+            .modio()
+            .expect("could not get modio object")
+            .game(STATIC_SETTINGS.game_id)
+            .mods()
+            .search(Name::like(format!("*{query}*")))
+            .collect()
+            .await;
+        let _ = tx.send(Msg::SearchResultMods(
+            rid,
+            mods_res.map_err(anyhow::Error::msg),
+        ));
+        ctx.request_repaint();
+    });
 }
 
 fn search(name: String, tx: Sender<Msg>, ctx: egui::Context, settings: Settings) {
@@ -631,6 +785,7 @@ async fn check_key_async(key: String) -> Result<modio::games::Game> {
 enum Msg {
     Log(String),
     SearchResult(Result<Vec<modio::mods::Mod>>),
+    SearchResultMods(u32, Result<Vec<modio::mods::Mod>>),
     KeyCheck(u32, Result<modio::games::Game>),
 }
 
@@ -746,14 +901,14 @@ async fn install(settings: &Settings, args: ActionInstall) -> Result<()> {
     Ok(())
 }
 
-fn mod_entry_from_modio(mod_: modio::mods::Mod) -> Result<ModEntry> {
+fn mod_entry_from_modio(mod_: &modio::mods::Mod) -> Result<ModEntry> {
     Ok(ModEntry {
         id: mod_.id.to_string(),
         name: Some(mod_.name.to_owned()),
         approval: Some(get_approval(&mod_)),
         required: Some(is_required(&mod_)),
-        version: if let Some(modfile) = mod_.modfile {
-            Ok(Some(mod_.id.to_string()))
+        version: if let Some(modfile) = &mod_.modfile {
+            Ok(Some(modfile.id.to_string()))
         } else {
             Err(anyhow!("mod={} does not have any modfiles", mod_.id))
         }?,
@@ -1017,6 +1172,15 @@ struct Mods {
     mods: Vec<ModEntry>,
     #[serde(default)]
     request_sync: bool,
+}
+
+impl Default for Mods {
+    fn default() -> Self {
+        Mods {
+            mods: Default::default(),
+            request_sync: false,
+        }
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize)]
