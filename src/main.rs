@@ -1,10 +1,9 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
-#![feature(drain_filter)]
+#![feature(let_chains)]
 
 use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::hash::Hash;
-use std::rc::Rc;
 
 use anyhow::anyhow;
 use anyhow::Result;
@@ -62,7 +61,8 @@ fn main() -> Result<()> {
     // Log to stdout (if you run with `RUST_LOG=debug`).
     //tracing_subscriber::fmt::init();
     //
-    let config = Config::load_or_create_default(&STATIC_SETTINGS.config_path)?;
+    let mut config = Config::load_or_create_default(&STATIC_SETTINGS.config_path)?;
+    println!("{config:#?}");
 
     let command = Args::parse().action;
     match command {
@@ -102,11 +102,13 @@ fn main() -> Result<()> {
         }
         _ => rt.block_on(async {
             match command {
-                Action::Install(args) => install(&config.settings, args).await,
-                Action::Sync(args) => sync(&config.settings, args).await,
-                Action::Run(args) => run(&config.settings, args).await,
+                Action::Install(args) => install(&mut config, args).await?,
+                Action::Sync(args) => sync(&mut config, args).await?,
+                Action::Run(args) => run(&mut config, args).await?,
                 Action::Gui(_) => panic!("unreachable"),
             }
+            config.save(&STATIC_SETTINGS.config_path).unwrap();
+            Ok(())
         }),
     }
 }
@@ -179,15 +181,39 @@ struct SettingsDialog {
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]
+#[serde(default)]
 struct Config {
     settings: Settings,
-    mod_profiles: HashMap<String, Mods>,
+    mod_profiles: HashMap<String, ModProfile>,
+    modio_cache: ModioCache,
 }
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 struct Settings {
     modio_key: Option<String>,
     fsd_install: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct ModProfile {
+    mods: BTreeMap<ModId, ModProfileEntry>,
+}
+
+#[derive(Debug, Default, Serialize, Deserialize)]
+struct ModioCache {
+    mods: HashMap<ModId, ModioMod>,
+    dependencies: HashMap<ModId, Vec<ModId>>,
+}
+
+// TODO "overrideable" struct field? (version, required)
+#[derive(Debug, Default, Serialize, Deserialize)]
+struct ModProfileEntry {
+    /// Mod version (file ID in the case of a mod.io mod)
+    version: String,
+    /// Whether the user should be prompted if there is a newer version of the mod available
+    pinned_version: bool,
+    /// Whether clients should be required to install the mod. Can be configured by the user
+    required: bool,
 }
 
 impl Config {
@@ -231,11 +257,11 @@ impl Settings {
 #[derive(Default)]
 struct ModSearch {
     query: String,
-    search_results: Option<Result<Vec<Rc<modio::mods::Mod>>>>,
+    search_results: Option<Result<Vec<ModId>>>,
     search_rid: Option<u32>,
 }
 enum ModSearchAction {
-    Add(ModEntry),
+    Add(ModId),
 }
 impl ModSearch {
     #[must_use]
@@ -245,7 +271,9 @@ impl ModSearch {
         settings: &Settings,
         tx: &Sender<Msg>,
         rc: &mut RequestCounter,
+        modio_cache: &HashMap<ModId, ModioMod>,
     ) -> Option<ModSearchAction> {
+        ui.heading("Mod.io search");
         let mut action = None;
         let search_res = ui.add_enabled(
             true, //self.search_rid.is_none(),
@@ -263,14 +291,14 @@ impl ModSearch {
             );
             self.search_rid = Some(id);
         }
-        if let Some(search_rid) = self.search_rid {
+        if self.search_rid.is_some() {
             ui.spinner();
         }
         egui::ScrollArea::both()
             .auto_shrink([false, true])
             .show(ui, |ui| {
                 egui::Grid::new("search_results")
-                    .num_columns(3)
+                    .num_columns(4)
                     //.max_col_width(200.0)
                     .striped(true)
                     .show(ui, |ui| {
@@ -282,21 +310,19 @@ impl ModSearch {
                         if let Some(results) = &self.search_results {
                             match results {
                                 Ok(mods) => {
-                                    for mod_ in mods {
+                                    for id in mods {
+                                        let mod_ = modio_cache.get(id).unwrap();
                                         if ui.button("<-").clicked() {
-                                            action = Some(ModSearchAction::Add(
-                                                mod_entry_from_modio(mod_).unwrap(),
-                                            ));
+                                            action = Some(ModSearchAction::Add(*id));
                                         }
-                                        //ui.set_max_width(100.0);
-                                        //ui.add_sized([0.0, 0.0], egui::Hyperlink::from_label_and_url(&mod_.name, &mod_.profile_url));
-                                        ui.hyperlink_to(&mod_.name, &mod_.profile_url);
+                                        ui.hyperlink_to(&mod_.name, &mod_.url);
                                         ui.label(match get_approval(mod_) {
                                             Approval::Verified => "Verified",
                                             Approval::Approved => "Approved",
                                             Approval::Sandbox => "Sandbox",
                                             // TODO auto verified
                                         });
+                                        ui.allocate_space(ui.available_size());
                                         ui.end_row();
                                     }
                                 }
@@ -309,12 +335,133 @@ impl ModSearch {
             });
         action
     }
-    fn receive(&mut self, rid: u32, res: Result<Vec<Rc<modio::mods::Mod>>>) {
+    fn receive(&mut self, rid: u32, res: Result<Vec<ModId>>) {
         if let Some(id) = self.search_rid {
             if id == rid {
                 self.search_results = Some(res);
                 self.search_rid = None;
             }
+        }
+    }
+}
+
+#[derive(Default)]
+struct ModProfileEditor {
+    selected_profile: Option<String>,
+}
+impl ModProfileEditor {
+    fn ui(
+        &mut self,
+        ui: &mut egui::Ui,
+        mod_profiles: &mut HashMap<String, ModProfile>,
+        modio_cache: &mut ModioCache,
+    ) {
+        ui.heading("Profile editor");
+        egui::ScrollArea::both()
+            .auto_shrink([false, true])
+            .show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    for profile in mod_profiles.keys() {
+                        let selected = Some(profile) == self.selected_profile.as_ref();
+                        if ui.selectable_label(selected, profile).clicked() {
+                            self.selected_profile = if selected { None } else { Some(profile.to_owned()) };
+                        }
+                    }
+                });
+                if let Some(selected_profile) = &self.selected_profile && let Some(profile) = mod_profiles.get_mut(selected_profile) {
+                    egui::Grid::new("mod_profile_editor")
+                        .num_columns(4)
+                        //.max_col_width(200.0)
+                        .striped(true)
+                        .show(ui, |ui| {
+                            ui.label("remove");
+                            ui.label("mod");
+                            ui.label("approval");
+                            //ui.label("approval");
+                            ui.end_row();
+
+                            let mut to_remove = vec![];
+                            for (id, mod_) in &profile.mods {
+                                if ui.button("x").clicked() {
+                                    to_remove.push(*id);
+                                }
+                                if let Some(modio) = modio_cache.mods.get(id) {
+                                    ui.hyperlink_to(&modio.name, &modio.url);
+                                    ui.label(match get_approval(modio) {
+                                        Approval::Verified => "Verified",
+                                        Approval::Approved => "Approved",
+                                        Approval::Sandbox => "Sandbox",
+                                        // TODO auto verified
+                                    });
+                                }
+                                ui.allocate_space(ui.available_size());
+                                ui.end_row();
+                            }
+                            for id in to_remove {
+                                profile.mods.remove(&id);
+                            }
+                        });
+                }
+            });
+    }
+    fn add_mod(&mut self, mod_profiles: &mut HashMap<String, ModProfile>, mod_id: ModId) {
+        if let Some(selected_profile) = &self.selected_profile && let Some(profile) = mod_profiles.get_mut(selected_profile) {
+            profile.mods.insert(mod_id, Default::default());
+        }
+    }
+}
+
+#[serde_with::serde_as]
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash, Ord, PartialOrd, Serialize, Deserialize)]
+// TODO define similar struct for Files
+struct ModId(#[serde_as(as = "serde_with::DisplayFromStr")] u32);
+
+impl std::fmt::Display for ModId {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl FromStr for ModId {
+    type Err = anyhow::Error;
+
+    fn from_str(s: &str) -> Result<Self> {
+        Ok(ModId(s.parse::<u32>()?))
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct ModioMod {
+    id: ModId,
+    name: String,
+    tags: Vec<String>,
+    modfile: Option<ModioFile>,
+    url: url::Url,
+}
+
+impl From<modio::mods::Mod> for ModioMod {
+    fn from(value: modio::mods::Mod) -> Self {
+        ModioMod {
+            id: ModId(value.id),
+            name: value.name,
+            tags: value.tags.into_iter().map(|t| t.name).collect(),
+            modfile: value.modfile.map(|f| f.into()),
+            url: value.profile_url,
+        }
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct ModioFile {
+    id: u32,
+    filehash: String,
+}
+
+impl From<modio::files::File> for ModioFile {
+    fn from(value: modio::files::File) -> Self {
+        ModioFile {
+            id: value.id,
+            filehash: value.filehash.md5,
         }
     }
 }
@@ -329,7 +476,7 @@ struct App {
     settings_dialog: Option<SettingsDialog>,
     config: Config,
     mod_search: ModSearch,
-    modio_mod_cache: HashMap<u32, Rc<modio::mods::Mod>>,
+    mod_profile_editor: ModProfileEditor,
 }
 
 impl Default for App {
@@ -345,29 +492,10 @@ impl Default for App {
             settings_dialog: None,
             showing_about: false,
             mod_search: Default::default(),
-            modio_mod_cache: HashMap::new(),
+            mod_profile_editor: Default::default(),
         }
     }
 }
-
-/*
-impl Default for MyApp {
-    fn default() -> Self {
-        let (tx, rx) = std::sync::mpsc::channel();
-        Self {
-            tx,
-            rx,
-            name: "Arthur".to_owned(),
-            age: 42,
-            log: "asdf".to_owned(),
-            mods: Mods {
-                mods: vec![],
-                request_sync: false
-            },
-        }
-    }
-}
-*/
 
 fn is_committed(res: &egui::Response) -> bool {
     res.lost_focus() && res.ctx.input().key_pressed(egui::Key::Enter)
@@ -555,6 +683,12 @@ impl App {
     }
 }
 
+impl App {
+    fn save_config(&self) {
+        self.config.save(&STATIC_SETTINGS.config_path).unwrap();
+    }
+}
+
 impl eframe::App for App {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         let mut log = |msg: String| {
@@ -564,33 +698,20 @@ impl eframe::App for App {
         if let Ok(msg) = self.rx.try_recv() {
             match msg {
                 Msg::Log(msg) => log(msg),
-                Msg::SearchResult(mods_res) => match mods_res {
-                    Ok(mods) => {
-                        log("request complete".to_owned());
-                        self.mods.mods = mods
-                            .iter()
-                            .map(&mod_entry_from_modio)
-                            .collect::<Result<Vec<ModEntry>>>()
-                            .ok()
-                            .unwrap();
-                    }
-                    Err(err) => {
-                        log(format!("request failed: {err}"));
-                    }
-                },
                 Msg::SearchResultMods(rid, mods_res) => {
                     self.mod_search.receive(
                         rid,
                         mods_res.map(|mods| {
                             mods.into_iter()
                                 .map(|m| {
-                                    let rc: Rc<modio::mods::Mod> = m.into();
-                                    self.modio_mod_cache.insert(rc.id, rc.clone());
-                                    rc
+                                    let id = m.id;
+                                    self.config.modio_cache.mods.insert(id, m);
+                                    id
                                 })
                                 .collect::<Vec<_>>()
                         }),
                     );
+                    self.save_config();
                 }
                 Msg::KeyCheck(rid, res) => {
                     if let Some(settings) = &mut self.settings_dialog {
@@ -615,7 +736,7 @@ impl eframe::App for App {
                                     self.config.settings.fsd_install =
                                         Some(settings.validated_fsd_install.current_value.clone());
                                     self.settings_dialog = None;
-                                    self.config.save(&STATIC_SETTINGS.config_path).unwrap();
+                                    self.save_config();
                                 }
                             }
                         }
@@ -657,38 +778,35 @@ impl eframe::App for App {
                                         let mods = &mut self.mods.mods;
                                         let mut i = 0;
                                         while i < mods.len() {
-                                            if {
-                                                let mut mod_ = &mut mods[i];
-                                                let remove = ui.button("x").clicked();
-                                                let name = &mod_.name.as_ref().unwrap_or(&mod_.id);
-                                                ui.add(doc_link_label(name, name));
+                                            let mut mod_ = &mut mods[i];
+                                            let remove = ui.button("x").clicked();
+                                            let name = &mod_.name.as_ref().unwrap_or(&mod_.id);
+                                            ui.add(doc_link_label(name, name));
 
-                                                let empty = "-".to_string();
+                                            let empty = "-".to_string();
 
-                                                let version =
-                                                    mod_.version.as_ref().unwrap_or(&empty);
-                                                ui.label(version);
+                                            let version = mod_.version.as_ref().unwrap_or(&empty);
+                                            ui.label(version);
 
-                                                let approval = match mod_.approval {
-                                                    Some(Approval::Verified) => "Verified",
-                                                    Some(Approval::Approved) => "Approved",
-                                                    Some(Approval::Sandbox) => "Sandbox",
-                                                    None => "-",
-                                                };
-                                                ui.label(approval);
+                                            let approval = match mod_.approval {
+                                                Some(Approval::Verified) => "Verified",
+                                                Some(Approval::Approved) => "Approved",
+                                                Some(Approval::Sandbox) => "Sandbox",
+                                                None => "-",
+                                            };
+                                            ui.label(approval);
 
-                                                let mut required =
-                                                    mod_.required.unwrap_or_default();
-                                                ui.add_enabled(
-                                                    true,
-                                                    egui::Checkbox::new(&mut required, ""),
-                                                );
-                                                mod_.required = Some(required);
+                                            let mut required = mod_.required.unwrap_or_default();
+                                            ui.add_enabled(
+                                                true,
+                                                egui::Checkbox::new(&mut required, ""),
+                                            );
+                                            mod_.required = Some(required);
 
-                                                ui.allocate_space(ui.available_size());
-                                                ui.end_row();
-                                                remove
-                                            } {
+                                            ui.allocate_space(ui.available_size());
+                                            ui.end_row();
+
+                                            if remove {
                                                 mods.remove(i);
                                             } else {
                                                 i += 1;
@@ -700,27 +818,50 @@ impl eframe::App for App {
                     ui.allocate_space(ui.available_size());
                 });
                 columns[1].group(|ui| {
-                    let action = self.mod_search.ui(
-                        ui,
-                        &self.config.settings,
-                        &self.tx,
-                        &mut self.request_counter,
-                    );
-                    match action {
-                        Some(ModSearchAction::Add(mod_)) => {
-                            self.mods.mods.push(mod_);
-                        }
-                        None => {}
-                    }
-
+                    ui.push_id(1, |ui| {
+                        self.mod_profile_editor.ui(
+                            ui,
+                            &mut self.config.mod_profiles,
+                            &mut self.config.modio_cache,
+                        );
+                    });
                     ui.allocate_space(ui.available_size());
                 });
                 columns[2].group(|ui| {
-                    for (id, mod_) in &self.modio_mod_cache {
-                        ui.label(format!("{id} {}", mod_.name));
-                    }
+                    ui.push_id(2, |ui| {
+                        let action = self.mod_search.ui(
+                            ui,
+                            &self.config.settings,
+                            &self.tx,
+                            &mut self.request_counter,
+                            &self.config.modio_cache.mods,
+                        );
+                        match action {
+                            Some(ModSearchAction::Add(mod_)) => {
+                                self.mod_profile_editor
+                                    .add_mod(&mut self.config.mod_profiles, mod_);
+                                self.save_config();
+                            }
+                            None => {}
+                        }
+                    });
                     ui.allocate_space(ui.available_size());
                 });
+                /*
+                columns[3].group(|ui| {
+                    ui.push_id(3, |ui| {
+                        egui::ScrollArea::both()
+                            .auto_shrink([false; 2])
+                            .stick_to_bottom(true)
+                            .show(ui, |ui| {
+                                for (id, mod_) in &self.config.modio_cache.mods {
+                                    ui.label(format!("{} {}", id.0, mod_.name));
+                                }
+                            });
+                    });
+                    ui.allocate_space(ui.available_size());
+                });
+                */
             });
 
             /*
@@ -766,26 +907,14 @@ fn search_modio_mods(
             .await;
         let _ = tx.send(Msg::SearchResultMods(
             rid,
-            mods_res.map_err(anyhow::Error::msg),
+            mods_res
+                .map_err(anyhow::Error::msg)
+                .map(|m| m.into_iter().map(|m| m.into()).collect()),
         ));
         ctx.request_repaint();
     });
 }
 
-fn search(name: String, tx: Sender<Msg>, ctx: egui::Context, settings: Settings) {
-    tokio::spawn(async move {
-        let mods_res = settings
-            .modio()
-            .expect("could not get modio object")
-            .game(STATIC_SETTINGS.game_id)
-            .mods()
-            .search(Name::like(format!("*{name}*")))
-            .collect()
-            .await;
-        let _ = tx.send(Msg::SearchResult(mods_res.map_err(anyhow::Error::msg)));
-        ctx.request_repaint();
-    });
-}
 fn check_key(rid: u32, key: String, tx: Sender<Msg>, ctx: egui::Context) -> u32 {
     tokio::spawn(async move {
         let r = check_key_async(key).await.map_err(anyhow::Error::msg);
@@ -805,8 +934,7 @@ async fn check_key_async(key: String) -> Result<modio::games::Game> {
 #[derive(Debug)]
 enum Msg {
     Log(String),
-    SearchResult(Result<Vec<modio::mods::Mod>>),
-    SearchResultMods(u32, Result<Vec<modio::mods::Mod>>),
+    SearchResultMods(u32, Result<Vec<ModioMod>>),
     KeyCheck(u32, Result<modio::games::Game>),
 }
 
@@ -850,7 +978,7 @@ struct Args {
     action: Action,
 }
 
-async fn run(settings: &Settings, args: ActionRun) -> Result<()> {
+async fn run(config: &mut Config, args: ActionRun) -> Result<()> {
     use std::process::Command;
     if let Some((cmd, args)) = args.args.split_first() {
         //install(&env, ActionInstall { config: None, update: false }).await?;
@@ -863,13 +991,14 @@ async fn run(settings: &Settings, args: ActionRun) -> Result<()> {
                 .wait()?;
 
             let save_buffer = std::fs::read(
-                settings
+                config
+                    .settings
                     .mod_config_save()
                     .ok_or_else(|| anyhow!("mod config save not found"))?,
             )?;
             let json = extract_config_from_save(&save_buffer)?;
             if serde_json::from_str::<Mods>(&json)?.request_sync {
-                sync(settings, ActionSync {}).await?;
+                sync(config, ActionSync {}).await?;
             } else {
                 break;
             }
@@ -881,9 +1010,10 @@ async fn run(settings: &Settings, args: ActionRun) -> Result<()> {
     Ok(())
 }
 
-async fn sync(settings: &Settings, args: ActionSync) -> Result<()> {
+async fn sync(config: &mut Config, args: ActionSync) -> Result<()> {
     let save_buffer = std::fs::read(
-        settings
+        config
+            .settings
             .mod_config_save()
             .ok_or_else(|| anyhow!("mod config save not found"))?,
     )?;
@@ -891,12 +1021,12 @@ async fn sync(settings: &Settings, args: ActionSync) -> Result<()> {
     let mods: Mods = serde_json::from_str(&json)?;
     println!("{mods:#?}");
 
-    let mod_config = install_config(settings, mods, false).await?;
+    let mod_config = install_config(config, mods, false).await?;
 
     Ok(())
 }
 
-async fn install(settings: &Settings, args: ActionInstall) -> Result<()> {
+async fn install(config: &mut Config, args: ActionInstall) -> Result<()> {
     let mods = if let Some(path) = &args.config {
         let config_path = std::path::Path::new(path);
 
@@ -910,7 +1040,7 @@ async fn install(settings: &Settings, args: ActionInstall) -> Result<()> {
     };
     println!("{mods:#?}");
 
-    let mod_config = install_config(settings, mods, args.update).await?;
+    let mod_config = install_config(config, mods, args.update).await?;
 
     if args.update {
         if let Some(path) = &args.config {
@@ -922,22 +1052,8 @@ async fn install(settings: &Settings, args: ActionInstall) -> Result<()> {
     Ok(())
 }
 
-fn mod_entry_from_modio(mod_: &modio::mods::Mod) -> Result<ModEntry> {
-    Ok(ModEntry {
-        id: mod_.id.to_string(),
-        name: Some(mod_.name.to_owned()),
-        approval: Some(get_approval(&mod_)),
-        required: Some(is_required(&mod_)),
-        version: if let Some(modfile) = &mod_.modfile {
-            Ok(Some(modfile.id.to_string()))
-        } else {
-            Err(anyhow!("mod={} does not have any modfiles", mod_.id))
-        }?,
-    })
-}
-
 async fn populate_config(
-    settings: &Settings,
+    config: &mut Config,
     mods: Mods,
     update: bool,
     mod_hashes: &mut HashMap<u32, String>,
@@ -945,41 +1061,91 @@ async fn populate_config(
     let mut config_map: indexmap::IndexMap<_, _> = mods
         .mods
         .into_iter()
-        .map(|m| (m.id.parse::<u32>().unwrap(), m))
+        .map(|m| (ModId(m.id.parse::<u32>().unwrap()), m))
         .collect();
 
-    let mut to_check: HashSet<u32> = config_map.keys().copied().collect();
+    let mut to_check: HashSet<ModId> = config_map.keys().copied().collect();
+    let mut deps_checked: HashSet<ModId> = Default::default();
 
+    // adds new empty mod to config and returns true if so
+    let add_mod = |config_map: &mut indexmap::IndexMap<ModId, ModEntry>, id: &ModId| -> bool {
+        println!("found dependency {id:?}");
+        if !config_map.contains_key(id) {
+            config_map.insert(
+                *id,
+                ModEntry {
+                    id: id.to_string(),
+                    name: None,
+                    version: None,
+                    approval: None,
+                    required: None,
+                },
+            );
+            true
+        } else {
+            false
+        }
+    };
+
+    // force update from mod.io regardless of cache
+    let u = false;
     while !to_check.is_empty() {
         println!("to check: {:?}", &to_check);
-        let mut dependency_reqs = tokio::task::JoinSet::new();
 
-        for id in to_check.iter().copied() {
-            let deps = settings
-                .modio()
-                .expect("could not create modio object")
-                .mod_(STATIC_SETTINGS.game_id, id)
-                .dependencies();
-            dependency_reqs.spawn(async move { (id, deps.list().await) });
+        let mut deps_to_check = to_check.iter().cloned().collect::<Vec<_>>();
+        let mut dependency_reqs = tokio::task::JoinSet::new();
+        while let Some(dep) = deps_to_check.pop() {
+            if !u && let Some(deps) = config.modio_cache.dependencies.get(&dep) {
+                for id in deps {
+                    if !deps_checked.contains(id) && add_mod(&mut config_map, id) {
+                        deps_to_check.push(*id);
+                        deps_checked.insert(*id);
+                        to_check.insert(*id);
+                    }
+                }
+            } else {
+                let deps = config.settings
+                    .modio()
+                    .expect("could not create modio object")
+                    .mod_(STATIC_SETTINGS.game_id, dep.0)
+                    .dependencies();
+                dependency_reqs.spawn(async move { (dep, deps.list().await) });
+            }
         }
 
-        println!("requesting mods");
-        let mods_res = settings
-            .modio()
-            .expect("could not create modio object")
-            .game(STATIC_SETTINGS.game_id)
-            .mods()
-            .search(Id::_in(to_check.iter().copied().collect::<Vec<_>>()))
-            .collect()
-            .await?;
-        to_check.clear();
-        for res in mods_res.into_iter() {
+        let ids: Vec<u32> = if u {
+            to_check.iter().map(|id| id.0).collect()
+        } else {
+            to_check
+                .iter()
+                .filter(|id| !config.modio_cache.mods.contains_key(&id))
+                .map(|id| id.0)
+                .collect()
+        };
+        if !ids.is_empty() {
+            println!("requesting mods {ids:?}");
+            let mods_res = config
+                .settings
+                .modio()
+                .expect("could not create modio object")
+                .game(STATIC_SETTINGS.game_id)
+                .mods()
+                .search(Id::_in(ids))
+                .collect()
+                .await?;
+            for mod_ in mods_res.into_iter() {
+                config.modio_cache.mods.insert(ModId(mod_.id), mod_.into());
+            }
+        }
+
+        for id in &to_check {
+            let res = config.modio_cache.mods.get(id).unwrap(); // previously inserted so shouldn't be missing
             let mut mod_config = config_map.get_mut(&res.id).unwrap();
             mod_config.name = Some(res.name.to_owned());
             mod_config.approval = Some(get_approval(&res));
             mod_config.required = Some(is_required(&res));
-            if let Some(modfile) = res.modfile {
-                mod_hashes.insert(modfile.id, modfile.filehash.md5);
+            if let Some(modfile) = &res.modfile {
+                mod_hashes.insert(modfile.id, modfile.filehash.to_owned());
                 if mod_config.version.is_none() || update {
                     mod_config.version = Some(modfile.id.to_string());
                 }
@@ -987,22 +1153,19 @@ async fn populate_config(
                 return Err(anyhow!("mod={} does not have any modfiles", mod_config.id));
             }
         }
+
+        to_check.clear();
+
         println!("requesting dependencies");
         while let Some(Ok(res)) = dependency_reqs.join_next().await {
-            for dep in res.1? {
-                println!("found dependency {dep:?}");
-                if !config_map.contains_key(&dep.mod_id) {
-                    config_map.insert(
-                        dep.mod_id,
-                        ModEntry {
-                            id: dep.mod_id.to_string(),
-                            name: None,
-                            version: None,
-                            approval: None,
-                            required: None,
-                        },
-                    );
-                    to_check.insert(dep.mod_id);
+            let deps = res.1?;
+            config
+                .modio_cache
+                .dependencies
+                .insert(res.0, deps.iter().map(|res| ModId(res.mod_id)).collect());
+            for dep in deps {
+                if add_mod(&mut config_map, &ModId(dep.mod_id)) {
+                    to_check.insert(ModId(dep.mod_id));
                 }
             }
         }
@@ -1015,11 +1178,11 @@ async fn populate_config(
 }
 
 /// Take config, validate against mod.io, install, return populated config
-async fn install_config(settings: &Settings, mods: Mods, update: bool) -> Result<Mods> {
+async fn install_config(config: &mut Config, mods: Mods, update: bool) -> Result<Mods> {
     println!("installing config={mods:#?}");
 
     let mut mod_hashes = HashMap::new();
-    let mod_config = populate_config(settings, mods, update, &mut mod_hashes).await?;
+    let mod_config = populate_config(config, mods, update, &mut mod_hashes).await?;
 
     let mut paks = vec![];
 
@@ -1037,7 +1200,8 @@ async fn install_config(settings: &Settings, mods: Mods, update: bool) -> Result
                     file_id,
                     file_path.display()
                 );
-                settings
+                config
+                    .settings
                     .modio()
                     .expect("could not create modio object")
                     .download(DownloadAction::File {
@@ -1054,7 +1218,8 @@ async fn install_config(settings: &Settings, mods: Mods, update: bool) -> Result
                 hash
             } else {
                 println!("requesting modfile={file_id}");
-                modfile = settings
+                modfile = config
+                    .settings
                     .modio()
                     .expect("could not create modio object")
                     .game(STATIC_SETTINGS.game_id)
@@ -1081,8 +1246,13 @@ async fn install_config(settings: &Settings, mods: Mods, update: bool) -> Result
     let loader = include_bytes!("../mod-integration.pak").to_vec();
     paks.push(("loader".to_string(), loader));
 
-    for entry in fs::read_dir(settings.paks_dir().expect("could not find paks directory"))
-        .expect("Unable to list")
+    for entry in fs::read_dir(
+        config
+            .settings
+            .paks_dir()
+            .expect("could not find paks directory"),
+    )
+    .expect("Unable to list")
     {
         let entry = entry.expect("unable to get entry");
         if entry.file_type()?.is_dir() {
@@ -1107,7 +1277,8 @@ async fn install_config(settings: &Settings, mods: Mods, update: bool) -> Result
             .create(true)
             .truncate(true)
             .open(
-                settings
+                config
+                    .settings
                     .paks_dir()
                     .expect("could not find paks dir")
                     .join(name),
@@ -1121,7 +1292,8 @@ async fn install_config(settings: &Settings, mods: Mods, update: bool) -> Result
         .create(true)
         .truncate(true)
         .open(
-            settings
+            config
+                .settings
                 .mod_config_save()
                 .expect("could not find mod config save"),
         )?;
@@ -1170,22 +1342,17 @@ fn get_pak_from_file(path: &Path) -> Result<Vec<u8>> {
     Err(anyhow!("Zip does not contain pak"))
 }
 
-fn get_approval(mod_: &modio::mods::Mod) -> Approval {
+fn get_approval(mod_: &ModioMod) -> Approval {
     for tag in &mod_.tags {
-        if let Ok(approval) = Approval::from_str(&tag.name) {
+        if let Ok(approval) = Approval::from_str(&tag) {
             return approval;
         }
     }
     Approval::Sandbox
 }
 
-fn is_required(mod_: &modio::mods::Mod) -> bool {
-    for tag in &mod_.tags {
-        if tag.name == "RequiredByAll" {
-            return true;
-        }
-    }
-    false
+fn is_required(mod_: &ModioMod) -> bool {
+    mod_.tags.contains(&"RequiredByAll".to_owned())
 }
 
 #[derive(Debug, Serialize, Deserialize)]
