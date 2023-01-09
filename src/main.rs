@@ -219,11 +219,11 @@ struct ModProfileEntry {
 
 impl Config {
     fn load<P: AsRef<Path>>(path: P) -> Result<Self> {
-        Ok(serde_json::from_reader::<_, Config>(File::open(path)?)?)
+        Ok(serde_json::from_reader::<_, Config>(std::io::BufReader::new(File::open(path)?))?)
     }
     fn load_or_create_default<P: AsRef<Path>>(path: P) -> Result<Self> {
         match File::open(&path) {
-            Ok(f) => Ok(serde_json::from_reader::<_, Config>(f)?),
+            Ok(f) => Ok(serde_json::from_reader(std::io::BufReader::new(f))?),
             Err(ref e) if e.kind() == std::io::ErrorKind::NotFound => {
                 let config = Config::default();
                 config.save(path)?;
@@ -233,7 +233,7 @@ impl Config {
         }
     }
     fn save<P: AsRef<Path>>(&self, path: P) -> Result<()> {
-        serde_json::to_writer_pretty(File::create(path)?, &self)?;
+        serde_json::to_writer_pretty(std::io::BufWriter::new(File::create(&path)?), &self)?;
         Ok(())
     }
 }
