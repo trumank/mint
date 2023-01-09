@@ -105,6 +105,7 @@ fn main() -> Result<()> {
                 Action::Install(args) => install(&mut config, args).await?,
                 Action::Sync(args) => sync(&mut config, args).await?,
                 Action::Run(args) => run(&mut config, args).await?,
+                Action::Info(args) => info(&mut config, args).await?,
                 Action::Gui(_) => panic!("unreachable"),
             }
             config.save(&STATIC_SETTINGS.config_path).unwrap();
@@ -956,8 +957,12 @@ struct ActionRun {
     #[arg(index = 1, trailing_var_arg = true, allow_hyphen_values = true)]
     args: Vec<String>,
 }
+
 #[derive(Parser, Debug)]
 struct ActionGui {}
+
+#[derive(Parser, Debug)]
+struct ActionInfo {}
 
 #[derive(Subcommand, Debug)]
 enum Action {
@@ -969,6 +974,8 @@ enum Action {
     Run(ActionRun),
     /// Launch GUI
     Gui(ActionGui),
+    /// Info
+    Info(ActionInfo),
 }
 
 #[derive(Parser, Debug)]
@@ -1006,7 +1013,12 @@ async fn run(config: &mut Config, args: ActionRun) -> Result<()> {
     } else {
         return Err(anyhow!("missing command"));
     }
+    Ok(())
+}
 
+async fn info(config: &mut Config, args: ActionInfo) -> Result<()> {
+    println!("data_dir: {}", STATIC_SETTINGS.data_dir.display());
+    println!("cache_dir: {}", STATIC_SETTINGS.cache_dir.display());
     Ok(())
 }
 
