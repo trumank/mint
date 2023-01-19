@@ -67,13 +67,13 @@ fn main() -> Result<()> {
     let command = Args::parse().action;
     match command {
         Action::Gui(_) => {
-            let save_buffer = std::fs::read(
+            let mut f = File::open(
                 config
                     .settings
                     .mod_config_save()
                     .expect("could not find mod config save"),
             )?;
-            let json = extract_config_from_save(&save_buffer)?;
+            let json = extract_config_from_save(&mut f)?;
             let mods: Mods = serde_json::from_str(&json)?;
 
             //let mods = Mods { mods: vec![], request_sync: false };
@@ -273,6 +273,7 @@ impl ModSearch {
         tx: &Sender<Msg>,
         rc: &mut RequestCounter,
         modio_cache: &HashMap<ModId, ModioMod>,
+        highlighted: &mut Option<Highlighted>,
     ) -> Option<ModSearchAction> {
         ui.heading("Mod.io search");
         let mut action = None;
@@ -375,7 +376,7 @@ impl ModProfileEditor {
                         //.max_col_width(200.0)
                         .striped(true)
                         .show(ui, |ui| {
-                            ui.label("remove");
+                            ui.label("");
                             ui.label("mod");
                             ui.label("approval");
                             //ui.label("approval");
@@ -467,6 +468,10 @@ impl From<modio::files::File> for ModioFile {
     }
 }
 
+enum Highlighted {
+    Mod(ModId),
+}
+
 struct App {
     tx: Sender<Msg>,
     rx: Receiver<Msg>,
@@ -476,6 +481,7 @@ struct App {
     showing_about: bool,
     settings_dialog: Option<SettingsDialog>,
     config: Config,
+    highlighted: Option<Highlighted>,
     mod_search: ModSearch,
     mod_profile_editor: ModProfileEditor,
 }
@@ -492,6 +498,7 @@ impl Default for App {
             mods: Default::default(),
             settings_dialog: None,
             showing_about: false,
+            highlighted: None,
             mod_search: Default::default(),
             mod_profile_editor: Default::default(),
         }
@@ -767,7 +774,7 @@ impl eframe::App for App {
                                     //.spacing([40.0, 4.0])
                                     .striped(true)
                                     .show(ui, |ui| {
-                                        ui.label("remove");
+                                        ui.label("");
                                         ui.label("mod");
                                         ui.label("version");
                                         ui.label("approval");
@@ -836,6 +843,7 @@ impl eframe::App for App {
                             &self.tx,
                             &mut self.request_counter,
                             &self.config.modio_cache.mods,
+                            &mut self.highlighted,
                         );
                         match action {
                             Some(ModSearchAction::Add(mod_)) => {
@@ -997,13 +1005,13 @@ async fn run(config: &mut Config, args: ActionRun) -> Result<()> {
                 .expect("failed to execute process")
                 .wait()?;
 
-            let save_buffer = std::fs::read(
+            let mut f = File::open(
                 config
                     .settings
                     .mod_config_save()
                     .ok_or_else(|| anyhow!("mod config save not found"))?,
             )?;
-            let json = extract_config_from_save(&save_buffer)?;
+            let json = extract_config_from_save(&mut f)?;
             if serde_json::from_str::<Mods>(&json)?.request_sync {
                 sync(config, ActionSync {}).await?;
             } else {
@@ -1023,13 +1031,13 @@ async fn info(config: &mut Config, args: ActionInfo) -> Result<()> {
 }
 
 async fn sync(config: &mut Config, args: ActionSync) -> Result<()> {
-    let save_buffer = std::fs::read(
+    let mut f = File::open(
         config
             .settings
             .mod_config_save()
             .ok_or_else(|| anyhow!("mod config save not found"))?,
     )?;
-    let json = extract_config_from_save(&save_buffer)?;
+    let json = extract_config_from_save(&mut f)?;
     let mods: Mods = serde_json::from_str(&json)?;
     println!("{mods:#?}");
 
@@ -1309,7 +1317,7 @@ async fn install_config(config: &mut Config, mods: Mods, update: bool) -> Result
                 .mod_config_save()
                 .expect("could not find mod config save"),
         )?;
-    out_save.write_all(&wrap_config(serde_json::to_string(&mod_config)?)?)?;
+    wrap_config(serde_json::to_string(&mod_config)?, &mut out_save)?;
 
     println!("mods installed");
 
@@ -1413,9 +1421,8 @@ impl FromStr for Approval {
     }
 }
 
-fn extract_config_from_save(buffer: &[u8]) -> Result<String> {
-    let mut save_rdr = std::io::Cursor::new(buffer);
-    let save = Save::read(&mut save_rdr)?;
+fn extract_config_from_save(file: &mut File) -> Result<String> {
+    let save = Save::read(&mut BufReader::new(file))?;
 
     if let Str { value: json, .. } = &save.root.root[0].value {
         Ok(json.to_string())
@@ -1423,16 +1430,14 @@ fn extract_config_from_save(buffer: &[u8]) -> Result<String> {
         Err(anyhow!("Malformed save file"))
     }
 }
-fn wrap_config(config: String) -> Result<Vec<u8>> {
+fn wrap_config(config: String, f: &mut File) -> Result<()> {
     let buffer = include_bytes!("../ModIntegration.sav");
     let mut save_rdr = std::io::Cursor::new(&buffer[..]);
     let mut save = Save::read(&mut save_rdr)?;
 
     if let Str { value: json, .. } = &mut save.root.root[0].value {
         *json = config;
-        let mut out_buffer = vec![];
-        save.write(&mut out_buffer)?;
-        Ok(out_buffer)
+        save.write(&mut std::io::BufWriter::new(f))
     } else {
         Err(anyhow!("Malformed save file"))
     }
