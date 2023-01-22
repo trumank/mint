@@ -1263,6 +1263,7 @@ async fn install_config(config: &mut Config, mods: Mods, update: bool) -> Result
             panic!("unreachable");
         }
     }
+    let mod_count = paks.len();
     let loader = include_bytes!("../mod-integration.pak").to_vec();
     paks.push(("loader".to_string(), loader));
 
@@ -1285,26 +1286,38 @@ async fn install_config(config: &mut Config, mods: Mods, update: bool) -> Result
         }
     }
 
-    let ar_search = "AssetRegistry.bin".as_bytes();
+    let mut out_file = std::io::BufWriter::new(OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .open(
+            config
+                .settings
+                .paks_dir()
+                .expect("could not find paks dir")
+                .join("mods_P.pak"),
+        )?);
+
+    let mount_point = PathBuf::from("../../../");
+    let mut out_pak = unpak::PakWriter::new(out_file, None, unpak::Version::V8B, String::from(mount_point.to_string_lossy()));
+
     for (id, buf) in paks {
-        let name = if contains(&buf, ar_search) {
-            format!("{id}.pak")
-        } else {
-            format!("{id}_P.pak")
-        };
-        let mut out_file = OpenOptions::new()
-            .write(true)
-            .create(true)
-            .truncate(true)
-            .open(
-                config
-                    .settings
-                    .paks_dir()
-                    .expect("could not find paks dir")
-                    .join(name),
-            )?;
-        out_file.write_all(&buf)?;
+        let mut in_pak = unpak::PakReader::new_any(std::io::Cursor::new(&buf), None)?;
+        let in_mount_point = PathBuf::from(in_pak.mount_point());
+        for file in in_pak.files() {
+            let path = in_mount_point.join(&file);
+            let filename = path.file_name().ok_or(anyhow!("failed to get asset name: {}", path.display()))?.to_string_lossy();
+            if filename == "AssetRegistry.bin" {
+                continue;
+            }
+            if filename.to_lowercase() == "initcave.uasset" || filename.to_lowercase() == "initspacerig.uasset" {
+                println!("found init asset {}", path.display());
+            }
+            let out_path = path.strip_prefix(&mount_point)?;
+            out_pak.write_file(&String::from(out_path.to_string_lossy()), &mut std::io::Cursor::new(in_pak.get(&file)?))?;
+        }
     }
+    out_pak.write_index()?;
 
     // write config to mod integration save file
     let mut out_save = OpenOptions::new()
@@ -1319,7 +1332,7 @@ async fn install_config(config: &mut Config, mods: Mods, update: bool) -> Result
         )?;
     wrap_config(serde_json::to_string(&mod_config)?, &mut out_save)?;
 
-    println!("mods installed");
+    println!("{mod_count} mods installed");
 
     Ok(mod_config)
 }
