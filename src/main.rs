@@ -67,16 +67,17 @@ fn main() -> Result<()> {
     let command = Args::parse().action;
     match command {
         Action::Gui(_) => {
-            let mut f = File::open(
+            let mods = File::open(
                 config
                     .settings
                     .mod_config_save()
                     .expect("could not find mod config save"),
-            )?;
-            let json = extract_config_from_save(&mut f)?;
-            let mods: Mods = serde_json::from_str(&json)?;
+            )
+            .ok()
+            .and_then(|mut f| extract_config_from_save(&mut f).ok())
+            .and_then(|j| serde_json::from_str(&j).ok())
+            .unwrap_or_default();
 
-            //let mods = Mods { mods: vec![], request_sync: false };
             println!("{mods:#?}");
 
             std::thread::spawn(move || {
