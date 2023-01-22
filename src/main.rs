@@ -219,11 +219,13 @@ struct ModProfileEntry {
 
 impl Config {
     fn load<P: AsRef<Path>>(path: P) -> Result<Self> {
-        Ok(serde_json::from_reader::<_, Config>(std::io::BufReader::new(File::open(path)?))?)
+        Ok(serde_json::from_reader::<_, Config>(BufReader::new(
+            File::open(path)?,
+        ))?)
     }
     fn load_or_create_default<P: AsRef<Path>>(path: P) -> Result<Self> {
         match File::open(&path) {
-            Ok(f) => Ok(serde_json::from_reader(std::io::BufReader::new(f))?),
+            Ok(f) => Ok(serde_json::from_reader(BufReader::new(f))?),
             Err(ref e) if e.kind() == std::io::ErrorKind::NotFound => {
                 let config = Config::default();
                 config.save(path)?;
@@ -1263,10 +1265,39 @@ async fn install_config(config: &mut Config, mods: Mods, update: bool) -> Result
             panic!("unreachable");
         }
     }
+
     let mod_count = paks.len();
     let loader = include_bytes!("../mod-integration.pak").to_vec();
     paks.push(("loader".to_string(), loader));
 
+    /*
+    let mut fsd_pak = unpak::PakReader::new_any(
+        BufReader::new(File::open(
+            config
+                .settings
+                .paks_dir()
+                .expect("could not find paks directory")
+                .join("FSD-WindowsNoEditor.pak"),
+        )?),
+        None,
+    )?;
+    let bytes_asset = fsd_pak.get("FSD/Content/Game/BP_PlayerControllerBase.uasset")?;
+    let bytes_exp = fsd_pak.get("FSD/Content/Game/BP_PlayerControllerBase.uexp")?;
+    let mut asset = unreal_asset::Asset::new(bytes_asset, Some(bytes_exp));
+    asset.set_engine_version(unreal_asset::engine_version::EngineVersion::VER_UE4_27);
+    asset.parse_data().unwrap();
+    for export in asset.exports {
+        if let unreal_asset::exports::Export::FunctionExport(func) = export {
+            if func.struct_export.normal_export.base_export.object_name.content == "ReceiveBeginPlay" {
+                println!("{:#?}", func);
+            }
+        }
+    }
+    */
+
+    /*
+    // no longer necessary since only a single file is changed by the integrator
+    // TODO: perhaps warn the user if any other paks are present which may conflict/crash?
     for entry in fs::read_dir(
         config
             .settings
@@ -1285,38 +1316,197 @@ async fn install_config(config: &mut Config, mods: Mods, update: bool) -> Result
             }
         }
     }
+    */
 
-    let mut out_file = std::io::BufWriter::new(OpenOptions::new()
-        .write(true)
-        .create(true)
-        .truncate(true)
-        .open(
-            config
-                .settings
-                .paks_dir()
-                .expect("could not find paks dir")
-                .join("mods_P.pak"),
-        )?);
+    let mut out_file = std::io::BufWriter::new(
+        OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .open(
+                config
+                    .settings
+                    .paks_dir()
+                    .expect("could not find paks dir")
+                    .join("mods_P.pak"),
+            )?,
+    );
 
     let mount_point = PathBuf::from("../../../");
-    let mut out_pak = unpak::PakWriter::new(out_file, None, unpak::Version::V8B, String::from(mount_point.to_string_lossy()));
+    let mut out_pak = unpak::PakWriter::new(
+        out_file,
+        None,
+        unpak::Version::V8B,
+        String::from(mount_point.to_string_lossy()),
+    );
 
+    let integrator_path_asset =
+        Path::new("../../../FSD/Content/_AssemblyStorm/ModIntegration/MI_SpawnMods.uasset");
+    let integrator_path_exp =
+        Path::new("../../../FSD/Content/_AssemblyStorm/ModIntegration/MI_SpawnMods.uexp");
+    let mut integrator_asset = None;
+    let mut integrator_exp = None;
+
+    let mut init_spacerig_assets = HashSet::new();
+    let mut init_cave_assets = HashSet::new();
     for (id, buf) in paks {
         let mut in_pak = unpak::PakReader::new_any(std::io::Cursor::new(&buf), None)?;
         let in_mount_point = PathBuf::from(in_pak.mount_point());
         for file in in_pak.files() {
             let path = in_mount_point.join(&file);
-            let filename = path.file_name().ok_or(anyhow!("failed to get asset name: {}", path.display()))?.to_string_lossy();
+            let filename = path
+                .file_name()
+                .ok_or(anyhow!("failed to get asset name: {}", path.display()))?
+                .to_string_lossy();
             if filename == "AssetRegistry.bin" {
                 continue;
             }
-            if filename.to_lowercase() == "initcave.uasset" || filename.to_lowercase() == "initspacerig.uasset" {
-                println!("found init asset {}", path.display());
+            fn format_soft_class(path: &Path) -> String {
+                let name = path.file_stem().unwrap().to_string_lossy();
+                format!(
+                    "/Game/{}{}_C",
+                    path.strip_prefix("../../../FSD/Content")
+                        .unwrap()
+                        .to_string_lossy()
+                        .strip_suffix("uasset")
+                        .unwrap(),
+                    name
+                )
             }
-            let out_path = path.strip_prefix(&mount_point)?;
-            out_pak.write_file(&String::from(out_path.to_string_lossy()), &mut std::io::Cursor::new(in_pak.get(&file)?))?;
+            if filename.to_lowercase() == "initspacerig.uasset" {
+                init_spacerig_assets.insert(format_soft_class(&path));
+            }
+            if filename.to_lowercase() == "initcave.uasset" {
+                init_cave_assets.insert(format_soft_class(&path));
+            }
+            let data = in_pak.get(&file)?;
+            if path == integrator_path_asset {
+                integrator_asset = Some(data);
+            } else if path == integrator_path_exp {
+                integrator_exp = Some(data);
+            } else {
+                let out_path = path.strip_prefix(&mount_point)?;
+                out_pak.write_file(
+                    &String::from(out_path.to_string_lossy()),
+                    &mut std::io::Cursor::new(data),
+                )?;
+            }
         }
     }
+
+    println!("found InitSpaceRig assets {:#?}", &init_spacerig_assets);
+    println!("found InitCave assets {:#?}", &init_cave_assets);
+
+    let mut asset =
+        unreal_asset::Asset::new(integrator_asset.unwrap(), Some(integrator_exp.unwrap()));
+    asset.set_engine_version(unreal_asset::engine_version::EngineVersion::VER_UE4_27);
+    asset.parse_data().unwrap();
+    let init_spacerig_fnames = init_spacerig_assets
+        .into_iter()
+        .map(|p| asset.add_fname(&p))
+        .collect::<Vec<_>>();
+    let init_cave_fnames = init_cave_assets
+        .into_iter()
+        .map(|p| asset.add_fname(&p))
+        .collect::<Vec<_>>();
+    fn find_export_named<'a>(
+        asset: &'a mut unreal_asset::Asset,
+        name: &'a str,
+    ) -> Option<&'a mut unreal_asset::exports::normal_export::NormalExport> {
+        for export in &mut asset.exports {
+            if let unreal_asset::exports::Export::NormalExport(export) = export {
+                if export.base_export.object_name.content == name {
+                    return Some(export);
+                }
+            }
+        }
+        None
+    }
+    fn find_string_property_named<'a>(
+        export: &'a mut unreal_asset::exports::normal_export::NormalExport,
+        name: &'a str,
+    ) -> Option<&'a mut unreal_asset::properties::str_property::StrProperty> {
+        for prop in &mut export.properties {
+            if let unreal_asset::properties::Property::StrProperty(prop) = prop {
+                if prop.name.content == name {
+                    return Some(prop);
+                }
+            }
+        }
+        None
+    }
+    fn find_array_property_named<'a>(
+        export: &'a mut unreal_asset::exports::normal_export::NormalExport,
+        name: &'a str,
+    ) -> Option<&'a mut unreal_asset::properties::array_property::ArrayProperty> {
+        for prop in &mut export.properties {
+            if let unreal_asset::properties::Property::ArrayProperty(prop) = prop {
+                if prop.name.content == name {
+                    return Some(prop);
+                }
+            }
+        }
+        None
+    }
+    let config_str = serde_json::to_string(&mod_config)?;
+    find_export_named(&mut asset, "Default__MI_SpawnMods_C").map(|e| {
+        find_string_property_named(e, "Config").map(|p| p.value = Some(config_str));
+        find_array_property_named(e, "SpaceRigMods").map(|p| {
+            for path in init_spacerig_fnames {
+                p.value
+                    .push(unreal_asset::properties::Property::SoftObjectProperty(
+                        unreal_asset::properties::object_property::SoftObjectProperty {
+                            name: unreal_asset::types::FName::new("0".to_owned(), -2147483648),
+                            property_guid: None,
+                            duplication_index: 0,
+                            value: unreal_asset::properties::object_property::SoftObjectPath {
+                                asset_path_name: path,
+                                sub_path_string: None,
+                            },
+                        },
+                    ));
+            }
+        });
+        find_array_property_named(e, "CaveMods").map(|p| {
+            for path in init_cave_fnames {
+                p.value
+                    .push(unreal_asset::properties::Property::SoftObjectProperty(
+                        unreal_asset::properties::object_property::SoftObjectProperty {
+                            name: unreal_asset::types::FName::new("0".to_owned(), -2147483648),
+                            property_guid: None,
+                            duplication_index: 0,
+                            value: unreal_asset::properties::object_property::SoftObjectPath {
+                                asset_path_name: path,
+                                sub_path_string: None,
+                            },
+                        },
+                    ));
+            }
+        });
+    });
+    let mut out_asset = std::io::Cursor::new(vec![]);
+    let mut out_exp = std::io::Cursor::new(vec![]);
+    asset
+        .write_data(&mut out_asset, Some(&mut out_exp))
+        .unwrap();
+
+    out_pak.write_file(
+        &String::from(
+            integrator_path_asset
+                .strip_prefix(&mount_point)?
+                .to_string_lossy(),
+        ),
+        &mut std::io::Cursor::new(out_asset.into_inner()),
+    )?;
+    out_pak.write_file(
+        &String::from(
+            integrator_path_exp
+                .strip_prefix(&mount_point)?
+                .to_string_lossy(),
+        ),
+        &mut std::io::Cursor::new(out_exp.into_inner()),
+    )?;
+
     out_pak.write_index()?;
 
     // write config to mod integration save file
@@ -1330,7 +1520,7 @@ async fn install_config(config: &mut Config, mods: Mods, update: bool) -> Result
                 .mod_config_save()
                 .expect("could not find mod config save"),
         )?;
-    wrap_config(serde_json::to_string(&mod_config)?, &mut out_save)?;
+    //wrap_config(serde_json::to_string(&mod_config)?, &mut out_save)?;
 
     println!("{mod_count} mods installed");
 
