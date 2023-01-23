@@ -1,7 +1,8 @@
 use crate::{
-    get_approval, Approval, Config, ModId, ModProfile, ModioCache, ModioMod, Mods, Name, Path,
-    Settings, STATIC_SETTINGS,
+    get_approval, Approval, Config, ModId, ModProfile, Mods, Name, Path, Settings, STATIC_SETTINGS,
 };
+
+use crate::cache::{ModioCache, ModioMod};
 
 use modio::filter::Like;
 

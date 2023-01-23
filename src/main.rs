@@ -1,6 +1,10 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 #![feature(let_chains)]
 
+mod cache;
+mod gui;
+mod integrate;
+
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::hash::Hash;
@@ -20,8 +24,7 @@ use uesave::Save;
 
 use clap::{Parser, Subcommand};
 
-mod gui;
-mod integrate;
+use crate::cache::{ModioCache, ModioMod};
 
 #[derive(Debug, Clone)]
 struct StaticSettings {
@@ -115,12 +118,6 @@ struct ModProfile {
     mods: BTreeMap<ModId, ModProfileEntry>,
 }
 
-#[derive(Debug, Default, Serialize, Deserialize)]
-struct ModioCache {
-    mods: HashMap<ModId, ModioMod>,
-    dependencies: HashMap<ModId, Vec<ModId>>,
-}
-
 // TODO "overrideable" struct field? (version, required)
 #[derive(Debug, Default, Serialize, Deserialize)]
 struct ModProfileEntry {
@@ -170,7 +167,7 @@ impl Settings {
 #[serde_with::serde_as]
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Hash, Ord, PartialOrd, Serialize, Deserialize)]
 // TODO define similar struct for Files
-struct ModId(#[serde_as(as = "serde_with::DisplayFromStr")] u32);
+pub struct ModId(#[serde_as(as = "serde_with::DisplayFromStr")] u32);
 
 impl std::fmt::Display for ModId {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
@@ -183,42 +180,6 @@ impl FromStr for ModId {
 
     fn from_str(s: &str) -> Result<Self> {
         Ok(ModId(s.parse::<u32>()?))
-    }
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-struct ModioMod {
-    id: ModId,
-    name: String,
-    tags: Vec<String>,
-    modfile: Option<ModioFile>,
-    url: url::Url,
-}
-
-impl From<modio::mods::Mod> for ModioMod {
-    fn from(value: modio::mods::Mod) -> Self {
-        ModioMod {
-            id: ModId(value.id),
-            name: value.name,
-            tags: value.tags.into_iter().map(|t| t.name).collect(),
-            modfile: value.modfile.map(|f| f.into()),
-            url: value.profile_url,
-        }
-    }
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-struct ModioFile {
-    id: u32,
-    filehash: String,
-}
-
-impl From<modio::files::File> for ModioFile {
-    fn from(value: modio::files::File) -> Self {
-        ModioFile {
-            id: value.id,
-            filehash: value.filehash.md5,
-        }
     }
 }
 
@@ -439,10 +400,10 @@ async fn populate_config(
             mod_config.name = Some(res.name.to_owned());
             mod_config.approval = Some(get_approval(res));
             mod_config.required = Some(is_required(res));
-            if let Some(modfile) = &res.modfile {
-                mod_hashes.insert(modfile.id, modfile.filehash.to_owned());
+            if let Some((&id, modfile)) = &res.versions.iter().next_back() {
+                mod_hashes.insert(id, modfile.filehash.to_owned());
                 if mod_config.version.is_none() || update {
-                    mod_config.version = Some(modfile.id.to_string());
+                    mod_config.version = Some(id.to_string());
                 }
             } else {
                 return Err(anyhow!("mod={} does not have any modfiles", mod_config.id));
