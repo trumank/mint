@@ -1,0 +1,26 @@
+[package]
+name = "drg-mod-integration"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+anyhow = "1.0.68"
+clap = { version = "4.0.32", features = ["derive"] }
+dirs = "4.0.0"
+eframe = "0.20.1"
+egui = "0.20.1"
+hex = "0.4.3"
+indexmap = "1.9.2"
+lazy_static = "1.4.0"
+md-5 = "0.10.5"
+modio = "0.7.1"
+opener = "0.5.0"
+serde = { version = "1.0.151", features = ["derive"] }
+serde_json = "1.0.91"
+serde_with = "2.1.0"
+tokio = { version = "1.23.0", features = ["full"] }
+uesave = { git = "https://github.com/trumank/uesave-rs.git", version = "0.1.0" }
+unpak = { version = "0.2.0", git = "https://github.com/trumank/unpak.git" }
+unreal_asset = { git = "https://github.com/astrotechies/unrealmodding", package = "unreal_asset" }
+url = "2.3.1"
+zip = { version = "0.6.3", default-features = false, features = ["aes-crypto", "deflate", "time"] }
