@@ -5,16 +5,14 @@ use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::hash::Hash;
 
-use anyhow::anyhow;
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 
-use std::fs::{self, File, OpenOptions};
+use std::fs::{self, File};
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 
-use std::io::{BufReader, Read, Write};
+use std::io::{BufReader, Read};
 
-use modio::download::DownloadAction;
 use modio::filter::prelude::*;
 
 use uesave::PropertyMeta::Str;
@@ -22,9 +20,8 @@ use uesave::Save;
 
 use clap::{Parser, Subcommand};
 
-use std::sync::mpsc::{Receiver, Sender};
-
-use eframe::egui;
+mod gui;
+mod integrate;
 
 #[derive(Debug, Clone)]
 struct StaticSettings {
@@ -83,23 +80,7 @@ fn main() -> Result<()> {
             std::thread::spawn(move || {
                 rt.block_on(std::future::pending::<()>());
             });
-            let options = eframe::NativeOptions {
-                initial_window_size: Some(egui::vec2(500.0, 300.0)),
-                min_window_size: Some(egui::vec2(500.0, 300.0)),
-                ..Default::default()
-            };
-            eframe::run_native(
-                "DRG Mod Integration",
-                options,
-                Box::new(|_cc| {
-                    Box::new(App {
-                        config,
-                        mods,
-                        ..Default::default()
-                    })
-                }),
-            );
-            Ok(())
+            gui::launch_gui(config, mods)
         }
         _ => rt.block_on(async {
             match command {
@@ -115,76 +96,9 @@ fn main() -> Result<()> {
     }
 }
 
-#[derive(Default)]
-struct RequestCounter(u32);
-
-impl RequestCounter {
-    fn next(&mut self) -> u32 {
-        let id = self.0;
-        self.0 += 1;
-        id
-    }
-}
-
-#[derive(Debug)]
-struct ValidatedSetting<T: std::cmp::PartialEq + std::clone::Clone> {
-    current_value: T,
-    validated_value: T,
-    validation_result: Result<(), String>,
-}
-
-impl<T> ValidatedSetting<T>
-where
-    T: std::cmp::PartialEq + std::clone::Clone,
-{
-    /// Create new validated setting that defaults to valid
-    fn new(value: T) -> Self {
-        ValidatedSetting {
-            current_value: value.clone(),
-            validated_value: value,
-            validation_result: Ok(()),
-        }
-    }
-    /// Returns whether the current value is the same as the validated value
-    fn is_modified(&self) -> bool {
-        self.current_value != self.validated_value
-    }
-    /// Sets the result of validation and updates the validated value
-    fn set_validation_result(&mut self, result: Result<(), String>) {
-        self.validated_value = self.current_value.clone();
-        self.validation_result = result;
-    }
-    /// Get validation error if unmodified and exists
-    fn get_err(&self) -> Option<&String> {
-        match &self.validation_result {
-            Ok(_) => None,
-            Err(msg) => {
-                if self.is_modified() {
-                    None
-                } else {
-                    Some(msg)
-                }
-            }
-        }
-    }
-    /// Returns whether the value is unmodified and if it is valid
-    fn is_valid(&self) -> bool {
-        match &self.validation_result {
-            Ok(_) => !self.is_modified(),
-            Err(_) => false,
-        }
-    }
-}
-
-struct SettingsDialog {
-    validated_key: ValidatedSetting<String>,
-    validation_rid: Option<u32>,
-    validated_fsd_install: ValidatedSetting<String>,
-}
-
 #[derive(Debug, Default, Serialize, Deserialize)]
 #[serde(default)]
-struct Config {
+pub struct Config {
     settings: Settings,
     mod_profiles: HashMap<String, ModProfile>,
     modio_cache: ModioCache,
@@ -219,11 +133,6 @@ struct ModProfileEntry {
 }
 
 impl Config {
-    fn load<P: AsRef<Path>>(path: P) -> Result<Self> {
-        Ok(serde_json::from_reader::<_, Config>(BufReader::new(
-            File::open(path)?,
-        ))?)
-    }
     fn load_or_create_default<P: AsRef<Path>>(path: P) -> Result<Self> {
         match File::open(&path) {
             Ok(f) => Ok(serde_json::from_reader(BufReader::new(f))?),
@@ -255,164 +164,6 @@ impl Settings {
         self.modio_key
             .as_ref()
             .and_then(|k| modio::Modio::new(modio::Credentials::new(k)).ok())
-    }
-}
-
-#[derive(Default)]
-struct ModSearch {
-    query: String,
-    search_results: Option<Result<Vec<ModId>>>,
-    search_rid: Option<u32>,
-}
-enum ModSearchAction {
-    Add(ModId),
-}
-impl ModSearch {
-    #[must_use]
-    fn ui(
-        &mut self,
-        ui: &mut egui::Ui,
-        settings: &Settings,
-        tx: &Sender<Msg>,
-        rc: &mut RequestCounter,
-        modio_cache: &HashMap<ModId, ModioMod>,
-        highlighted: &mut Option<Highlighted>,
-    ) -> Option<ModSearchAction> {
-        ui.heading("Mod.io search");
-        let mut action = None;
-        let search_res = ui.add_enabled(
-            true, //self.search_rid.is_none(),
-            egui::TextEdit::singleline(&mut self.query).hint_text("Search mods..."),
-        );
-        if is_committed(&search_res) {
-            search_res.request_focus();
-            let id = rc.next();
-            search_modio_mods(
-                id,
-                self.query.clone(),
-                tx.clone(),
-                ui.ctx().clone(),
-                settings.clone(),
-            );
-            self.search_rid = Some(id);
-        }
-        if self.search_rid.is_some() {
-            ui.spinner();
-        }
-        egui::ScrollArea::both()
-            .auto_shrink([false, true])
-            .show(ui, |ui| {
-                egui::Grid::new("search_results")
-                    .num_columns(4)
-                    //.max_col_width(200.0)
-                    .striped(true)
-                    .show(ui, |ui| {
-                        ui.label("add");
-                        ui.label("mod");
-                        ui.label("approval");
-                        ui.end_row();
-
-                        if let Some(results) = &self.search_results {
-                            match results {
-                                Ok(mods) => {
-                                    for id in mods {
-                                        let mod_ = modio_cache.get(id).unwrap();
-                                        if ui.button("<-").clicked() {
-                                            action = Some(ModSearchAction::Add(*id));
-                                        }
-                                        ui.hyperlink_to(&mod_.name, &mod_.url);
-                                        ui.label(match get_approval(mod_) {
-                                            Approval::Verified => "Verified",
-                                            Approval::Approved => "Approved",
-                                            Approval::Sandbox => "Sandbox",
-                                            // TODO auto verified
-                                        });
-                                        ui.allocate_space(ui.available_size());
-                                        ui.end_row();
-                                    }
-                                }
-                                Err(err) => {
-                                    ui.colored_label(ui.visuals().error_fg_color, err.to_string());
-                                }
-                            }
-                        }
-                    });
-            });
-        action
-    }
-    fn receive(&mut self, rid: u32, res: Result<Vec<ModId>>) {
-        if let Some(id) = self.search_rid {
-            if id == rid {
-                self.search_results = Some(res);
-                self.search_rid = None;
-            }
-        }
-    }
-}
-
-#[derive(Default)]
-struct ModProfileEditor {
-    selected_profile: Option<String>,
-}
-impl ModProfileEditor {
-    fn ui(
-        &mut self,
-        ui: &mut egui::Ui,
-        mod_profiles: &mut HashMap<String, ModProfile>,
-        modio_cache: &mut ModioCache,
-    ) {
-        ui.heading("Profile editor");
-        egui::ScrollArea::both()
-            .auto_shrink([false, true])
-            .show(ui, |ui| {
-                ui.horizontal(|ui| {
-                    for profile in mod_profiles.keys() {
-                        let selected = Some(profile) == self.selected_profile.as_ref();
-                        if ui.selectable_label(selected, profile).clicked() {
-                            self.selected_profile = if selected { None } else { Some(profile.to_owned()) };
-                        }
-                    }
-                });
-                if let Some(selected_profile) = &self.selected_profile && let Some(profile) = mod_profiles.get_mut(selected_profile) {
-                    egui::Grid::new("mod_profile_editor")
-                        .num_columns(4)
-                        //.max_col_width(200.0)
-                        .striped(true)
-                        .show(ui, |ui| {
-                            ui.label("");
-                            ui.label("mod");
-                            ui.label("approval");
-                            //ui.label("approval");
-                            ui.end_row();
-
-                            let mut to_remove = vec![];
-                            for (id, mod_) in &profile.mods {
-                                if ui.button("x").clicked() {
-                                    to_remove.push(*id);
-                                }
-                                if let Some(modio) = modio_cache.mods.get(id) {
-                                    ui.hyperlink_to(&modio.name, &modio.url);
-                                    ui.label(match get_approval(modio) {
-                                        Approval::Verified => "Verified",
-                                        Approval::Approved => "Approved",
-                                        Approval::Sandbox => "Sandbox",
-                                        // TODO auto verified
-                                    });
-                                }
-                                ui.allocate_space(ui.available_size());
-                                ui.end_row();
-                            }
-                            for id in to_remove {
-                                profile.mods.remove(&id);
-                            }
-                        });
-                }
-            });
-    }
-    fn add_mod(&mut self, mod_profiles: &mut HashMap<String, ModProfile>, mod_id: ModId) {
-        if let Some(selected_profile) = &self.selected_profile && let Some(profile) = mod_profiles.get_mut(selected_profile) {
-            profile.mods.insert(mod_id, Default::default());
-        }
     }
 }
 
@@ -469,485 +220,6 @@ impl From<modio::files::File> for ModioFile {
             filehash: value.filehash.md5,
         }
     }
-}
-
-enum Highlighted {
-    Mod(ModId),
-}
-
-struct App {
-    tx: Sender<Msg>,
-    rx: Receiver<Msg>,
-    request_counter: RequestCounter,
-    log: String,
-    mods: Mods,
-    showing_about: bool,
-    settings_dialog: Option<SettingsDialog>,
-    config: Config,
-    highlighted: Option<Highlighted>,
-    mod_search: ModSearch,
-    mod_profile_editor: ModProfileEditor,
-}
-
-impl Default for App {
-    fn default() -> Self {
-        let (tx, rx) = std::sync::mpsc::channel();
-        App {
-            tx,
-            rx,
-            request_counter: Default::default(),
-            log: "".to_owned(),
-            config: Default::default(),
-            mods: Default::default(),
-            settings_dialog: None,
-            showing_about: false,
-            highlighted: None,
-            mod_search: Default::default(),
-            mod_profile_editor: Default::default(),
-        }
-    }
-}
-
-fn is_committed(res: &egui::Response) -> bool {
-    res.lost_focus() && res.ctx.input().key_pressed(egui::Key::Enter)
-}
-
-fn is_valid_fsd_install(path: &String) -> bool {
-    Path::exists(&Path::new(path).join("FSD/Content/Paks/FSD-WindowsNoEditor.pak"))
-}
-
-impl App {
-    fn about_dialog(&mut self, ui: &mut egui::Ui) {
-        if ui.button("About").clicked() {
-            self.showing_about = true;
-        }
-        if self.showing_about {
-            egui::Window::new("About")
-                .auto_sized()
-                .collapsible(false)
-                .open(&mut self.showing_about)
-                .show(ui.ctx(), |ui| {
-                    ui.heading(format!(
-                        "DRG Mod Integration v{}",
-                        env!("CARGO_PKG_VERSION")
-                    ));
-
-                    ui.horizontal(|ui| {
-                        ui.label("data dir:");
-                        if ui
-                            .link(STATIC_SETTINGS.data_dir.display().to_string())
-                            .clicked()
-                        {
-                            opener::open(&STATIC_SETTINGS.data_dir).ok();
-                        }
-                    });
-                    ui.horizontal(|ui| {
-                        ui.label("cache dir:");
-                        if ui
-                            .link(STATIC_SETTINGS.cache_dir.display().to_string())
-                            .clicked()
-                        {
-                            opener::open(&STATIC_SETTINGS.cache_dir).ok();
-                        }
-                    });
-                });
-        }
-    }
-    fn settings_dialog(&mut self, ui: &mut egui::Ui) {
-        if ui.button("Settings").clicked() {
-            self.settings_dialog = Some(SettingsDialog {
-                validated_key: ValidatedSetting::new(
-                    self.config
-                        .settings
-                        .modio_key
-                        .as_ref()
-                        .map_or_else(|| "".to_string(), |p| p.clone()),
-                ),
-                validation_rid: None,
-                validated_fsd_install: ValidatedSetting::new(
-                    self.config
-                        .settings
-                        .fsd_install
-                        .as_ref()
-                        .map_or_else(|| "".to_string(), |p| p.clone()),
-                ),
-            });
-        }
-        let (rc, settings) = (&mut self.request_counter, &mut self.settings_dialog);
-        if let Some(settings) = settings {
-            let mut open = true;
-            let mut try_save = false;
-            egui::Window::new("Settings")
-                .auto_sized()
-                .collapsible(false)
-                .open(&mut open)
-                .show(ui.ctx(), |ui| {
-                    egui::Grid::new("settings_grid")
-                        .num_columns(2)
-                        .show(ui, |ui| {
-                            // modio API key
-                            let label =
-                                ui.hyperlink_to("mod.io API key:", "https://mod.io/me/access#api");
-                            ui.add_enabled_ui(settings.validation_rid.is_none(), |ui| {
-                                let color = if !settings.validated_key.is_modified() {
-                                    match &settings.validated_key.validation_result {
-                                        Ok(_) => Some(egui::Color32::GREEN),
-                                        Err(_) => Some(egui::Color32::RED),
-                                    }
-                                } else {
-                                    None
-                                };
-                                let mut key_box = egui::TextEdit::singleline(
-                                    &mut settings.validated_key.current_value,
-                                )
-                                .password(true);
-                                if let Some(color) = color {
-                                    key_box = key_box.text_color(color);
-                                }
-                                let mut key_box_res = ui.add(key_box).labelled_by(label.id);
-
-                                key_box_res = if let Some(err) = settings.validated_key.get_err() {
-                                    key_box_res.on_hover_ui(|ui| {
-                                        ui.horizontal_wrapped(|ui| {
-                                            ui.colored_label(ui.visuals().error_fg_color, err);
-                                        });
-                                    })
-                                } else {
-                                    key_box_res
-                                };
-
-                                if is_committed(&key_box_res) {
-                                    try_save = true;
-                                }
-                            });
-                            ui.end_row();
-
-                            // fsd_install
-                            let fsd_install_label = ui.label("DRG install: ");
-                            let color = if !settings.validated_fsd_install.is_modified() {
-                                match &settings.validated_fsd_install.validation_result {
-                                    Ok(_) => Some(egui::Color32::GREEN),
-                                    Err(_) => Some(egui::Color32::RED),
-                                }
-                            } else {
-                                None
-                            };
-                            let mut fsd_path_box = egui::TextEdit::singleline(
-                                &mut settings.validated_fsd_install.current_value,
-                            );
-                            if let Some(color) = color {
-                                fsd_path_box = fsd_path_box.text_color(color);
-                            }
-                            let mut fsd_path_box_res =
-                                ui.add(fsd_path_box).labelled_by(fsd_install_label.id);
-                            fsd_path_box_res =
-                                if let Some(err) = settings.validated_fsd_install.get_err() {
-                                    fsd_path_box_res.on_hover_ui(|ui| {
-                                        ui.horizontal_wrapped(|ui| {
-                                            ui.colored_label(ui.visuals().error_fg_color, err);
-                                        });
-                                    })
-                                } else {
-                                    fsd_path_box_res
-                                };
-                            if is_committed(&fsd_path_box_res) {
-                                try_save = true;
-                            }
-                            ui.end_row();
-
-                            ui.horizontal(|ui| {
-                                ui.set_enabled(
-                                    settings.validated_key.get_err().is_none()
-                                        && settings.validated_fsd_install.get_err().is_none(),
-                                );
-                                if ui.button("Save").clicked() {
-                                    try_save = true;
-                                }
-                                if settings.validation_rid.is_some() {
-                                    ui.spinner();
-                                }
-                            });
-
-                            if try_save {
-                                settings.validation_rid = Some(check_key(
-                                    rc.next(),
-                                    settings.validated_key.current_value.clone(),
-                                    self.tx.clone(),
-                                    ui.ctx().clone(),
-                                ));
-                                settings.validated_fsd_install.set_validation_result(
-                                    if is_valid_fsd_install(
-                                        &settings.validated_fsd_install.current_value,
-                                    ) {
-                                        Ok(())
-                                    } else {
-                                        Err("not valid because reasons".to_owned())
-                                    },
-                                );
-                            }
-                        });
-                });
-            if !open {
-                self.settings_dialog = None;
-            }
-        }
-    }
-}
-
-impl App {
-    fn save_config(&self) {
-        self.config.save(&STATIC_SETTINGS.config_path).unwrap();
-    }
-}
-
-impl eframe::App for App {
-    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        let mut log = |msg: String| {
-            println!("{msg}");
-            self.log.push_str(&format!("\n{msg}"));
-        };
-        if let Ok(msg) = self.rx.try_recv() {
-            match msg {
-                Msg::Log(msg) => log(msg),
-                Msg::SearchResultMods(rid, mods_res) => {
-                    self.mod_search.receive(
-                        rid,
-                        mods_res.map(|mods| {
-                            mods.into_iter()
-                                .map(|m| {
-                                    let id = m.id;
-                                    self.config.modio_cache.mods.insert(id, m);
-                                    id
-                                })
-                                .collect::<Vec<_>>()
-                        }),
-                    );
-                    self.save_config();
-                }
-                Msg::KeyCheck(rid, res) => {
-                    if let Some(settings) = &mut self.settings_dialog {
-                        if let Some(srid) = settings.validation_rid {
-                            if srid == rid {
-                                settings.validation_rid = None;
-                                match res {
-                                    Ok(_) => {
-                                        settings.validated_key.set_validation_result(Ok(()));
-                                    }
-                                    Err(err) => {
-                                        settings
-                                            .validated_key
-                                            .set_validation_result(Err(err.to_string()));
-                                    }
-                                }
-                                if settings.validated_key.is_valid()
-                                    && settings.validated_fsd_install.is_valid()
-                                {
-                                    self.config.settings.modio_key =
-                                        Some(settings.validated_key.current_value.clone());
-                                    self.config.settings.fsd_install =
-                                        Some(settings.validated_fsd_install.current_value.clone());
-                                    self.settings_dialog = None;
-                                    self.save_config();
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        egui::CentralPanel::default().show(ctx, |ui| {
-            ui.horizontal(|ui| {
-                ui.heading("DRG Mod Integration");
-                self.about_dialog(ui);
-                self.settings_dialog(ui);
-            });
-
-            ui.separator();
-
-            ui.columns(3, |columns| {
-                columns[0].group(|ui| {
-                    ui.push_id(0, |ui| {
-                        ui.heading("Loaded mods");
-                        egui::ScrollArea::both()
-                            .auto_shrink([false, true])
-                            .show(ui, |ui| {
-                                egui::Grid::new("my_grid")
-                                    .num_columns(6)
-                                    //.spacing([40.0, 4.0])
-                                    .striped(true)
-                                    .show(ui, |ui| {
-                                        ui.label("");
-                                        ui.label("mod");
-                                        ui.label("version");
-                                        ui.label("approval");
-                                        ui.label("required");
-                                        ui.end_row();
-
-                                        //for mod_ in &mut self.mods.mods {
-                                        //self.mods.mods.drain_filter(|mod_| {
-                                        let mods = &mut self.mods.mods;
-                                        let mut i = 0;
-                                        while i < mods.len() {
-                                            let mut mod_ = &mut mods[i];
-                                            let remove = ui.button("x").clicked();
-                                            let name = &mod_.name.as_ref().unwrap_or(&mod_.id);
-                                            ui.add(doc_link_label(name, name));
-
-                                            let empty = "-".to_string();
-
-                                            let version = mod_.version.as_ref().unwrap_or(&empty);
-                                            ui.label(version);
-
-                                            let approval = match mod_.approval {
-                                                Some(Approval::Verified) => "Verified",
-                                                Some(Approval::Approved) => "Approved",
-                                                Some(Approval::Sandbox) => "Sandbox",
-                                                None => "-",
-                                            };
-                                            ui.label(approval);
-
-                                            let mut required = mod_.required.unwrap_or_default();
-                                            ui.add_enabled(
-                                                true,
-                                                egui::Checkbox::new(&mut required, ""),
-                                            );
-                                            mod_.required = Some(required);
-
-                                            ui.allocate_space(ui.available_size());
-                                            ui.end_row();
-
-                                            if remove {
-                                                mods.remove(i);
-                                            } else {
-                                                i += 1;
-                                            }
-                                        }
-                                    });
-                            });
-                    });
-                    ui.allocate_space(ui.available_size());
-                });
-                columns[1].group(|ui| {
-                    ui.push_id(1, |ui| {
-                        self.mod_profile_editor.ui(
-                            ui,
-                            &mut self.config.mod_profiles,
-                            &mut self.config.modio_cache,
-                        );
-                    });
-                    ui.allocate_space(ui.available_size());
-                });
-                columns[2].group(|ui| {
-                    ui.push_id(2, |ui| {
-                        let action = self.mod_search.ui(
-                            ui,
-                            &self.config.settings,
-                            &self.tx,
-                            &mut self.request_counter,
-                            &self.config.modio_cache.mods,
-                            &mut self.highlighted,
-                        );
-                        match action {
-                            Some(ModSearchAction::Add(mod_)) => {
-                                self.mod_profile_editor
-                                    .add_mod(&mut self.config.mod_profiles, mod_);
-                                self.save_config();
-                            }
-                            None => {}
-                        }
-                    });
-                    ui.allocate_space(ui.available_size());
-                });
-                /*
-                columns[3].group(|ui| {
-                    ui.push_id(3, |ui| {
-                        egui::ScrollArea::both()
-                            .auto_shrink([false; 2])
-                            .stick_to_bottom(true)
-                            .show(ui, |ui| {
-                                for (id, mod_) in &self.config.modio_cache.mods {
-                                    ui.label(format!("{} {}", id.0, mod_.name));
-                                }
-                            });
-                    });
-                    ui.allocate_space(ui.available_size());
-                });
-                */
-            });
-
-            /*
-            ui.push_id(1, |ui| {
-                egui::ScrollArea::vertical()
-                    .auto_shrink([false; 2])
-                    .stick_to_bottom(true)
-                    .show(ui, |ui| ui.label(&self.log));
-            });
-            */
-        });
-    }
-}
-
-fn doc_link_label<'a>(title: &'a str, search_term: &'a str) -> impl egui::Widget + 'a {
-    let label = format!("{title}:");
-    let url = format!("https://drg.old.mod.io/?filter=t&kw={search_term}");
-    move |ui: &mut egui::Ui| {
-        ui.hyperlink_to(label, url).on_hover_ui(|ui| {
-            ui.horizontal_wrapped(|ui| {
-                ui.label("Search egui docs for");
-                ui.code(search_term);
-            });
-        })
-    }
-}
-
-fn search_modio_mods(
-    rid: u32,
-    query: String,
-    tx: Sender<Msg>,
-    ctx: egui::Context,
-    settings: Settings,
-) {
-    tokio::spawn(async move {
-        let mods_res = settings
-            .modio()
-            .expect("could not get modio object")
-            .game(STATIC_SETTINGS.game_id)
-            .mods()
-            .search(Name::like(format!("*{query}*")))
-            .collect()
-            .await;
-        let _ = tx.send(Msg::SearchResultMods(
-            rid,
-            mods_res
-                .map_err(anyhow::Error::msg)
-                .map(|m| m.into_iter().map(|m| m.into()).collect()),
-        ));
-        ctx.request_repaint();
-    });
-}
-
-fn check_key(rid: u32, key: String, tx: Sender<Msg>, ctx: egui::Context) -> u32 {
-    tokio::spawn(async move {
-        let r = check_key_async(key).await.map_err(anyhow::Error::msg);
-        let _ = tx.send(Msg::KeyCheck(rid, r));
-        ctx.request_repaint();
-    });
-    rid
-}
-
-async fn check_key_async(key: String) -> Result<modio::games::Game> {
-    Ok(modio::Modio::new(modio::Credentials::new(key))?
-        .game(STATIC_SETTINGS.game_id)
-        .get()
-        .await?)
-}
-
-#[derive(Debug)]
-enum Msg {
-    Log(String),
-    SearchResultMods(u32, Result<Vec<ModioMod>>),
-    KeyCheck(u32, Result<modio::games::Game>),
 }
 
 #[derive(Parser, Debug)]
@@ -1027,13 +299,13 @@ async fn run(config: &mut Config, args: ActionRun) -> Result<()> {
     Ok(())
 }
 
-async fn info(config: &mut Config, args: ActionInfo) -> Result<()> {
+async fn info(_config: &mut Config, _args: ActionInfo) -> Result<()> {
     println!("data_dir: {}", STATIC_SETTINGS.data_dir.display());
     println!("cache_dir: {}", STATIC_SETTINGS.cache_dir.display());
     Ok(())
 }
 
-async fn sync(config: &mut Config, args: ActionSync) -> Result<()> {
+async fn sync(config: &mut Config, _args: ActionSync) -> Result<()> {
     let mut f = File::open(
         config
             .settings
@@ -1044,7 +316,7 @@ async fn sync(config: &mut Config, args: ActionSync) -> Result<()> {
     let mods: Mods = serde_json::from_str(&json)?;
     println!("{mods:#?}");
 
-    let mod_config = install_config(config, mods, false).await?;
+    let _mod_config = integrate::install_config(config, mods, false).await?;
 
     Ok(())
 }
@@ -1063,7 +335,7 @@ async fn install(config: &mut Config, args: ActionInstall) -> Result<()> {
     };
     println!("{mods:#?}");
 
-    let mod_config = install_config(config, mods, args.update).await?;
+    let mod_config = integrate::install_config(config, mods, args.update).await?;
 
     if args.update {
         if let Some(path) = &args.config {
@@ -1141,7 +413,7 @@ async fn populate_config(
         } else {
             to_check
                 .iter()
-                .filter(|id| !config.modio_cache.mods.contains_key(&id))
+                .filter(|id| !config.modio_cache.mods.contains_key(id))
                 .map(|id| id.0)
                 .collect()
         };
@@ -1165,8 +437,8 @@ async fn populate_config(
             let res = config.modio_cache.mods.get(id).unwrap(); // previously inserted so shouldn't be missing
             let mut mod_config = config_map.get_mut(&res.id).unwrap();
             mod_config.name = Some(res.name.to_owned());
-            mod_config.approval = Some(get_approval(&res));
-            mod_config.required = Some(is_required(&res));
+            mod_config.approval = Some(get_approval(res));
+            mod_config.required = Some(is_required(res));
             if let Some(modfile) = &res.modfile {
                 mod_hashes.insert(modfile.id, modfile.filehash.to_owned());
                 if mod_config.version.is_none() || update {
@@ -1200,346 +472,6 @@ async fn populate_config(
     })
 }
 
-/// Take config, validate against mod.io, install, return populated config
-async fn install_config(config: &mut Config, mods: Mods, update: bool) -> Result<Mods> {
-    println!("installing config={mods:#?}");
-
-    let mut mod_hashes = HashMap::new();
-    let mod_config = populate_config(config, mods, update, &mut mod_hashes).await?;
-
-    let mut paks = vec![];
-
-    fs::create_dir(&STATIC_SETTINGS.mod_cache_dir).ok();
-
-    for entry in &mod_config.mods {
-        let mod_id = entry.id.parse::<u32>()?;
-        if let Some(version) = &entry.version {
-            let file_id = version.parse::<u32>()?;
-            let file_path = &STATIC_SETTINGS.mod_cache_dir.join(format!("{file_id}.zip"));
-            if !file_path.exists() {
-                println!(
-                    "downloading mod={} version={} path={}",
-                    mod_id,
-                    file_id,
-                    file_path.display()
-                );
-                config
-                    .settings
-                    .modio()
-                    .expect("could not create modio object")
-                    .download(DownloadAction::File {
-                        game_id: STATIC_SETTINGS.game_id,
-                        mod_id,
-                        file_id,
-                    })
-                    .save_to_file(&file_path)
-                    .await?;
-            }
-
-            let modfile;
-            let hash = if let Some(hash) = mod_hashes.get(&file_id) {
-                hash
-            } else {
-                println!("requesting modfile={file_id}");
-                modfile = config
-                    .settings
-                    .modio()
-                    .expect("could not create modio object")
-                    .game(STATIC_SETTINGS.game_id)
-                    .mod_(mod_id)
-                    .file(file_id)
-                    .get()
-                    .await?;
-                &modfile.filehash.md5
-            };
-
-            use md5::{Digest, Md5};
-            let mut hasher = Md5::new();
-            std::io::copy(&mut File::open(file_path)?, &mut hasher)?;
-            let local_hash = hex::encode(hasher.finalize());
-            println!("checking file hash modio={hash} local={local_hash}");
-            assert_eq!(hash, &local_hash);
-
-            let buf = get_pak_from_file(file_path)?;
-            paks.push((format!("{mod_id}"), buf));
-        } else {
-            panic!("unreachable");
-        }
-    }
-
-    let mod_count = paks.len();
-    let loader = include_bytes!("../mod-integration.pak").to_vec();
-    paks.push(("loader".to_string(), loader));
-
-    /*
-    let mut fsd_pak = unpak::PakReader::new_any(
-        BufReader::new(File::open(
-            config
-                .settings
-                .paks_dir()
-                .expect("could not find paks directory")
-                .join("FSD-WindowsNoEditor.pak"),
-        )?),
-        None,
-    )?;
-    let bytes_asset = fsd_pak.get("FSD/Content/Game/BP_PlayerControllerBase.uasset")?;
-    let bytes_exp = fsd_pak.get("FSD/Content/Game/BP_PlayerControllerBase.uexp")?;
-    let mut asset = unreal_asset::Asset::new(bytes_asset, Some(bytes_exp));
-    asset.set_engine_version(unreal_asset::engine_version::EngineVersion::VER_UE4_27);
-    asset.parse_data().unwrap();
-    for export in asset.exports {
-        if let unreal_asset::exports::Export::FunctionExport(func) = export {
-            if func.struct_export.normal_export.base_export.object_name.content == "ReceiveBeginPlay" {
-                println!("{:#?}", func);
-            }
-        }
-    }
-    */
-
-    /*
-    // no longer necessary since only a single file is changed by the integrator
-    // TODO: perhaps warn the user if any other paks are present which may conflict/crash?
-    for entry in fs::read_dir(
-        config
-            .settings
-            .paks_dir()
-            .expect("could not find paks directory"),
-    )
-    .expect("Unable to list")
-    {
-        let entry = entry.expect("unable to get entry");
-        if entry.file_type()?.is_dir() {
-            continue;
-        };
-        if let Some(name) = entry.file_name().to_str() {
-            if name.ends_with(".pak") && name != "FSD-WindowsNoEditor.pak" {
-                fs::remove_file(entry.path())?;
-            }
-        }
-    }
-    */
-
-    let mut out_file = std::io::BufWriter::new(
-        OpenOptions::new()
-            .write(true)
-            .create(true)
-            .truncate(true)
-            .open(
-                config
-                    .settings
-                    .paks_dir()
-                    .expect("could not find paks dir")
-                    .join("mods_P.pak"),
-            )?,
-    );
-
-    let mount_point = PathBuf::from("../../../");
-    let mut out_pak = unpak::PakWriter::new(
-        out_file,
-        None,
-        unpak::Version::V8B,
-        String::from(mount_point.to_string_lossy()),
-    );
-
-    let integrator_path_asset =
-        Path::new("../../../FSD/Content/_AssemblyStorm/ModIntegration/MI_SpawnMods.uasset");
-    let integrator_path_exp =
-        Path::new("../../../FSD/Content/_AssemblyStorm/ModIntegration/MI_SpawnMods.uexp");
-    let mut integrator_asset = None;
-    let mut integrator_exp = None;
-
-    let mut init_spacerig_assets = HashSet::new();
-    let mut init_cave_assets = HashSet::new();
-    for (id, buf) in paks {
-        let mut in_pak = unpak::PakReader::new_any(std::io::Cursor::new(&buf), None)?;
-        let in_mount_point = PathBuf::from(in_pak.mount_point());
-        for file in in_pak.files() {
-            let path = in_mount_point.join(&file);
-            let filename = path
-                .file_name()
-                .ok_or(anyhow!("failed to get asset name: {}", path.display()))?
-                .to_string_lossy();
-            if filename == "AssetRegistry.bin" {
-                continue;
-            }
-            fn format_soft_class(path: &Path) -> String {
-                let name = path.file_stem().unwrap().to_string_lossy();
-                format!(
-                    "/Game/{}{}_C",
-                    path.strip_prefix("../../../FSD/Content")
-                        .unwrap()
-                        .to_string_lossy()
-                        .strip_suffix("uasset")
-                        .unwrap(),
-                    name
-                )
-            }
-            if filename.to_lowercase() == "initspacerig.uasset" {
-                init_spacerig_assets.insert(format_soft_class(&path));
-            }
-            if filename.to_lowercase() == "initcave.uasset" {
-                init_cave_assets.insert(format_soft_class(&path));
-            }
-            let data = in_pak.get(&file)?;
-            if path == integrator_path_asset {
-                integrator_asset = Some(data);
-            } else if path == integrator_path_exp {
-                integrator_exp = Some(data);
-            } else {
-                let out_path = path.strip_prefix(&mount_point)?;
-                out_pak.write_file(
-                    &String::from(out_path.to_string_lossy()),
-                    &mut std::io::Cursor::new(data),
-                )?;
-            }
-        }
-    }
-
-    println!("found InitSpaceRig assets {:#?}", &init_spacerig_assets);
-    println!("found InitCave assets {:#?}", &init_cave_assets);
-
-    let mut asset =
-        unreal_asset::Asset::new(integrator_asset.unwrap(), Some(integrator_exp.unwrap()));
-    asset.set_engine_version(unreal_asset::engine_version::EngineVersion::VER_UE4_27);
-    asset.parse_data().unwrap();
-    let init_spacerig_fnames = init_spacerig_assets
-        .into_iter()
-        .map(|p| asset.add_fname(&p))
-        .collect::<Vec<_>>();
-    let init_cave_fnames = init_cave_assets
-        .into_iter()
-        .map(|p| asset.add_fname(&p))
-        .collect::<Vec<_>>();
-    fn find_export_named<'a>(
-        asset: &'a mut unreal_asset::Asset,
-        name: &'a str,
-    ) -> Option<&'a mut unreal_asset::exports::normal_export::NormalExport> {
-        for export in &mut asset.exports {
-            if let unreal_asset::exports::Export::NormalExport(export) = export {
-                if export.base_export.object_name.content == name {
-                    return Some(export);
-                }
-            }
-        }
-        None
-    }
-    fn find_string_property_named<'a>(
-        export: &'a mut unreal_asset::exports::normal_export::NormalExport,
-        name: &'a str,
-    ) -> Option<&'a mut unreal_asset::properties::str_property::StrProperty> {
-        for prop in &mut export.properties {
-            if let unreal_asset::properties::Property::StrProperty(prop) = prop {
-                if prop.name.content == name {
-                    return Some(prop);
-                }
-            }
-        }
-        None
-    }
-    fn find_array_property_named<'a>(
-        export: &'a mut unreal_asset::exports::normal_export::NormalExport,
-        name: &'a str,
-    ) -> Option<&'a mut unreal_asset::properties::array_property::ArrayProperty> {
-        for prop in &mut export.properties {
-            if let unreal_asset::properties::Property::ArrayProperty(prop) = prop {
-                if prop.name.content == name {
-                    return Some(prop);
-                }
-            }
-        }
-        None
-    }
-    let config_str = serde_json::to_string(&mod_config)?;
-    find_export_named(&mut asset, "Default__MI_SpawnMods_C").map(|e| {
-        find_string_property_named(e, "Config").map(|p| p.value = Some(config_str));
-        find_array_property_named(e, "SpaceRigMods").map(|p| {
-            for path in init_spacerig_fnames {
-                p.value
-                    .push(unreal_asset::properties::Property::SoftObjectProperty(
-                        unreal_asset::properties::object_property::SoftObjectProperty {
-                            name: unreal_asset::types::FName::new("0".to_owned(), -2147483648),
-                            property_guid: None,
-                            duplication_index: 0,
-                            value: unreal_asset::properties::object_property::SoftObjectPath {
-                                asset_path_name: path,
-                                sub_path_string: None,
-                            },
-                        },
-                    ));
-            }
-        });
-        find_array_property_named(e, "CaveMods").map(|p| {
-            for path in init_cave_fnames {
-                p.value
-                    .push(unreal_asset::properties::Property::SoftObjectProperty(
-                        unreal_asset::properties::object_property::SoftObjectProperty {
-                            name: unreal_asset::types::FName::new("0".to_owned(), -2147483648),
-                            property_guid: None,
-                            duplication_index: 0,
-                            value: unreal_asset::properties::object_property::SoftObjectPath {
-                                asset_path_name: path,
-                                sub_path_string: None,
-                            },
-                        },
-                    ));
-            }
-        });
-    });
-    let mut out_asset = std::io::Cursor::new(vec![]);
-    let mut out_exp = std::io::Cursor::new(vec![]);
-    asset
-        .write_data(&mut out_asset, Some(&mut out_exp))
-        .unwrap();
-
-    out_pak.write_file(
-        &String::from(
-            integrator_path_asset
-                .strip_prefix(&mount_point)?
-                .to_string_lossy(),
-        ),
-        &mut std::io::Cursor::new(out_asset.into_inner()),
-    )?;
-    out_pak.write_file(
-        &String::from(
-            integrator_path_exp
-                .strip_prefix(&mount_point)?
-                .to_string_lossy(),
-        ),
-        &mut std::io::Cursor::new(out_exp.into_inner()),
-    )?;
-
-    out_pak.write_index()?;
-
-    // write config to mod integration save file
-    let mut out_save = OpenOptions::new()
-        .write(true)
-        .create(true)
-        .truncate(true)
-        .open(
-            config
-                .settings
-                .mod_config_save()
-                .expect("could not find mod config save"),
-        )?;
-    //wrap_config(serde_json::to_string(&mod_config)?, &mut out_save)?;
-
-    println!("{mod_count} mods installed");
-
-    Ok(mod_config)
-}
-
-fn contains(source: &[u8], needle: &[u8]) -> bool {
-    'outer: for i in 0..(source.len() - needle.len() + 1) {
-        for j in 0..needle.len() {
-            if source[i + j] != needle[j] {
-                continue 'outer;
-            }
-        }
-        return true;
-    }
-    false
-}
-
 // TODO implement for raw paks
 fn get_pak_from_file(path: &Path) -> Result<Vec<u8>> {
     let file = std::fs::File::open(path).unwrap();
@@ -1568,7 +500,7 @@ fn get_pak_from_file(path: &Path) -> Result<Vec<u8>> {
 
 fn get_approval(mod_: &ModioMod) -> Approval {
     for tag in &mod_.tags {
-        if let Ok(approval) = Approval::from_str(&tag) {
+        if let Ok(approval) = Approval::from_str(tag) {
             return approval;
         }
     }
@@ -1579,20 +511,11 @@ fn is_required(mod_: &ModioMod) -> bool {
     mod_.tags.contains(&"RequiredByAll".to_owned())
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-struct Mods {
+#[derive(Debug, Default, Serialize, Deserialize)]
+pub struct Mods {
     mods: Vec<ModEntry>,
     #[serde(default)]
     request_sync: bool,
-}
-
-impl Default for Mods {
-    fn default() -> Self {
-        Mods {
-            mods: Default::default(),
-            request_sync: false,
-        }
-    }
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -1606,7 +529,7 @@ struct ModEntry {
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-enum Approval {
+pub enum Approval {
     Sandbox,
     Verified,
     Approved,
@@ -1630,18 +553,6 @@ fn extract_config_from_save(file: &mut File) -> Result<String> {
 
     if let Str { value: json, .. } = &save.root.root[0].value {
         Ok(json.to_string())
-    } else {
-        Err(anyhow!("Malformed save file"))
-    }
-}
-fn wrap_config(config: String, f: &mut File) -> Result<()> {
-    let buffer = include_bytes!("../ModIntegration.sav");
-    let mut save_rdr = std::io::Cursor::new(&buffer[..]);
-    let mut save = Save::read(&mut save_rdr)?;
-
-    if let Str { value: json, .. } = &mut save.root.root[0].value {
-        *json = config;
-        save.write(&mut std::io::BufWriter::new(f))
     } else {
         Err(anyhow!("Malformed save file"))
     }
