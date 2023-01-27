@@ -158,6 +158,7 @@ pub async fn install_config(config: &mut Config, mods: Mods, update: bool) -> Re
 
     let mut init_spacerig_assets = HashSet::new();
     let mut init_cave_assets = HashSet::new();
+    let mut asset_mod_owner = HashMap::new();
     for (_id, buf) in paks {
         let mut in_pak = unpak::PakReader::new_any(std::io::Cursor::new(&buf), None)?;
         let in_mount_point = PathBuf::from(in_pak.mount_point());
@@ -194,11 +195,24 @@ pub async fn install_config(config: &mut Config, mods: Mods, update: bool) -> Re
             } else if path == integrator_path_exp {
                 integrator_exp = Some(data);
             } else {
-                let out_path = path.strip_prefix(&mount_point)?;
-                out_pak.write_file(
-                    &String::from(out_path.to_string_lossy()),
-                    &mut std::io::Cursor::new(data),
-                )?;
+                let out_path = String::from(path.strip_prefix(&mount_point)?.to_string_lossy());
+
+                use sha2::{Digest, Sha256};
+                let mut hasher = Sha256::new();
+                hasher.update(&data);
+                let hash = hasher.finalize();
+
+                if let Some((owner, existing_hash)) = asset_mod_owner.get(&out_path) {
+                    if hash != *existing_hash {
+                        println!(
+                            "warn: {} overwrote asset added by {}: {}",
+                            owner, _id, out_path
+                        );
+                    }
+                } else {
+                    out_pak.write_file(&out_path, &mut std::io::Cursor::new(data))?;
+                }
+                asset_mod_owner.insert(out_path.clone(), (_id.to_owned(), hash));
             }
         }
     }
