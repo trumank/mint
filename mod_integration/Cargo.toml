@@ -1,5 +1,5 @@
 [package]
-name = "drg-mod-integration"
+name = "mod_integration"
 version = "0.1.0"
 edition = "2021"
 
