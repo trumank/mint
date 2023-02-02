@@ -80,7 +80,7 @@ pub async fn install_config(config: &mut Config, mods: Mods, update: bool) -> Re
     paks.push(("loader".to_string(), loader));
 
     /*
-    let mut fsd_pak = unpak::PakReader::new_any(
+    let mut fsd_pak = repak::PakReader::new_any(
         BufReader::new(File::open(
             config
                 .settings
@@ -142,10 +142,10 @@ pub async fn install_config(config: &mut Config, mods: Mods, update: bool) -> Re
     );
 
     let mount_point = PathBuf::from("../../../");
-    let mut out_pak = unpak::PakWriter::new(
+    let mut out_pak = repak::PakWriter::new(
         out_file,
         None,
-        unpak::Version::V8B,
+        repak::Version::V8B,
         String::from(mount_point.to_string_lossy()),
     );
 
@@ -160,7 +160,7 @@ pub async fn install_config(config: &mut Config, mods: Mods, update: bool) -> Re
     let mut init_cave_assets = HashSet::new();
     let mut asset_mod_owner = HashMap::new();
     for (_id, buf) in paks {
-        let mut in_pak = unpak::PakReader::new_any(std::io::Cursor::new(&buf), None)?;
+        let mut in_pak = repak::PakReader::new_any(std::io::Cursor::new(&buf), None)?;
         let in_mount_point = PathBuf::from(in_pak.mount_point());
         for file in in_pak.files() {
             let path = in_mount_point.join(&file);
