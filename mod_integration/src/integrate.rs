@@ -147,6 +147,7 @@ pub async fn install_config(config: &mut Config, mods: Mods, update: bool) -> Re
         None,
         repak::Version::V8B,
         String::from(mount_point.to_string_lossy()),
+        None,
     );
 
     let integrator_path_asset =
@@ -160,7 +161,8 @@ pub async fn install_config(config: &mut Config, mods: Mods, update: bool) -> Re
     let mut init_cave_assets = HashSet::new();
     let mut asset_mod_owner = HashMap::new();
     for (_id, buf) in paks {
-        let mut in_pak = repak::PakReader::new_any(std::io::Cursor::new(&buf), None)?;
+        let mut reader = std::io::Cursor::new(&buf);
+        let in_pak = repak::PakReader::new_any(&mut reader, None)?;
         let in_mount_point = PathBuf::from(in_pak.mount_point());
         for file in in_pak.files() {
             let path = in_mount_point.join(&file);
@@ -189,7 +191,7 @@ pub async fn install_config(config: &mut Config, mods: Mods, update: bool) -> Re
             if filename.to_lowercase() == "initcave.uasset" {
                 init_cave_assets.insert(format_soft_class(&path));
             }
-            let data = in_pak.get(&file)?;
+            let data = in_pak.get(&file, &mut reader)?;
             if path == integrator_path_asset {
                 integrator_asset = Some(data);
             } else if path == integrator_path_exp {
