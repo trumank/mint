@@ -3,6 +3,7 @@ use crate::{get_pak_from_file, populate_config, Config, Mods, STATIC_SETTINGS};
 use std::collections::{HashMap, HashSet};
 use std::fs::{self, File, OpenOptions};
 use std::path::{Path, PathBuf};
+use std::io::{self, Cursor, BufWriter};
 
 use anyhow::{anyhow, Result};
 
@@ -63,7 +64,7 @@ pub async fn install_config(config: &mut Config, mods: Mods, update: bool) -> Re
 
             use md5::{Digest, Md5};
             let mut hasher = Md5::new();
-            std::io::copy(&mut File::open(file_path)?, &mut hasher)?;
+            io::copy(&mut File::open(file_path)?, &mut hasher)?;
             let local_hash = hex::encode(hasher.finalize());
             println!("checking file hash modio={hash} local={local_hash}");
             assert_eq!(hash, &local_hash);
@@ -127,7 +128,7 @@ pub async fn install_config(config: &mut Config, mods: Mods, update: bool) -> Re
     }
     */
 
-    let out_file = std::io::BufWriter::new(
+    let out_file = BufWriter::new(
         OpenOptions::new()
             .write(true)
             .create(true)
@@ -161,7 +162,7 @@ pub async fn install_config(config: &mut Config, mods: Mods, update: bool) -> Re
     let mut init_cave_assets = HashSet::new();
     let mut asset_mod_owner = HashMap::new();
     for (_id, buf) in paks {
-        let mut reader = std::io::Cursor::new(&buf);
+        let mut reader = Cursor::new(&buf);
         let in_pak = repak::PakReader::new_any(&mut reader, None)?;
         let in_mount_point = PathBuf::from(in_pak.mount_point());
         for file in in_pak.files() {
@@ -212,7 +213,7 @@ pub async fn install_config(config: &mut Config, mods: Mods, update: bool) -> Re
                         );
                     }
                 } else {
-                    out_pak.write_file(&out_path, &mut std::io::Cursor::new(data))?;
+                    out_pak.write_file(&out_path, &mut Cursor::new(data))?;
                 }
                 asset_mod_owner.insert(out_path.clone(), (_id.to_owned(), hash));
             }
@@ -223,7 +224,7 @@ pub async fn install_config(config: &mut Config, mods: Mods, update: bool) -> Re
     println!("found InitCave assets {:#?}", &init_cave_assets);
 
     let mut asset =
-        unreal_asset::Asset::new(integrator_asset.unwrap(), Some(integrator_exp.unwrap()));
+        unreal_asset::Asset::new(Cursor::new(integrator_asset.unwrap()), Some(Cursor::new(integrator_exp.unwrap())));
     asset.set_engine_version(unreal_asset::engine_version::EngineVersion::VER_UE4_27);
     asset.parse_data().unwrap();
     let init_spacerig_fnames = init_spacerig_assets
@@ -234,8 +235,8 @@ pub async fn install_config(config: &mut Config, mods: Mods, update: bool) -> Re
         .into_iter()
         .map(|p| asset.add_fname(&p))
         .collect::<Vec<_>>();
-    fn find_export_named<'a>(
-        asset: &'a mut unreal_asset::Asset,
+    fn find_export_named<'a, R: io::Read + io::Seek>(
+        asset: &'a mut unreal_asset::Asset<R>,
         name: &'a str,
     ) -> Option<&'a mut unreal_asset::exports::normal_export::NormalExport> {
         for export in &mut asset.exports {
@@ -311,8 +312,8 @@ pub async fn install_config(config: &mut Config, mods: Mods, update: bool) -> Re
             }
         }
     }
-    let mut out_asset = std::io::Cursor::new(vec![]);
-    let mut out_exp = std::io::Cursor::new(vec![]);
+    let mut out_asset = Cursor::new(vec![]);
+    let mut out_exp = Cursor::new(vec![]);
     asset
         .write_data(&mut out_asset, Some(&mut out_exp))
         .unwrap();
@@ -323,7 +324,7 @@ pub async fn install_config(config: &mut Config, mods: Mods, update: bool) -> Re
                 .strip_prefix(&mount_point)?
                 .to_string_lossy(),
         ),
-        &mut std::io::Cursor::new(out_asset.into_inner()),
+        &mut Cursor::new(out_asset.into_inner()),
     )?;
     out_pak.write_file(
         &String::from(
@@ -331,7 +332,7 @@ pub async fn install_config(config: &mut Config, mods: Mods, update: bool) -> Re
                 .strip_prefix(&mount_point)?
                 .to_string_lossy(),
         ),
-        &mut std::io::Cursor::new(out_exp.into_inner()),
+        &mut Cursor::new(out_exp.into_inner()),
     )?;
 
     out_pak.write_index()?;
