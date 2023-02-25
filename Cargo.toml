@@ -1,0 +1,12 @@
+[package]
+name = "drg_mod_integration"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+anyhow = "1.0.69"
+clap = { version = "4.1.6", features = ["derive"] }
+repak = { git = "https://github.com/trumank/repak.git", version = "0.1.3" }
+steamlocate = { git = "https://github.com/CosmicHorrorDev/steamlocate-rs.git", branch = "fully-switch-from-steamy-vdf" }
+unreal_asset = { git = "https://github.com/AstroTechies/unrealmodding.git", version = "0.1.12" }
+zip = { version = "0.6.4", default-features = false, features = ["aes-crypto", "deflate", "time"] }
