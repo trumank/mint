@@ -1,7 +1,11 @@
+mod providers;
+
 use std::collections::{HashMap, HashSet};
 use std::fs::{File, OpenOptions};
 use std::io::{self, BufReader, BufWriter, Cursor, Read, Seek};
 use std::path::{Path, PathBuf};
+
+use providers::{ReadSeek, ResolvableStatus};
 
 use anyhow::{anyhow, Result};
 use clap::{Parser, Subcommand};
@@ -31,7 +35,7 @@ struct ActionIntegrate {
 
     /// Path of mods to integrate
     #[arg(short, long, num_args=0..)]
-    mods: Vec<PathBuf>,
+    mods: Vec<String>,
 }
 
 #[derive(Subcommand, Debug)]
@@ -46,15 +50,17 @@ struct Args {
     action: Action,
 }
 
-fn main() -> Result<()> {
+#[tokio::main]
+async fn main() -> Result<()> {
+    dotenvy::dotenv().ok();
     let args = Args::parse();
 
     match args.action {
-        Action::Integrate(action) => action_integrate(action),
+        Action::Integrate(action) => action_integrate(action).await,
     }
 }
 
-fn action_integrate(action: ActionIntegrate) -> Result<()> {
+async fn action_integrate(action: ActionIntegrate) -> Result<()> {
     let path_game = action
         .drg
         .or_else(|| {
@@ -70,7 +76,39 @@ fn action_integrate(action: ActionIntegrate) -> Result<()> {
             )
         })?;
 
-    let path_paks = Path::join(&path_game, "FSD/Content/Paks/");
+    std::fs::create_dir("cache").ok();
+    let mut store = providers::ModStore::new("cache");
+    if let Ok(modio_key) = std::env::var("MODIO_KEY") {
+        store.add_provider(Box::new(providers::modio::ModioProvider::new(
+            modio::Modio::new(modio::Credentials::new(modio_key))?,
+        )));
+    } else {
+        println!("MODIO_KEY env var not found, modio provider will be unavailable");
+    }
+    store.add_provider(Box::new(providers::file::FileProvider {}));
+    store.add_provider(Box::new(providers::http::HttpProvider::new()));
+
+    use futures::stream::{self, StreamExt};
+
+    let mods = stream::iter(action.mods.into_iter().map(|m| store.get_mod(m)))
+        .buffered(5)
+        .collect::<Vec<Result<_>>>()
+        .await
+        .into_iter()
+        .collect::<Result<Vec<_>>>()?;
+
+    println!("resolvable mods:");
+    for m in &mods {
+        if let ResolvableStatus::Resolvable { url } = &m.status {
+            println!("{url}");
+        }
+    }
+
+    integrate(path_game, mods)
+}
+
+fn integrate<P: AsRef<Path>>(path_game: P, mods: Vec<providers::Mod>) -> Result<()> {
+    let path_paks = Path::join(path_game.as_ref(), "FSD/Content/Paks/");
     let path_pak = Path::join(&path_paks, "FSD-WindowsNoEditor.pak");
     let path_mod_pak = Path::join(&path_paks, "mods_P.pak");
 
@@ -118,12 +156,11 @@ fn action_integrate(action: ActionIntegrate) -> Result<()> {
     let mut init_spacerig_assets = HashSet::new();
     let mut init_cave_assets = HashSet::new();
 
-    let mods = action
-        .mods
+    let mods = mods
         .into_iter()
         .map(|m| {
-            println!("integrating {}", m.display());
-            let mut buf = Cursor::new(get_pak_from_file(&m)?);
+            println!("integrating {:?}", m.status);
+            let mut buf = get_pak_from_data(m.data)?;
             let pak = repak::PakReader::new_any(&mut buf, None)?;
 
             let mount = Path::new(pak.mount_point());
@@ -162,11 +199,10 @@ fn action_integrate(action: ActionIntegrate) -> Result<()> {
                     &mut Cursor::new(pak.get(&p, &mut buf)?),
                 )?;
             }
-            Ok(Path::new(&m)
-                .file_name()
-                .unwrap()
-                .to_string_lossy()
-                .to_string())
+            Ok(match m.status {
+                ResolvableStatus::Unresolvable { name } => name,
+                ResolvableStatus::Resolvable { url } => url,
+            })
         })
         .collect::<Result<Vec<String>>>()?;
 
@@ -231,24 +267,26 @@ fn action_integrate(action: ActionIntegrate) -> Result<()> {
 
     mod_pak.write_index()?;
 
-    println!("{} mods installed to {}", mods.len(), path_mod_pak.display());
+    println!(
+        "{} mods installed to {}",
+        mods.len(),
+        path_mod_pak.display()
+    );
 
     Ok(())
 }
 
-fn get_pak_from_file(path: &Path) -> Result<Vec<u8>> {
-    let mut file = File::open(path)?;
-
-    if let Ok(mut archive) = zip::ZipArchive::new(BufReader::new(&file)) {
+fn get_pak_from_data(mut data: Box<dyn ReadSeek>) -> Result<Box<dyn ReadSeek>> {
+    if let Ok(mut archive) = zip::ZipArchive::new(&mut data) {
         (0..archive.len())
-            .map(|i| -> Result<Option<Vec<u8>>> {
+            .map(|i| -> Result<Option<Box<dyn ReadSeek>>> {
                 let mut file = archive.by_index(i)?;
                 match file.enclosed_name() {
                     Some(p) => {
                         if file.is_file() && p.extension().filter(|e| e == &"pak").is_some() {
                             let mut buf = vec![];
                             file.read_to_end(&mut buf)?;
-                            Ok(Some(buf))
+                            Ok(Some(Box::new(Cursor::new(buf))))
                         } else {
                             Ok(None)
                         }
@@ -259,10 +297,8 @@ fn get_pak_from_file(path: &Path) -> Result<Vec<u8>> {
             .find_map(|e| e.transpose())
             .ok_or_else(|| anyhow!("Zip does not contain pak"))?
     } else {
-        file.rewind()?;
-        let mut buf = vec![];
-        BufReader::new(file).read_to_end(&mut buf)?;
-        Ok(buf)
+        data.rewind()?;
+        Ok(data)
     }
 }
 
