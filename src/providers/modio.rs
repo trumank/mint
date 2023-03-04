@@ -15,7 +15,7 @@ impl ModioProvider {
 }
 
 lazy_static::lazy_static! {
-    static ref RE_MOD: regex::Regex = regex::Regex::new("^https://mod.io/g/drg/m/(?P<name_id>[^/#]+)(:?#(?P<mod_id>\\d+)/(?P<modfile_id>\\d+))?$").unwrap();
+    static ref RE_MOD: regex::Regex = regex::Regex::new("^https://mod.io/g/drg/m/(?P<name_id>[^/#]+)(:?#(?P<mod_id>\\d+)(:?/(?P<modfile_id>\\d+))?)?$").unwrap();
 }
 
 const MODIO_DRG_ID: u32 = 2475;
@@ -58,6 +58,26 @@ impl ModProvider for ModioProvider {
                     url: url.to_owned(),
                 },
                 data,
+            })
+        } else if let Some(mod_id) = captures.name("mod_id") {
+            let name_id = captures.name("name_id").unwrap().as_str();
+
+            let mod_ = self
+                .modio
+                .game(MODIO_DRG_ID)
+                .mod_(mod_id.as_str().parse::<u32>().unwrap())
+                .get()
+                .await?;
+
+            let file = mod_
+                .modfile
+                .ok_or_else(|| anyhow!("mod {} does not have an associated modfile", url))?;
+
+            Ok(ModResponse::Redirect {
+                url: format!(
+                    "https://mod.io/g/drg/m/{}#{}/{}",
+                    &name_id, file.mod_id, file.id
+                ),
             })
         } else {
             use modio::filter::Eq;
