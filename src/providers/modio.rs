@@ -80,11 +80,12 @@ impl ModProvider for ModioProvider {
                 ),
             })
         } else {
-            use modio::filter::Eq;
+            use modio::filter::{Eq, In};
+            use modio::mods::filters::{NameId, Visible};
 
             let name_id = captures.name("name_id").unwrap().as_str();
 
-            let filter = modio::mods::filters::NameId::eq(name_id);
+            let filter = NameId::eq(name_id).and(Visible::_in(vec![0, 1]));
             let mut mods = self
                 .modio
                 .game(MODIO_DRG_ID)
