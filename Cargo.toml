@@ -20,7 +20,7 @@ sha2 = "0.10.6"
 steamlocate = { git = "https://github.com/CosmicHorrorDev/steamlocate-rs.git", branch = "fully-switch-from-steamy-vdf" }
 task-local-extensions = "0.1.3"
 tokio = { version = "1.25.0", features = ["full"] }
-uesave = { git = "https://github.com/trumank/uesave-rs.git", version = "0.1.0" }
+uesave = { git = "https://github.com/trumank/uesave-rs.git", version = "0.2.0" }
 unreal_asset = { git = "https://github.com/AstroTechies/unrealmodding.git", version = "0.1.12" }
 url = "2.3.1"
 zip = { version = "0.6.4", default-features = false, features = ["aes-crypto", "deflate", "time"] }
