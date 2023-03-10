@@ -60,63 +60,6 @@ async fn main() -> Result<()> {
     }
 }
 
-use reqwest::{Request, Response};
-use reqwest_middleware::{Middleware, Next};
-use task_local_extensions::Extensions;
-
-struct LoggingMiddleware {
-    requests: std::sync::Arc<std::sync::atomic::AtomicUsize>,
-}
-
-#[async_trait::async_trait]
-impl Middleware for LoggingMiddleware {
-    async fn handle(
-        &self,
-        req: Request,
-        extensions: &mut Extensions,
-        next: Next<'_>,
-    ) -> reqwest_middleware::Result<Response> {
-        loop {
-            println!(
-                "Request started {} {:?}",
-                self.requests
-                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed),
-                req.url().path()
-            );
-            let res = next.clone().run(req.try_clone().unwrap(), extensions).await;
-            if let Ok(res) = &res {
-                if let Some(retry) = res.headers().get("retry-after") {
-                    println!("retrying after: {}...", retry.to_str().unwrap());
-                    tokio::time::sleep(tokio::time::Duration::from_secs(
-                        retry.to_str().unwrap().parse::<u64>().unwrap(),
-                    ))
-                    .await;
-                    continue;
-                }
-            }
-            return res;
-        }
-
-        /*
-        self.ratelimiter.until_ready().await;
-        println!(
-            "Request started {} {:?}",
-            self.requests
-                .fetch_add(1, std::sync::atomic::Ordering::Relaxed),
-            req.url().path()
-        );
-        let res = next.run(req, extensions).await;
-        if let Ok(res) = &res {
-            if let Some(retry) = res.headers().get("retry-after") {
-                println!("retry-after: {}", retry.to_str().unwrap());
-            }
-        }
-
-        res
-        */
-    }
-}
-
 async fn action_integrate(action: ActionIntegrate) -> Result<()> {
     let path_game = action
         .drg
@@ -134,29 +77,7 @@ async fn action_integrate(action: ActionIntegrate) -> Result<()> {
         })?;
 
     std::fs::create_dir("cache").ok();
-    let mut store = providers::ModStore::new("cache");
-    if let Ok(modio_key) = std::env::var("MODIO_KEY") {
-        let token = std::env::var("MODIO_ACCESS_TOKEN").ok();
-        let client = reqwest_middleware::ClientBuilder::new(reqwest::Client::new())
-            .with(LoggingMiddleware {
-                requests: Default::default(),
-            })
-            .build();
-        let modio = modio::Modio::new(
-            if let Some(token) = token {
-                modio::Credentials::with_token(modio_key, token)
-            } else {
-                modio::Credentials::new(modio_key)
-            },
-            client,
-        )?;
-
-        store.add_provider(Box::new(providers::modio::ModioProvider::new(modio)));
-    } else {
-        println!("MODIO_KEY env var not found, modio provider will be unavailable");
-    }
-    store.add_provider(Box::new(providers::file::FileProvider {}));
-    store.add_provider(Box::new(providers::http::HttpProvider::new()));
+    let store = providers::ModStore::new("cache");
 
     use futures::stream::{self, StreamExt};
 

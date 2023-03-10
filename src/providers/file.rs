@@ -6,7 +6,21 @@ use anyhow::{anyhow, Result};
 
 use super::{ModProvider, ModResponse, ResolvableStatus};
 
+inventory::submit! {
+    super::ProviderFactory(FileProvider::new_provider)
+}
+
+#[derive(Debug)]
 pub struct FileProvider {}
+
+impl FileProvider {
+    pub fn new_provider() -> Result<Box<dyn ModProvider>> {
+        Ok(Box::new(Self::new()))
+    }
+    pub fn new() -> Self {
+        Self {}
+    }
+}
 
 #[async_trait::async_trait]
 impl ModProvider for FileProvider {

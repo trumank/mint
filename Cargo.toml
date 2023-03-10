@@ -10,6 +10,7 @@ clap = { version = "4.1.6", features = ["derive"] }
 dotenvy = "0.15.6"
 futures = "0.3.26"
 hex = "0.4.3"
+inventory = "0.3.4"
 lazy_static = "1.4.0"
 modio = { version = "0.7.1", features = ["rustls-tls"] }
 regex = "1.7.1"

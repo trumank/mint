@@ -24,11 +24,10 @@ impl ModStore {
     pub fn new<P: AsRef<Path>>(cache_path: P) -> Self {
         ModStore {
             cache_path: cache_path.as_ref().to_path_buf(),
-            providers: vec![],
+            providers: inventory::iter::<ProviderFactory>()
+                .filter_map(ProviderFactory::build)
+                .collect::<Vec<_>>(),
         }
-    }
-    pub fn add_provider(&mut self, provider: Box<dyn ModProvider>) {
-        self.providers.push(provider);
     }
     pub async fn get_mod(&self, mut url: String) -> Result<Mod> {
         loop {
@@ -113,7 +112,22 @@ pub enum ModResponse {
 }
 
 #[async_trait::async_trait]
-pub trait ModProvider {
+pub trait ModProvider: Sync + std::fmt::Debug {
     fn can_provide(&self, url: &str) -> bool;
     async fn get_mod(&self, url: &str) -> Result<ModResponse>;
 }
+
+struct ProviderFactory(fn() -> Result<Box<dyn ModProvider>>);
+impl ProviderFactory {
+    fn build(&self) -> Option<Box<dyn ModProvider>> {
+        match self.0() {
+            Ok(p) => Some(p),
+            Err(e) => {
+                eprintln!("{e}");
+                None
+            }
+        }
+    }
+}
+
+inventory::collect!(ProviderFactory);
