@@ -7,7 +7,10 @@ use anyhow::{anyhow, Result};
 use super::{ModProvider, ModResponse, ResolvableStatus};
 
 inventory::submit! {
-    super::ProviderFactory(FileProvider::new_provider)
+    super::ProviderFactory {
+        new: FileProvider::new_provider,
+        can_provide: |url| Path::new(&url).exists()
+    }
 }
 
 #[derive(Debug)]
@@ -24,10 +27,6 @@ impl FileProvider {
 
 #[async_trait::async_trait]
 impl ModProvider for FileProvider {
-    fn can_provide(&self, url: &str) -> bool {
-        Path::new(url).exists()
-    }
-
     async fn get_mod(&self, url: &str) -> Result<ModResponse> {
         let path = Path::new(url);
         Ok(ModResponse::Resolve {

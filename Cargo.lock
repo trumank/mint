@@ -431,6 +431,7 @@ dependencies = [
  "sha2",
  "steamlocate",
  "task-local-extensions",
+ "thiserror",
  "tokio",
  "uesave",
  "unreal_asset",

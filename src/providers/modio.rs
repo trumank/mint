@@ -8,7 +8,10 @@ use task_local_extensions::Extensions;
 use super::{ModProvider, ModResponse, ResolvableStatus};
 
 inventory::submit! {
-    super::ProviderFactory(ModioProvider::new_provider)
+    super::ProviderFactory {
+        new: ModioProvider::new_provider,
+        can_provide: |url| RE_MOD.is_match(&url),
+    }
 }
 
 #[derive(Debug)]
@@ -89,10 +92,6 @@ impl Middleware for LoggingMiddleware {
 
 #[async_trait::async_trait]
 impl ModProvider for ModioProvider {
-    fn can_provide(&self, url: &str) -> bool {
-        RE_MOD.is_match(url)
-    }
-
     async fn get_mod(&self, url: &str) -> Result<ModResponse> {
         let captures = RE_MOD
             .captures(url)

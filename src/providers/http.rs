@@ -5,7 +5,17 @@ use anyhow::{anyhow, Result};
 use super::{ModProvider, ModResponse, ResolvableStatus};
 
 inventory::submit! {
-    super::ProviderFactory(HttpProvider::new_provider)
+    super::ProviderFactory {
+        new: HttpProvider::new_provider,
+        can_provide: |url| -> bool {
+            RE_MOD
+                .captures(&url)
+                .and_then(|c| c.name("hostname"))
+                .map_or(false, |h| {
+                    !["mod.io", "drg.mod.io", "drg.old.mod.io"].contains(&h.as_str())
+                })
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -30,15 +40,6 @@ lazy_static::lazy_static! {
 
 #[async_trait::async_trait]
 impl ModProvider for HttpProvider {
-    fn can_provide(&self, url: &str) -> bool {
-        RE_MOD
-            .captures(url)
-            .and_then(|c| c.name("hostname"))
-            .map_or(false, |h| {
-                !["mod.io", "drg.mod.io", "drg.old.mod.io"].contains(&h.as_str())
-            })
-    }
-
     async fn get_mod(&self, url: &str) -> Result<ModResponse> {
         println!("downloading mod {url}...");
         Ok(ModResponse::Resolve {

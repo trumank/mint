@@ -1,3 +1,4 @@
+mod error;
 mod providers;
 
 use std::collections::{HashMap, HashSet};
@@ -26,6 +27,8 @@ use unreal_asset::{
     types::{FName, PackageIndex},
     Asset,
 };
+
+use crate::error::IntegrationError;
 
 #[derive(Parser, Debug)]
 struct ActionIntegrate {
@@ -77,16 +80,28 @@ async fn action_integrate(action: ActionIntegrate) -> Result<()> {
         })?;
 
     std::fs::create_dir("cache").ok();
-    let store = providers::ModStore::new("cache");
+    let mut store = providers::ModStore::new("cache");
 
-    use futures::stream::{self, StreamExt};
+    use futures::stream::{self, StreamExt, TryStreamExt};
 
-    let mods = stream::iter(action.mods.into_iter().map(|m| store.get_mod(m)))
-        .buffered(5)
-        .collect::<Vec<Result<_>>>()
-        .await
-        .into_iter()
-        .collect::<Result<Vec<_>>>()?;
+    let mods = loop {
+        let res: Result<Vec<_>> =
+            stream::iter(action.mods.iter().map(|m| store.get_mod(m.to_owned())))
+                .buffered(5)
+                .try_collect()
+                .await;
+
+        match res {
+            Ok(mods) => break mods,
+            Err(e) => match e.downcast::<IntegrationError>() {
+                Ok(IntegrationError::NoProvider { url, factory }) => {
+                    println!("Initializing provider for {url}");
+                    store.add_provider(factory)?;
+                }
+                Err(e) => return Err(e),
+            },
+        }
+    };
 
     println!("resolvable mods:");
     for m in &mods {
