@@ -6,7 +6,7 @@ use std::sync::Arc;
 use anyhow::{anyhow, Result};
 use tokio::sync::RwLock;
 
-use super::{CacheWrapper, ModProvider, ModResponse, ResolvableStatus};
+use super::{BlobCache, CacheWrapper, ModProvider, ModResponse, ResolvableStatus};
 
 inventory::submit! {
     super::ProviderFactory {
@@ -30,10 +30,14 @@ impl FileProvider {
 
 #[async_trait::async_trait]
 impl ModProvider for FileProvider {
-    async fn get_mod(&self, url: &str, _cache: Arc<RwLock<CacheWrapper>>) -> Result<ModResponse> {
+    async fn get_mod(
+        &self,
+        url: &str,
+        _cache: Arc<RwLock<CacheWrapper>>,
+        _blob_cache: &BlobCache,
+    ) -> Result<ModResponse> {
         let path = Path::new(url);
         Ok(ModResponse::Resolve {
-            cache: false,
             status: ResolvableStatus::Unresolvable {
                 name: path
                     .file_name()

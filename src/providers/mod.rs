@@ -6,35 +6,28 @@ use crate::error::IntegrationError;
 
 use anyhow::{anyhow, Result};
 
+use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
 
 use std::collections::HashMap;
-use std::fs::{File, OpenOptions};
-use std::io::{BufReader, BufWriter, Read, Seek};
+use std::fs::File;
+use std::io::{BufReader, Read, Seek};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-fn hash_string(input: &str) -> String {
-    use sha2::{Digest, Sha256};
-
-    let mut hasher = Sha256::new();
-    hasher.update(input.as_bytes());
-    hex::encode(hasher.finalize())
-}
-
 pub struct ModStore {
-    cache_path: PathBuf,
     providers: HashMap<ProviderFactory, Box<dyn ModProvider>>,
     cache: Arc<RwLock<CacheWrapper>>,
+    blob_cache: BlobCache,
 }
 impl ModStore {
     pub fn new<P: AsRef<Path>>(cache_path: P) -> Self {
         ModStore {
-            cache_path: cache_path.as_ref().to_path_buf(),
             providers: HashMap::new(),
             cache: Arc::new(RwLock::new(CacheWrapper::from_path(
                 cache_path.as_ref().join("cache.json"),
             ))),
+            blob_cache: BlobCache::new(cache_path.as_ref().join("blobs")),
         }
     }
     pub fn add_provider(&mut self, provider_factory: ProviderFactory) -> Result<()> {
@@ -68,57 +61,24 @@ impl ModStore {
     }
     pub async fn get_mod(&self, mut url: String) -> Result<Mod> {
         loop {
-            let path = self.cache_path.join(hash_string(&url));
-
-            match File::open(&path) {
-                Ok(data) => {
-                    return Ok(Mod {
-                        status: ResolvableStatus::Resolvable {
-                            url: url.to_owned(),
-                        },
-                        data: Box::new(BufReader::new(data)),
-                    })
+            match self
+                .get_provider(&url)?
+                .get_mod(&url, self.cache.clone(), &self.blob_cache.clone())
+                .await?
+            {
+                ModResponse::Resolve { data, status } => {
+                    return Ok(Mod { status, data });
                 }
-                Err(ref e) if e.kind() == std::io::ErrorKind::NotFound => {
-                    match self
-                        .get_provider(&url)?
-                        .get_mod(&url, self.cache.clone())
-                        .await?
-                    {
-                        ModResponse::Resolve {
-                            cache,
-                            mut data,
-                            status,
-                        } => {
-                            let data: Box<dyn ReadSeek> = if cache {
-                                println!("caching url: {url}");
-                                let mut cache_file = OpenOptions::new()
-                                    .read(true)
-                                    .write(true)
-                                    .create(true)
-                                    .truncate(true)
-                                    .open(self.cache_path.join(hash_string(&url)))?;
-                                std::io::copy(&mut data, &mut BufWriter::new(&cache_file))?;
-                                cache_file.rewind()?;
-                                Box::new(BufReader::new(cache_file))
-                            } else {
-                                data
-                            };
-                            return Ok(Mod { status, data });
-                        }
-                        ModResponse::Redirect {
-                            url: redirected_url,
-                        } => url = redirected_url,
-                    };
-                }
-                Err(e) => return Err(e.into()),
-            }
+                ModResponse::Redirect {
+                    url: redirected_url,
+                } => url = redirected_url,
+            };
         }
     }
 }
 
-pub trait ReadSeek: Read + Seek {}
-impl<T: Seek + Read> ReadSeek for T {}
+pub trait ReadSeek: Read + Seek + Send {}
+impl<T: Seek + Read + Send> ReadSeek for T {}
 
 /// Whether a mod can be resolved by clients or not
 #[derive(Debug)]
@@ -141,7 +101,6 @@ pub enum ModResponse {
         url: String,
     },
     Resolve {
-        cache: bool,
         status: ResolvableStatus,
         data: Box<dyn ReadSeek>,
     },
@@ -149,7 +108,12 @@ pub enum ModResponse {
 
 #[async_trait::async_trait]
 pub trait ModProvider: Sync + std::fmt::Debug {
-    async fn get_mod(&self, url: &str, cache: Arc<RwLock<CacheWrapper>>) -> Result<ModResponse>;
+    async fn get_mod(
+        &self,
+        url: &str,
+        cache: Arc<RwLock<CacheWrapper>>,
+        blob_cache: &BlobCache,
+    ) -> Result<ModResponse>;
 }
 
 #[derive(Debug, Clone, Eq, Ord, Hash, PartialEq, PartialOrd)]
@@ -216,6 +180,39 @@ impl CacheWrapper {
             .get_mut(id)
             .and_then(|c| c.as_any_mut().downcast_mut::<T>())
             .unwrap()
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct BlobRef(String);
+
+#[derive(Debug, Clone)]
+pub struct BlobCache {
+    path: PathBuf,
+}
+impl BlobCache {
+    fn new<P: AsRef<Path>>(path: P) -> Self {
+        std::fs::create_dir(&path).ok();
+        Self {
+            path: path.as_ref().to_path_buf(),
+        }
+    }
+    fn write(&self, blob: &[u8]) -> Result<BlobRef> {
+        use sha2::{Digest, Sha256};
+
+        let mut hasher = Sha256::new();
+        hasher.update(blob);
+        let hash = hex::encode(hasher.finalize());
+
+        std::fs::write(self.path.join(&hash), blob)?;
+
+        Ok(BlobRef(hash))
+    }
+    fn read(&self, blob: &BlobRef) -> Result<Box<dyn ReadSeek>> {
+        // TODO verify hash, custom reader that hashes as it's read?
+        Ok(Box::new(BufReader::new(File::open(
+            self.path.join(&blob.0),
+        )?)))
     }
 }
 

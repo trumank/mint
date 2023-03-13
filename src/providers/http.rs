@@ -4,7 +4,7 @@ use std::sync::Arc;
 use anyhow::{anyhow, Result};
 use tokio::sync::RwLock;
 
-use super::{CacheWrapper, ModProvider, ModResponse, ResolvableStatus};
+use super::{BlobCache, CacheWrapper, ModProvider, ModResponse, ResolvableStatus};
 
 inventory::submit! {
     super::ProviderFactory {
@@ -43,10 +43,14 @@ lazy_static::lazy_static! {
 
 #[async_trait::async_trait]
 impl ModProvider for HttpProvider {
-    async fn get_mod(&self, url: &str, _cache: Arc<RwLock<CacheWrapper>>) -> Result<ModResponse> {
+    async fn get_mod(
+        &self,
+        url: &str,
+        _cache: Arc<RwLock<CacheWrapper>>,
+        _blob_cache: &BlobCache,
+    ) -> Result<ModResponse> {
         println!("downloading mod {url}...");
         Ok(ModResponse::Resolve {
-            cache: true,
             status: ResolvableStatus::Resolvable {
                 url: url.to_owned(),
             },

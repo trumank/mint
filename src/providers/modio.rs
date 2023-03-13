@@ -8,7 +8,9 @@ use serde::{Deserialize, Serialize};
 use task_local_extensions::Extensions;
 use tokio::sync::RwLock;
 
-use super::{CacheWrapper, ModProvider, ModProviderCache, ModResponse, ResolvableStatus};
+use super::{
+    BlobCache, BlobRef, CacheWrapper, ModProvider, ModProviderCache, ModResponse, ResolvableStatus,
+};
 
 inventory::submit! {
     super::ProviderFactory {
@@ -57,6 +59,7 @@ impl ModioProvider {
 pub struct ModioCache {
     mod_id_map: HashMap<String, u32>,
     latest_modfile: HashMap<u32, u32>,
+    modfile_blobs: HashMap<u32, BlobRef>,
 }
 #[typetag::serde]
 impl ModProviderCache for ModioCache {
@@ -114,7 +117,12 @@ impl Middleware for LoggingMiddleware {
 
 #[async_trait::async_trait]
 impl ModProvider for ModioProvider {
-    async fn get_mod(&self, url: &str, cache: Arc<RwLock<CacheWrapper>>) -> Result<ModResponse> {
+    async fn get_mod(
+        &self,
+        url: &str,
+        cache: Arc<RwLock<CacheWrapper>>,
+        blob_cache: &BlobCache,
+    ) -> Result<ModResponse> {
         let mut inner = cache.write().await;
         let cache = inner.get_mut::<ModioCache>("modio");
 
@@ -125,24 +133,37 @@ impl ModProvider for ModioProvider {
         if let (Some(mod_id), Some(modfile_id)) =
             (captures.name("mod_id"), captures.name("modfile_id"))
         {
-            let file = self
-                .modio
-                .game(MODIO_DRG_ID)
-                .mod_(mod_id.as_str().parse::<u32>().unwrap())
-                .file(modfile_id.as_str().parse::<u32>().unwrap())
-                .get()
-                .await?;
+            let mod_id = mod_id.as_str().parse::<u32>().unwrap();
+            let modfile_id = modfile_id.as_str().parse::<u32>().unwrap();
 
-            let download: modio::download::DownloadAction = file.into();
+            let data = if let Some(blob) = cache
+                .modfile_blobs
+                .get(&modfile_id)
+                .and_then(|r| blob_cache.read(r).ok())
+            {
+                blob
+            } else {
+                let file = self
+                    .modio
+                    .game(MODIO_DRG_ID)
+                    .mod_(mod_id)
+                    .file(modfile_id)
+                    .get()
+                    .await?;
 
-            println!("downloading mod {url}...");
+                let download: modio::download::DownloadAction = file.into();
 
-            let data = Box::new(Cursor::new(
-                self.modio.download(download).bytes().await?.to_vec(),
-            ));
+                println!("downloading mod {url}...");
+
+                let data = self.modio.download(download).bytes().await?.to_vec();
+                cache
+                    .modfile_blobs
+                    .insert(modfile_id, blob_cache.write(&data)?);
+
+                Box::new(Cursor::new(data))
+            };
 
             Ok(ModResponse::Resolve {
-                cache: true,
                 status: ResolvableStatus::Resolvable {
                     url: url.to_owned(),
                 },
