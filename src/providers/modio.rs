@@ -1,14 +1,18 @@
-use std::io::Cursor;
+use std::sync::Arc;
+use std::{collections::HashMap, io::Cursor};
 
 use anyhow::{anyhow, Result};
 use reqwest::{Request, Response};
 use reqwest_middleware::{Middleware, Next};
+use serde::{Deserialize, Serialize};
 use task_local_extensions::Extensions;
+use tokio::sync::RwLock;
 
-use super::{ModProvider, ModResponse, ResolvableStatus};
+use super::{CacheWrapper, ModProvider, ModProviderCache, ModResponse, ResolvableStatus};
 
 inventory::submit! {
     super::ProviderFactory {
+        id: "modio",
         new: ModioProvider::new_provider,
         can_provide: |url| RE_MOD.is_match(&url),
     }
@@ -46,6 +50,24 @@ impl ModioProvider {
     }
     fn new(modio: modio::Modio) -> Self {
         Self { modio }
+    }
+}
+
+#[derive(Debug, Default, Serialize, Deserialize)]
+pub struct ModioCache {
+    mod_id_map: HashMap<String, u32>,
+    latest_modfile: HashMap<u32, u32>,
+}
+#[typetag::serde]
+impl ModProviderCache for ModioCache {
+    fn new() -> Self {
+        Default::default()
+    }
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
+        self
     }
 }
 
@@ -92,7 +114,10 @@ impl Middleware for LoggingMiddleware {
 
 #[async_trait::async_trait]
 impl ModProvider for ModioProvider {
-    async fn get_mod(&self, url: &str) -> Result<ModResponse> {
+    async fn get_mod(&self, url: &str, cache: Arc<RwLock<CacheWrapper>>) -> Result<ModResponse> {
+        let mut inner = cache.write().await;
+        let cache = inner.get_mut::<ModioCache>("modio");
+
         let captures = RE_MOD
             .captures(url)
             .ok_or_else(|| anyhow!("invalid modio URL {url}"))?;
@@ -149,32 +174,53 @@ impl ModProvider for ModioProvider {
 
             let name_id = captures.name("name_id").unwrap().as_str();
 
-            let filter = NameId::eq(name_id).and(Visible::_in(vec![0, 1]));
-            let mut mods = self
-                .modio
-                .game(MODIO_DRG_ID)
-                .mods()
-                .search(filter)
-                .collect()
-                .await?;
-            if mods.len() > 1 {
-                Err(anyhow!(
-                    "multiple mods returned for mod name_id {}",
-                    name_id,
-                ))
-            } else if let Some(mod_) = mods.pop() {
-                let file = mod_
-                    .modfile
-                    .ok_or_else(|| anyhow!("mod {} does not have an associated modfile", url))?;
+            let cached_id = cache.mod_id_map.get(name_id);
 
-                Ok(ModResponse::Redirect {
-                    url: format!(
-                        "https://mod.io/g/drg/m/{}#{}/{}",
-                        &name_id, file.mod_id, file.id
-                    ),
-                })
+            if let Some(id) = cached_id {
+                if let Some(modfile_id) = cache.latest_modfile.get(id) {
+                    Ok(ModResponse::Redirect {
+                        url: format!("https://mod.io/g/drg/m/{}#{}/{}", &name_id, id, modfile_id),
+                    })
+                } else {
+                    let mod_ = self.modio.mod_(MODIO_DRG_ID, *id).get().await?;
+                    let file = mod_.modfile.ok_or_else(|| {
+                        anyhow!("mod {} does not have an associated modfile", url)
+                    })?;
+                    cache.latest_modfile.insert(*id, file.id);
+                    Ok(ModResponse::Redirect {
+                        url: format!("https://mod.io/g/drg/m/{}#{}/{}", &name_id, id, file.id),
+                    })
+                }
             } else {
-                Err(anyhow!("no mods returned for mod name_id {}", &name_id))
+                let filter = NameId::eq(name_id).and(Visible::_in(vec![0, 1]));
+                let mut mods = self
+                    .modio
+                    .game(MODIO_DRG_ID)
+                    .mods()
+                    .search(filter)
+                    .collect()
+                    .await?;
+                if mods.len() > 1 {
+                    Err(anyhow!(
+                        "multiple mods returned for mod name_id {}",
+                        name_id,
+                    ))
+                } else if let Some(mod_) = mods.pop() {
+                    cache.mod_id_map.insert(name_id.to_owned(), mod_.id);
+                    let file = mod_.modfile.ok_or_else(|| {
+                        anyhow!("mod {} does not have an associated modfile", url)
+                    })?;
+                    cache.latest_modfile.insert(mod_.id, file.id);
+
+                    Ok(ModResponse::Redirect {
+                        url: format!(
+                            "https://mod.io/g/drg/m/{}#{}/{}",
+                            &name_id, file.mod_id, file.id
+                        ),
+                    })
+                } else {
+                    Err(anyhow!("no mods returned for mod name_id {}", &name_id))
+                }
             }
         }
     }

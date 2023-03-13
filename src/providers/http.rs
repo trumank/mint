@@ -1,11 +1,14 @@
 use std::io::Cursor;
+use std::sync::Arc;
 
 use anyhow::{anyhow, Result};
+use tokio::sync::RwLock;
 
-use super::{ModProvider, ModResponse, ResolvableStatus};
+use super::{CacheWrapper, ModProvider, ModResponse, ResolvableStatus};
 
 inventory::submit! {
     super::ProviderFactory {
+        id: "http",
         new: HttpProvider::new_provider,
         can_provide: |url| -> bool {
             RE_MOD
@@ -40,7 +43,7 @@ lazy_static::lazy_static! {
 
 #[async_trait::async_trait]
 impl ModProvider for HttpProvider {
-    async fn get_mod(&self, url: &str) -> Result<ModResponse> {
+    async fn get_mod(&self, url: &str, _cache: Arc<RwLock<CacheWrapper>>) -> Result<ModResponse> {
         println!("downloading mod {url}...");
         Ok(ModResponse::Resolve {
             cache: true,

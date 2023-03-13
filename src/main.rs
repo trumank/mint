@@ -82,16 +82,8 @@ async fn action_integrate(action: ActionIntegrate) -> Result<()> {
     std::fs::create_dir("cache").ok();
     let mut store = providers::ModStore::new("cache");
 
-    use futures::stream::{self, StreamExt, TryStreamExt};
-
     let mods = loop {
-        let res: Result<Vec<_>> =
-            stream::iter(action.mods.iter().map(|m| store.get_mod(m.to_owned())))
-                .buffered(5)
-                .try_collect()
-                .await;
-
-        match res {
+        match store.resolve_mods(&action.mods).await {
             Ok(mods) => break mods,
             Err(e) => match e.downcast::<IntegrationError>() {
                 Ok(IntegrationError::NoProvider { url, factory }) => {

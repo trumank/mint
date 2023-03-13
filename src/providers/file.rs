@@ -1,13 +1,16 @@
 use std::fs::File;
 use std::io::BufReader;
 use std::path::Path;
+use std::sync::Arc;
 
 use anyhow::{anyhow, Result};
+use tokio::sync::RwLock;
 
-use super::{ModProvider, ModResponse, ResolvableStatus};
+use super::{CacheWrapper, ModProvider, ModResponse, ResolvableStatus};
 
 inventory::submit! {
     super::ProviderFactory {
+        id: "file",
         new: FileProvider::new_provider,
         can_provide: |url| Path::new(&url).exists()
     }
@@ -27,7 +30,7 @@ impl FileProvider {
 
 #[async_trait::async_trait]
 impl ModProvider for FileProvider {
-    async fn get_mod(&self, url: &str) -> Result<ModResponse> {
+    async fn get_mod(&self, url: &str, _cache: Arc<RwLock<CacheWrapper>>) -> Result<ModResponse> {
         let path = Path::new(url);
         Ok(ModResponse::Resolve {
             cache: false,
