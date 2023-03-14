@@ -201,7 +201,9 @@ impl BlobCache {
         hasher.update(blob);
         let hash = hex::encode(hasher.finalize());
 
-        std::fs::write(self.path.join(&hash), blob)?;
+        let tmp = self.path.join(format!(".{hash}"));
+        std::fs::write(&tmp, blob)?;
+        std::fs::rename(tmp, self.path.join(&hash))?;
 
         Ok(BlobRef(hash))
     }
