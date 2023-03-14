@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::io::Cursor;
 use std::sync::{Arc, RwLock};
 
 use anyhow::{anyhow, Result};
@@ -72,7 +71,7 @@ impl ModProvider for HttpProvider {
     ) -> Result<ModResponse> {
         let pid = "http";
 
-        if let Some(blob) = if update {
+        if let Some(path) = if update {
             None
         } else {
             cache
@@ -80,13 +79,13 @@ impl ModProvider for HttpProvider {
                 .unwrap()
                 .get::<HttpProviderCache>(pid)
                 .and_then(|c| c.url_blobs.get(url))
-                .and_then(|r| blob_cache.read(r).ok())
+                .and_then(|r| blob_cache.get_path(r))
         } {
             Ok(ModResponse::Resolve {
                 status: ResolvableStatus::Resolvable {
                     url: url.to_owned(),
                 },
-                data: blob,
+                path,
             })
         } else {
             println!("downloading mod {url}...");
@@ -94,7 +93,7 @@ impl ModProvider for HttpProvider {
                 status: ResolvableStatus::Resolvable {
                     url: url.to_owned(),
                 },
-                data: Box::new(Cursor::new({
+                path: {
                     let res = self.client.get(url).send().await?.error_for_status()?;
                     if let Some(mime) = res
                         .headers()
@@ -107,15 +106,17 @@ impl ModProvider for HttpProvider {
                     }
 
                     let data = res.bytes().await?.to_vec();
+                    let blob = blob_cache.write(&data)?;
+                    let path = blob_cache.get_path(&blob).unwrap();
                     cache
                         .write()
                         .unwrap()
                         .get_mut::<HttpProviderCache>(pid)
                         .url_blobs
-                        .insert(url.to_owned(), blob_cache.write(&data)?);
+                        .insert(url.to_owned(), blob);
 
-                    data
-                })),
+                    path
+                },
             })
         }
     }

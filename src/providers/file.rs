@@ -1,5 +1,3 @@
-use std::fs::File;
-use std::io::BufReader;
 use std::path::Path;
 use std::sync::{Arc, RwLock};
 
@@ -45,7 +43,7 @@ impl ModProvider for FileProvider {
                     .to_string_lossy()
                     .to_string(),
             },
-            data: Box::new(BufReader::new(File::open(path)?)),
+            path: path.to_path_buf(),
         })
     }
 }

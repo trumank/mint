@@ -65,8 +65,8 @@ impl ModStore {
                 .get_mod(&url, update, self.cache.clone(), &self.blob_cache.clone())
                 .await?
             {
-                ModResponse::Resolve { data, status } => {
-                    return Ok(Mod { status, data });
+                ModResponse::Resolve { status, path } => {
+                    return Ok(Mod { status, path });
                 }
                 ModResponse::Redirect {
                     url: redirected_url,
@@ -91,7 +91,7 @@ pub enum ResolvableStatus {
 /// Returned from ModStore
 pub struct Mod {
     pub status: ResolvableStatus,
-    pub data: Box<dyn ReadSeek>,
+    pub path: PathBuf,
 }
 
 /// Returned from ModProvider
@@ -101,7 +101,7 @@ pub enum ModResponse {
     },
     Resolve {
         status: ResolvableStatus,
-        data: Box<dyn ReadSeek>,
+        path: PathBuf,
     },
 }
 
@@ -211,6 +211,10 @@ impl BlobCache {
         Ok(Box::new(BufReader::new(File::open(
             self.path.join(&blob.0),
         )?)))
+    }
+    fn get_path(&self, blob: &BlobRef) -> Option<PathBuf> {
+        let path = self.path.join(&blob.0);
+        path.exists().then_some(path)
     }
 }
 

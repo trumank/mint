@@ -1,5 +1,5 @@
+use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
-use std::{collections::HashMap, io::Cursor};
 
 use anyhow::{anyhow, Result};
 use reqwest::{Request, Response};
@@ -135,16 +135,16 @@ impl ModProvider for ModioProvider {
             let mod_id = mod_id.as_str().parse::<u32>().unwrap();
             let modfile_id = modfile_id.as_str().parse::<u32>().unwrap();
 
-            let data = if let Some(blob) = {
+            let path = if let Some(path) = {
                 let lock = cache.read().unwrap();
-                let blob = lock
+                let path = lock
                     .get::<ModioCache>(pid)
                     .and_then(|c| c.modfile_blobs.get(&modfile_id))
-                    .and_then(|r| blob_cache.read(r).ok());
+                    .and_then(|r| blob_cache.get_path(r));
                 drop(lock);
-                blob
+                path
             } {
-                blob
+                path
             } else {
                 let file = self
                     .modio
@@ -160,6 +160,7 @@ impl ModProvider for ModioProvider {
 
                 let data = self.modio.download(download).bytes().await?.to_vec();
                 let blob = blob_cache.write(&data)?;
+                let path = blob_cache.get_path(&blob).unwrap();
 
                 cache
                     .write()
@@ -168,14 +169,14 @@ impl ModProvider for ModioProvider {
                     .modfile_blobs
                     .insert(modfile_id, blob);
 
-                Box::new(Cursor::new(data))
+                path
             };
 
             Ok(ModResponse::Resolve {
                 status: ResolvableStatus::Resolvable {
                     url: url.to_owned(),
                 },
-                data,
+                path,
             })
         } else if let Some(mod_id) = captures.name("mod_id") {
             let name_id = captures.name("name_id").unwrap().as_str();

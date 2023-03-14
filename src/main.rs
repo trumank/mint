@@ -162,7 +162,7 @@ fn integrate<P: AsRef<Path>>(path_game: P, mods: Vec<providers::Mod>) -> Result<
         .into_iter()
         .map(|m| {
             println!("integrating {:?}", m.status);
-            let mut buf = get_pak_from_data(m.data)?;
+            let mut buf = get_pak_from_data(Box::new(BufReader::new(File::open(m.path)?)))?;
             let pak = repak::PakReader::new_any(&mut buf, None)?;
 
             let mount = Path::new(pak.mount_point());
