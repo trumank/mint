@@ -33,6 +33,7 @@ impl ModProvider for FileProvider {
     async fn get_mod(
         &self,
         url: &str,
+        _update: bool,
         _cache: Arc<RwLock<CacheWrapper>>,
         _blob_cache: &BlobCache,
     ) -> Result<ModResponse> {

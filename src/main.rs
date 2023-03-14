@@ -36,6 +36,10 @@ struct ActionIntegrate {
     #[arg(short, long)]
     drg: Option<PathBuf>,
 
+    /// Update mods. By default only offline cached data will be used without this flag.
+    #[arg(short, long)]
+    update: bool,
+
     /// Path of mods to integrate
     #[arg(short, long, num_args=0..)]
     mods: Vec<String>,
@@ -83,7 +87,7 @@ async fn action_integrate(action: ActionIntegrate) -> Result<()> {
     let mut store = providers::ModStore::new("cache");
 
     let mods = loop {
-        match store.resolve_mods(&action.mods).await {
+        match store.resolve_mods(&action.mods, action.update).await {
             Ok(mods) => break mods,
             Err(e) => match e.downcast::<IntegrationError>() {
                 Ok(IntegrationError::NoProvider { url, factory }) => {

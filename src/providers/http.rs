@@ -67,15 +67,20 @@ impl ModProvider for HttpProvider {
     async fn get_mod(
         &self,
         url: &str,
+        update: bool,
         cache: Arc<RwLock<CacheWrapper>>,
         blob_cache: &BlobCache,
     ) -> Result<ModResponse> {
         let mut wrapper = cache.write().await;
         let cache = wrapper.get_mut::<HttpProviderCache>("http");
-        if let Some(blob) = cache
-            .url_blobs
-            .get(url)
-            .and_then(|r| blob_cache.read(r).ok())
+        if let Some(blob) = (!update)
+            .then(|| {
+                cache
+                    .url_blobs
+                    .get(url)
+                    .and_then(|r| blob_cache.read(r).ok())
+            })
+            .flatten()
         {
             Ok(ModResponse::Resolve {
                 status: ResolvableStatus::Resolvable {

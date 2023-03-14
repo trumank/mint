@@ -120,6 +120,7 @@ impl ModProvider for ModioProvider {
     async fn get_mod(
         &self,
         url: &str,
+        update: bool,
         cache: Arc<RwLock<CacheWrapper>>,
         blob_cache: &BlobCache,
     ) -> Result<ModResponse> {
@@ -195,23 +196,26 @@ impl ModProvider for ModioProvider {
 
             let name_id = captures.name("name_id").unwrap().as_str();
 
-            let cached_id = cache.mod_id_map.get(name_id);
+            let cached_id = (!update).then(|| cache.mod_id_map.get(name_id)).flatten();
 
             if let Some(id) = cached_id {
-                if let Some(modfile_id) = cache.latest_modfile.get(id) {
-                    Ok(ModResponse::Redirect {
-                        url: format!("https://mod.io/g/drg/m/{}#{}/{}", &name_id, id, modfile_id),
-                    })
+                let modfile_id = if let Some(modfile_id) = cache.latest_modfile.get(id) {
+                    *modfile_id
                 } else {
-                    let mod_ = self.modio.mod_(MODIO_DRG_ID, *id).get().await?;
-                    let file = mod_.modfile.ok_or_else(|| {
-                        anyhow!("mod {} does not have an associated modfile", url)
-                    })?;
-                    cache.latest_modfile.insert(*id, file.id);
-                    Ok(ModResponse::Redirect {
-                        url: format!("https://mod.io/g/drg/m/{}#{}/{}", &name_id, id, file.id),
-                    })
-                }
+                    let modfile_id = self
+                        .modio
+                        .mod_(MODIO_DRG_ID, *id)
+                        .get()
+                        .await?
+                        .modfile
+                        .ok_or_else(|| anyhow!("mod {} does not have an associated modfile", url))?
+                        .id;
+                    cache.latest_modfile.insert(*id, modfile_id);
+                    modfile_id
+                };
+                Ok(ModResponse::Redirect {
+                    url: format!("https://mod.io/g/drg/m/{}#{}/{}", &name_id, id, modfile_id),
+                })
             } else {
                 let filter = NameId::eq(name_id).and(Visible::_in(vec![0, 1]));
                 let mut mods = self

@@ -51,19 +51,19 @@ impl ModStore {
             }
         })
     }
-    pub async fn resolve_mods(&mut self, mods: &[String]) -> Result<Vec<Mod>> {
+    pub async fn resolve_mods(&mut self, mods: &[String], update: bool) -> Result<Vec<Mod>> {
         use futures::stream::{self, StreamExt, TryStreamExt};
 
-        stream::iter(mods.iter().map(|m| self.get_mod(m.to_owned())))
+        stream::iter(mods.iter().map(|m| self.get_mod(m.to_owned(), update)))
             .buffered(5)
             .try_collect()
             .await
     }
-    pub async fn get_mod(&self, mut url: String) -> Result<Mod> {
+    pub async fn get_mod(&self, mut url: String, update: bool) -> Result<Mod> {
         loop {
             match self
                 .get_provider(&url)?
-                .get_mod(&url, self.cache.clone(), &self.blob_cache.clone())
+                .get_mod(&url, update, self.cache.clone(), &self.blob_cache.clone())
                 .await?
             {
                 ModResponse::Resolve { data, status } => {
@@ -111,6 +111,7 @@ pub trait ModProvider: Sync + std::fmt::Debug {
     async fn get_mod(
         &self,
         url: &str,
+        update: bool,
         cache: Arc<RwLock<CacheWrapper>>,
         blob_cache: &BlobCache,
     ) -> Result<ModResponse>;
