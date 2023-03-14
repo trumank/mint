@@ -71,17 +71,18 @@ impl ModProvider for HttpProvider {
         cache: Arc<RwLock<CacheWrapper>>,
         blob_cache: &BlobCache,
     ) -> Result<ModResponse> {
-        let mut wrapper = cache.write().await;
-        let cache = wrapper.get_mut::<HttpProviderCache>("http");
-        if let Some(blob) = (!update)
-            .then(|| {
-                cache
-                    .url_blobs
-                    .get(url)
-                    .and_then(|r| blob_cache.read(r).ok())
-            })
-            .flatten()
-        {
+        let pid = "http";
+
+        if let Some(blob) = if update {
+            None
+        } else {
+            cache
+                .read()
+                .await
+                .get::<HttpProviderCache>(pid)
+                .and_then(|c| c.url_blobs.get(url))
+                .and_then(|r| blob_cache.read(r).ok())
+        } {
             Ok(ModResponse::Resolve {
                 status: ResolvableStatus::Resolvable {
                     url: url.to_owned(),
@@ -108,6 +109,9 @@ impl ModProvider for HttpProvider {
 
                     let data = res.bytes().await?.to_vec();
                     cache
+                        .write()
+                        .await
+                        .get_mut::<HttpProviderCache>(pid)
                         .url_blobs
                         .insert(url.to_owned(), blob_cache.write(&data)?);
 

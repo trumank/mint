@@ -164,14 +164,10 @@ impl CacheWrapper {
             .and_then(|c| c.as_any().downcast_ref::<T>())
             .is_none()
     }
-    fn get<T: ModProviderCache + 'static>(&mut self, id: &str) -> &T {
-        if self.has::<T>(id) {
-            self.cache.insert(id.to_owned(), Box::new(T::new()));
-        }
+    fn get<T: ModProviderCache + 'static>(&self, id: &str) -> Option<&T> {
         self.cache
             .get(id)
             .and_then(|c| c.as_any().downcast_ref::<T>())
-            .unwrap()
     }
     fn get_mut<T: ModProviderCache + 'static>(&mut self, id: &str) -> &mut T {
         if self.has::<T>(id) {

@@ -124,8 +124,7 @@ impl ModProvider for ModioProvider {
         cache: Arc<RwLock<CacheWrapper>>,
         blob_cache: &BlobCache,
     ) -> Result<ModResponse> {
-        let mut inner = cache.write().await;
-        let cache = inner.get_mut::<ModioCache>("modio");
+        let pid = "modio";
 
         let captures = RE_MOD
             .captures(url)
@@ -138,8 +137,10 @@ impl ModProvider for ModioProvider {
             let modfile_id = modfile_id.as_str().parse::<u32>().unwrap();
 
             let data = if let Some(blob) = cache
-                .modfile_blobs
-                .get(&modfile_id)
+                .read()
+                .await
+                .get::<ModioCache>(pid)
+                .and_then(|c| c.modfile_blobs.get(&modfile_id))
                 .and_then(|r| blob_cache.read(r).ok())
             {
                 blob
@@ -157,7 +158,11 @@ impl ModProvider for ModioProvider {
                 println!("downloading mod {url}...");
 
                 let data = self.modio.download(download).bytes().await?.to_vec();
+
                 cache
+                    .write()
+                    .await
+                    .get_mut::<ModioCache>(pid)
                     .modfile_blobs
                     .insert(modfile_id, blob_cache.write(&data)?);
 
@@ -196,21 +201,44 @@ impl ModProvider for ModioProvider {
 
             let name_id = captures.name("name_id").unwrap().as_str();
 
-            let cached_id = (!update).then(|| cache.mod_id_map.get(name_id)).flatten();
+            let cached_id = if update {
+                None
+            } else {
+                cache
+                    .read()
+                    .await
+                    .get::<ModioCache>(pid)
+                    .and_then(|c| c.mod_id_map.get(name_id).cloned())
+            };
 
             if let Some(id) = cached_id {
-                let modfile_id = if let Some(modfile_id) = cache.latest_modfile.get(id) {
-                    *modfile_id
+                let modfile_id = if let Some(modfile_id) = if update {
+                    None
+                } else {
+                    cache
+                        .read()
+                        .await
+                        .get::<ModioCache>(pid)
+                        .and_then(|c| c.latest_modfile.get(&id).cloned())
+                } {
+                    modfile_id
                 } else {
                     let modfile_id = self
                         .modio
-                        .mod_(MODIO_DRG_ID, *id)
+                        .mod_(MODIO_DRG_ID, id)
                         .get()
                         .await?
                         .modfile
                         .ok_or_else(|| anyhow!("mod {} does not have an associated modfile", url))?
                         .id;
-                    cache.latest_modfile.insert(*id, modfile_id);
+
+                    cache
+                        .write()
+                        .await
+                        .get_mut::<ModioCache>(pid)
+                        .latest_modfile
+                        .insert(id, modfile_id);
+
                     modfile_id
                 };
                 Ok(ModResponse::Redirect {
@@ -231,11 +259,21 @@ impl ModProvider for ModioProvider {
                         name_id,
                     ))
                 } else if let Some(mod_) = mods.pop() {
-                    cache.mod_id_map.insert(name_id.to_owned(), mod_.id);
+                    cache
+                        .write()
+                        .await
+                        .get_mut::<ModioCache>(pid)
+                        .mod_id_map
+                        .insert(name_id.to_owned(), mod_.id);
                     let file = mod_.modfile.ok_or_else(|| {
                         anyhow!("mod {} does not have an associated modfile", url)
                     })?;
-                    cache.latest_modfile.insert(mod_.id, file.id);
+                    cache
+                        .write()
+                        .await
+                        .get_mut::<ModioCache>(pid)
+                        .latest_modfile
+                        .insert(mod_.id, file.id);
 
                     Ok(ModResponse::Redirect {
                         url: format!(
