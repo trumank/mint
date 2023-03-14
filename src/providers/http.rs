@@ -1,10 +1,9 @@
 use std::collections::HashMap;
 use std::io::Cursor;
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 
 use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
-use tokio::sync::RwLock;
 
 use super::{
     BlobCache, BlobRef, CacheWrapper, ModProvider, ModProviderCache, ModResponse, ResolvableStatus,
@@ -78,7 +77,7 @@ impl ModProvider for HttpProvider {
         } else {
             cache
                 .read()
-                .await
+                .unwrap()
                 .get::<HttpProviderCache>(pid)
                 .and_then(|c| c.url_blobs.get(url))
                 .and_then(|r| blob_cache.read(r).ok())
@@ -110,7 +109,7 @@ impl ModProvider for HttpProvider {
                     let data = res.bytes().await?.to_vec();
                     cache
                         .write()
-                        .await
+                        .unwrap()
                         .get_mut::<HttpProviderCache>(pid)
                         .url_blobs
                         .insert(url.to_owned(), blob_cache.write(&data)?);

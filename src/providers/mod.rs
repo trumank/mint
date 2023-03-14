@@ -7,13 +7,12 @@ use crate::error::IntegrationError;
 use anyhow::{anyhow, Result};
 
 use serde::{Deserialize, Serialize};
-use tokio::sync::RwLock;
 
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::{BufReader, Read, Seek};
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 
 pub struct ModStore {
     providers: HashMap<ProviderFactory, Box<dyn ModProvider>>,

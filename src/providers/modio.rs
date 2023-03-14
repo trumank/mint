@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 use std::{collections::HashMap, io::Cursor};
 
 use anyhow::{anyhow, Result};
@@ -6,7 +6,6 @@ use reqwest::{Request, Response};
 use reqwest_middleware::{Middleware, Next};
 use serde::{Deserialize, Serialize};
 use task_local_extensions::Extensions;
-use tokio::sync::RwLock;
 
 use super::{
     BlobCache, BlobRef, CacheWrapper, ModProvider, ModProviderCache, ModResponse, ResolvableStatus,
@@ -136,13 +135,15 @@ impl ModProvider for ModioProvider {
             let mod_id = mod_id.as_str().parse::<u32>().unwrap();
             let modfile_id = modfile_id.as_str().parse::<u32>().unwrap();
 
-            let data = if let Some(blob) = cache
-                .read()
-                .await
-                .get::<ModioCache>(pid)
-                .and_then(|c| c.modfile_blobs.get(&modfile_id))
-                .and_then(|r| blob_cache.read(r).ok())
-            {
+            let data = if let Some(blob) = {
+                let lock = cache.read().unwrap();
+                let blob = lock
+                    .get::<ModioCache>(pid)
+                    .and_then(|c| c.modfile_blobs.get(&modfile_id))
+                    .and_then(|r| blob_cache.read(r).ok());
+                drop(lock);
+                blob
+            } {
                 blob
             } else {
                 let file = self
@@ -158,13 +159,14 @@ impl ModProvider for ModioProvider {
                 println!("downloading mod {url}...");
 
                 let data = self.modio.download(download).bytes().await?.to_vec();
+                let blob = blob_cache.write(&data)?;
 
                 cache
                     .write()
-                    .await
+                    .unwrap()
                     .get_mut::<ModioCache>(pid)
                     .modfile_blobs
-                    .insert(modfile_id, blob_cache.write(&data)?);
+                    .insert(modfile_id, blob);
 
                 Box::new(Cursor::new(data))
             };
@@ -206,7 +208,7 @@ impl ModProvider for ModioProvider {
             } else {
                 cache
                     .read()
-                    .await
+                    .unwrap()
                     .get::<ModioCache>(pid)
                     .and_then(|c| c.mod_id_map.get(name_id).cloned())
             };
@@ -217,7 +219,7 @@ impl ModProvider for ModioProvider {
                 } else {
                     cache
                         .read()
-                        .await
+                        .unwrap()
                         .get::<ModioCache>(pid)
                         .and_then(|c| c.latest_modfile.get(&id).cloned())
                 } {
@@ -234,7 +236,7 @@ impl ModProvider for ModioProvider {
 
                     cache
                         .write()
-                        .await
+                        .unwrap()
                         .get_mut::<ModioCache>(pid)
                         .latest_modfile
                         .insert(id, modfile_id);
@@ -261,7 +263,7 @@ impl ModProvider for ModioProvider {
                 } else if let Some(mod_) = mods.pop() {
                     cache
                         .write()
-                        .await
+                        .unwrap()
                         .get_mut::<ModioCache>(pid)
                         .mod_id_map
                         .insert(name_id.to_owned(), mod_.id);
@@ -270,7 +272,7 @@ impl ModProvider for ModioProvider {
                     })?;
                     cache
                         .write()
-                        .await
+                        .unwrap()
                         .get_mut::<ModioCache>(pid)
                         .latest_modfile
                         .insert(mod_.id, file.id);

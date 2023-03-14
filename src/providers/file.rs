@@ -1,10 +1,9 @@
 use std::fs::File;
 use std::io::BufReader;
 use std::path::Path;
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 
 use anyhow::{anyhow, Result};
-use tokio::sync::RwLock;
 
 use super::{BlobCache, CacheWrapper, ModProvider, ModResponse, ResolvableStatus};
 
