@@ -58,8 +58,10 @@ impl ModioProvider {
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct ModioCache {
     mod_id_map: HashMap<String, u32>,
+    name_id_map: HashMap<u32, String>,
     latest_modfile: HashMap<u32, u32>,
     modfile_blobs: HashMap<u32, BlobRef>,
+    dependencies: HashMap<u32, Vec<u32>>,
 }
 #[typetag::serde]
 impl ModProviderCache for ModioCache {
@@ -173,19 +175,42 @@ impl ModProvider for ModioProvider {
                 path
             };
 
-            let deps = self
-                .modio
-                .game(MODIO_DRG_ID)
-                .mod_(mod_id)
-                .dependencies()
-                .list()
-                .await?;
+            let deps = match (!update)
+                .then(|| {
+                    cache
+                        .read()
+                        .unwrap()
+                        .get::<ModioCache>(pid)
+                        .and_then(|c| c.dependencies.get(&mod_id).cloned())
+                })
+                .flatten()
+            {
+                Some(deps) => deps,
+                None => {
+                    let deps = self
+                        .modio
+                        .game(MODIO_DRG_ID)
+                        .mod_(mod_id)
+                        .dependencies()
+                        .list()
+                        .await?
+                        .into_iter()
+                        .map(|d| d.mod_id)
+                        .collect::<Vec<_>>();
 
-            let deps = deps
-                .into_iter()
-                //.map(|d| ModResponse::Redirect { url: format!("https://mod.io/g/drg/m/TEMP#{}", d.mod_id), })
-                .map(|d| format!("https://mod.io/g/drg/m/FIXME#{}", d.mod_id))
-                .collect();
+                    cache
+                        .write()
+                        .unwrap()
+                        .get_mut::<ModioCache>(pid)
+                        .dependencies
+                        .insert(mod_id, deps.clone());
+
+                    deps
+                }
+            }
+            .into_iter()
+            .map(|d| format!("https://mod.io/g/drg/m/FIXME#{d}"))
+            .collect();
 
             Ok(ModResponse::Resolve(Mod {
                 status: ResolvableStatus::Resolvable {
@@ -196,23 +221,43 @@ impl ModProvider for ModioProvider {
                 suggested_dependencies: deps,
             }))
         } else if let Some(mod_id) = captures.name("mod_id") {
-            let name_id = captures.name("name_id").unwrap().as_str();
+            let mod_id = mod_id.as_str().parse::<u32>().unwrap();
 
-            let mod_ = self
-                .modio
-                .game(MODIO_DRG_ID)
-                .mod_(mod_id.as_str().parse::<u32>().unwrap())
-                .get()
-                .await?;
+            let cached = (!update)
+                .then(|| {
+                    cache.read().unwrap().get::<ModioCache>(pid).and_then(|c| {
+                        c.latest_modfile
+                            .get(&mod_id)
+                            .copied()
+                            .zip(c.name_id_map.get(&mod_id).map(|n| n.to_owned()))
+                    })
+                })
+                .flatten();
 
-            let file = mod_
-                .modfile
-                .ok_or_else(|| anyhow!("mod {} does not have an associated modfile", url))?;
+            let mod_ = if let Some((file_id, name_id)) = cached {
+                (name_id, Some(file_id))
+            } else {
+                let mod_ = self.modio.game(MODIO_DRG_ID).mod_(mod_id).get().await?;
+
+                let mut lock = cache.write().unwrap();
+                let c = lock.get_mut::<ModioCache>(pid);
+                c.name_id_map.insert(mod_id, mod_.name_id.to_owned());
+                if let Some(modfile) = &mod_.modfile {
+                    c.latest_modfile.insert(mod_id, modfile.id);
+                }
+
+                (mod_.name_id, mod_.modfile.map(|f| f.id))
+            };
 
             Ok(ModResponse::Redirect {
                 url: format!(
                     "https://mod.io/g/drg/m/{}#{}/{}",
-                    &name_id, file.mod_id, file.id
+                    mod_.0,
+                    mod_id,
+                    mod_.1.ok_or_else(|| anyhow!(
+                        "mod {} does not have an associated modfile",
+                        url
+                    ))?
                 ),
             })
         } else {
