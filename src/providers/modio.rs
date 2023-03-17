@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, RwLock};
 
 use anyhow::{anyhow, Result};
@@ -14,7 +14,7 @@ use super::{
 
 inventory::submit! {
     super::ProviderFactory {
-        id: "modio",
+        id: MODIO_PROVIDER_ID,
         new: ModioProvider::new_provider,
         can_provide: |url| RE_MOD.is_match(&url),
     }
@@ -56,13 +56,14 @@ impl ModioProvider {
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]
+#[serde(default)]
 pub struct ModioCache {
     mod_id_map: HashMap<String, u32>,
-    name_id_map: HashMap<u32, String>,
-    latest_modfile: HashMap<u32, u32>,
     modfile_blobs: HashMap<u32, BlobRef>,
     dependencies: HashMap<u32, Vec<u32>>,
+    mods: HashMap<u32, ModioMod>,
 }
+
 #[typetag::serde]
 impl ModProviderCache for ModioCache {
     fn new() -> Self {
@@ -76,11 +77,28 @@ impl ModProviderCache for ModioCache {
     }
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ModioMod {
+    name_id: String,
+    latest_modfile: Option<u32>,
+    tags: HashSet<String>,
+}
+impl From<modio::mods::Mod> for ModioMod {
+    fn from(value: modio::mods::Mod) -> Self {
+        Self {
+            name_id: value.name_id,
+            latest_modfile: value.modfile.map(|f| f.id),
+            tags: value.tags.into_iter().map(|t| t.name).collect(),
+        }
+    }
+}
+
 lazy_static::lazy_static! {
     static ref RE_MOD: regex::Regex = regex::Regex::new("^https://mod.io/g/drg/m/(?P<name_id>[^/#]+)(:?#(?P<mod_id>\\d+)(:?/(?P<modfile_id>\\d+))?)?$").unwrap();
 }
 
 const MODIO_DRG_ID: u32 = 2475;
+const MODIO_PROVIDER_ID: &str = "modio";
 
 struct LoggingMiddleware {
     requests: std::sync::Arc<std::sync::atomic::AtomicUsize>,
@@ -126,8 +144,6 @@ impl ModProvider for ModioProvider {
         cache: Arc<RwLock<CacheWrapper>>,
         blob_cache: &BlobCache,
     ) -> Result<ModResponse> {
-        let pid = "modio";
-
         let captures = RE_MOD
             .captures(url)
             .ok_or_else(|| anyhow!("invalid modio URL {url}"))?;
@@ -139,12 +155,12 @@ impl ModProvider for ModioProvider {
             let modfile_id = modfile_id.as_str().parse::<u32>().unwrap();
 
             let path = if let Some(path) = {
-                let lock = cache.read().unwrap();
-                let path = lock
-                    .get::<ModioCache>(pid)
+                let path = cache
+                    .read()
+                    .unwrap()
+                    .get::<ModioCache>(MODIO_PROVIDER_ID)
                     .and_then(|c| c.modfile_blobs.get(&modfile_id))
                     .and_then(|r| blob_cache.get_path(r));
-                drop(lock);
                 path
             } {
                 path
@@ -168,11 +184,39 @@ impl ModProvider for ModioProvider {
                 cache
                     .write()
                     .unwrap()
-                    .get_mut::<ModioCache>(pid)
+                    .get_mut::<ModioCache>(MODIO_PROVIDER_ID)
                     .modfile_blobs
                     .insert(modfile_id, blob);
 
                 path
+            };
+
+            let mod_ = if let Some(mod_) = (!update)
+                .then(|| {
+                    cache
+                        .read()
+                        .unwrap()
+                        .get::<ModioCache>(MODIO_PROVIDER_ID)
+                        .and_then(|c| c.mods.get(&mod_id).cloned())
+                })
+                .flatten()
+            {
+                mod_
+            } else {
+                let mod_: ModioMod = self
+                    .modio
+                    .game(MODIO_DRG_ID)
+                    .mod_(mod_id)
+                    .get()
+                    .await?
+                    .into();
+
+                let mut lock = cache.write().unwrap();
+                let c = lock.get_mut::<ModioCache>(MODIO_PROVIDER_ID);
+                c.mods.insert(mod_id, mod_.clone());
+                c.mod_id_map.insert(mod_.name_id.to_owned(), mod_id);
+
+                mod_
             };
 
             let deps = match (!update)
@@ -180,7 +224,7 @@ impl ModProvider for ModioProvider {
                     cache
                         .read()
                         .unwrap()
-                        .get::<ModioCache>(pid)
+                        .get::<ModioCache>(MODIO_PROVIDER_ID)
                         .and_then(|c| c.dependencies.get(&mod_id).cloned())
                 })
                 .flatten()
@@ -201,7 +245,7 @@ impl ModProvider for ModioProvider {
                     cache
                         .write()
                         .unwrap()
-                        .get_mut::<ModioCache>(pid)
+                        .get_mut::<ModioCache>(MODIO_PROVIDER_ID)
                         .dependencies
                         .insert(mod_id, deps.clone());
 
@@ -217,7 +261,7 @@ impl ModProvider for ModioProvider {
                     url: url.to_owned(),
                 },
                 path,
-                suggested_require: false,
+                suggested_require: mod_.tags.contains("RequiredByAll"),
                 suggested_dependencies: deps,
             }))
         } else if let Some(mod_id) = captures.name("mod_id") {
@@ -225,36 +269,39 @@ impl ModProvider for ModioProvider {
 
             let cached = (!update)
                 .then(|| {
-                    cache.read().unwrap().get::<ModioCache>(pid).and_then(|c| {
-                        c.latest_modfile
-                            .get(&mod_id)
-                            .copied()
-                            .zip(c.name_id_map.get(&mod_id).map(|n| n.to_owned()))
-                    })
+                    cache
+                        .read()
+                        .unwrap()
+                        .get::<ModioCache>(MODIO_PROVIDER_ID)
+                        .and_then(|c| c.mods.get(&mod_id).cloned())
                 })
                 .flatten();
 
-            let mod_ = if let Some((file_id, name_id)) = cached {
-                (name_id, Some(file_id))
+            let mod_ = if let Some(mod_) = cached {
+                mod_
             } else {
-                let mod_ = self.modio.game(MODIO_DRG_ID).mod_(mod_id).get().await?;
+                let mod_: ModioMod = self
+                    .modio
+                    .game(MODIO_DRG_ID)
+                    .mod_(mod_id)
+                    .get()
+                    .await?
+                    .into();
 
                 let mut lock = cache.write().unwrap();
-                let c = lock.get_mut::<ModioCache>(pid);
-                c.name_id_map.insert(mod_id, mod_.name_id.to_owned());
-                if let Some(modfile) = &mod_.modfile {
-                    c.latest_modfile.insert(mod_id, modfile.id);
-                }
+                let c = lock.get_mut::<ModioCache>(MODIO_PROVIDER_ID);
+                c.mods.insert(mod_id, mod_.clone());
+                c.mod_id_map.insert(mod_.name_id.to_owned(), mod_id);
 
-                (mod_.name_id, mod_.modfile.map(|f| f.id))
+                mod_
             };
 
             Ok(ModResponse::Redirect {
                 url: format!(
                     "https://mod.io/g/drg/m/{}#{}/{}",
-                    mod_.0,
+                    mod_.name_id,
                     mod_id,
-                    mod_.1.ok_or_else(|| anyhow!(
+                    mod_.latest_modfile.ok_or_else(|| anyhow!(
                         "mod {} does not have an associated modfile",
                         url
                     ))?
@@ -272,40 +319,36 @@ impl ModProvider for ModioProvider {
                 cache
                     .read()
                     .unwrap()
-                    .get::<ModioCache>(pid)
+                    .get::<ModioCache>(MODIO_PROVIDER_ID)
                     .and_then(|c| c.mod_id_map.get(name_id).cloned())
             };
 
             if let Some(id) = cached_id {
-                let modfile_id = if let Some(modfile_id) = if update {
-                    None
-                } else {
-                    cache
-                        .read()
-                        .unwrap()
-                        .get::<ModioCache>(pid)
-                        .and_then(|c| c.latest_modfile.get(&id).cloned())
-                } {
+                let cached = (!update)
+                    .then(|| {
+                        cache
+                            .read()
+                            .unwrap()
+                            .get::<ModioCache>(MODIO_PROVIDER_ID)
+                            .and_then(|c| c.mods.get(&id))
+                            .and_then(|m| m.latest_modfile)
+                    })
+                    .flatten();
+
+                let modfile_id = if let Some(modfile_id) = cached {
                     modfile_id
                 } else {
-                    let modfile_id = self
-                        .modio
-                        .mod_(MODIO_DRG_ID, id)
-                        .get()
-                        .await?
-                        .modfile
+                    let mod_: ModioMod = self.modio.game(MODIO_DRG_ID).mod_(id).get().await?.into();
+
+                    let mut lock = cache.write().unwrap();
+                    let c = lock.get_mut::<ModioCache>(MODIO_PROVIDER_ID);
+                    c.mods.insert(id, mod_.clone());
+                    c.mod_id_map.insert(mod_.name_id, id);
+
+                    mod_.latest_modfile
                         .ok_or_else(|| anyhow!("mod {} does not have an associated modfile", url))?
-                        .id;
-
-                    cache
-                        .write()
-                        .unwrap()
-                        .get_mut::<ModioCache>(pid)
-                        .latest_modfile
-                        .insert(id, modfile_id);
-
-                    modfile_id
                 };
+
                 Ok(ModResponse::Redirect {
                     url: format!("https://mod.io/g/drg/m/{}#{}/{}", &name_id, id, modfile_id),
                 })
@@ -324,27 +367,26 @@ impl ModProvider for ModioProvider {
                         name_id,
                     ))
                 } else if let Some(mod_) = mods.pop() {
-                    cache
-                        .write()
-                        .unwrap()
-                        .get_mut::<ModioCache>(pid)
-                        .mod_id_map
-                        .insert(name_id.to_owned(), mod_.id);
-                    let file = mod_.modfile.ok_or_else(|| {
+                    let mod_id = mod_.id;
+                    let mod_: ModioMod = self
+                        .modio
+                        .game(MODIO_DRG_ID)
+                        .mod_(mod_id)
+                        .get()
+                        .await?
+                        .into();
+
+                    let mut lock = cache.write().unwrap();
+                    let c = lock.get_mut::<ModioCache>(MODIO_PROVIDER_ID);
+                    c.mods.insert(mod_id, mod_.clone());
+                    c.mod_id_map.insert(mod_.name_id, mod_id);
+
+                    let file = mod_.latest_modfile.ok_or_else(|| {
                         anyhow!("mod {} does not have an associated modfile", url)
                     })?;
-                    cache
-                        .write()
-                        .unwrap()
-                        .get_mut::<ModioCache>(pid)
-                        .latest_modfile
-                        .insert(mod_.id, file.id);
 
                     Ok(ModResponse::Redirect {
-                        url: format!(
-                            "https://mod.io/g/drg/m/{}#{}/{}",
-                            &name_id, file.mod_id, file.id
-                        ),
+                        url: format!("https://mod.io/g/drg/m/{}#{}/{}", &name_id, mod_id, file),
                     })
                 } else {
                     Err(anyhow!("no mods returned for mod name_id {}", &name_id))
