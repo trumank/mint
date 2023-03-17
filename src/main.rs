@@ -100,13 +100,16 @@ async fn action_integrate(action: ActionIntegrate) -> Result<()> {
     };
 
     println!("resolvable mods:");
-    for m in &mods {
-        if let ResolvableStatus::Resolvable { url } = &m.status {
+    for m in &action.mods {
+        if let ResolvableStatus::Resolvable { url } = &mods[m].status {
             println!("{url}");
         }
     }
 
-    integrate(path_game, mods)
+    integrate(
+        path_game,
+        action.mods.iter().map(|u| mods[u].clone()).collect(),
+    )
 }
 
 fn integrate<P: AsRef<Path>>(path_game: P, mods: Vec<providers::Mod>) -> Result<()> {
@@ -161,7 +164,7 @@ fn integrate<P: AsRef<Path>>(path_game: P, mods: Vec<providers::Mod>) -> Result<
     let mods = mods
         .into_iter()
         .map(|m| {
-            println!("integrating {:?}", m.status);
+            println!("integrating {m:?}");
             let mut buf = get_pak_from_data(Box::new(BufReader::new(File::open(m.path)?)))?;
             let pak = repak::PakReader::new_any(&mut buf, None)?;
 

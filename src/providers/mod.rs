@@ -8,7 +8,7 @@ use anyhow::{anyhow, Result};
 
 use serde::{Deserialize, Serialize};
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs::File;
 use std::io::{BufReader, Read, Seek};
 use std::path::{Path, PathBuf};
@@ -50,23 +50,50 @@ impl ModStore {
             }
         })
     }
-    pub async fn resolve_mods(&mut self, mods: &[String], update: bool) -> Result<Vec<Mod>> {
+    pub async fn resolve_mods(
+        &mut self,
+        mods: &[String],
+        update: bool,
+    ) -> Result<HashMap<String, Mod>> {
         use futures::stream::{self, StreamExt, TryStreamExt};
 
-        stream::iter(mods.iter().map(|m| self.get_mod(m.to_owned(), update)))
+        let mut to_resolve = mods.iter().cloned().collect::<HashSet<String>>();
+        let mut mods_map = HashMap::new();
+
+        while !to_resolve.is_empty() {
+            for (u, m) in stream::iter(
+                to_resolve
+                    .iter()
+                    .map(|u| self.get_mod(u.to_owned(), update)),
+            )
             .buffered(5)
-            .try_collect()
-            .await
+            .try_collect::<Vec<_>>()
+            .await?
+            {
+                mods_map.insert(u, m);
+                to_resolve.clear();
+                for m in mods_map.values() {
+                    for d in &m.suggested_dependencies {
+                        if !mods_map.contains_key(d) {
+                            to_resolve.insert(d.to_string());
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(mods_map)
     }
-    pub async fn get_mod(&self, mut url: String, update: bool) -> Result<Mod> {
+    pub async fn get_mod(&self, original_url: String, update: bool) -> Result<(String, Mod)> {
+        let mut url = original_url.clone();
         loop {
             match self
                 .get_provider(&url)?
                 .get_mod(&url, update, self.cache.clone(), &self.blob_cache.clone())
                 .await?
             {
-                ModResponse::Resolve { status, path } => {
-                    return Ok(Mod { status, path });
+                ModResponse::Resolve(m) => {
+                    return Ok((original_url, m));
                 }
                 ModResponse::Redirect {
                     url: redirected_url,
@@ -80,7 +107,7 @@ pub trait ReadSeek: Read + Seek + Send {}
 impl<T: Seek + Read + Send> ReadSeek for T {}
 
 /// Whether a mod can be resolved by clients or not
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum ResolvableStatus {
     /// If a mod can not be resolved, specify just a name
     Unresolvable { name: String },
@@ -89,20 +116,19 @@ pub enum ResolvableStatus {
 }
 
 /// Returned from ModStore
+#[derive(Debug, Clone)]
 pub struct Mod {
     pub status: ResolvableStatus,
     pub path: PathBuf,
+    pub suggested_require: bool,
+    pub suggested_dependencies: Vec<String>, // ModResponse
 }
 
 /// Returned from ModProvider
+#[derive(Debug, Clone)]
 pub enum ModResponse {
-    Redirect {
-        url: String,
-    },
-    Resolve {
-        status: ResolvableStatus,
-        path: PathBuf,
-    },
+    Redirect { url: String },
+    Resolve(Mod),
 }
 
 #[async_trait::async_trait]

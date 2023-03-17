@@ -8,7 +8,8 @@ use serde::{Deserialize, Serialize};
 use task_local_extensions::Extensions;
 
 use super::{
-    BlobCache, BlobRef, CacheWrapper, ModProvider, ModProviderCache, ModResponse, ResolvableStatus,
+    BlobCache, BlobRef, CacheWrapper, Mod, ModProvider, ModProviderCache, ModResponse,
+    ResolvableStatus,
 };
 
 inventory::submit! {
@@ -172,12 +173,28 @@ impl ModProvider for ModioProvider {
                 path
             };
 
-            Ok(ModResponse::Resolve {
+            let deps = self
+                .modio
+                .game(MODIO_DRG_ID)
+                .mod_(mod_id)
+                .dependencies()
+                .list()
+                .await?;
+
+            let deps = deps
+                .into_iter()
+                //.map(|d| ModResponse::Redirect { url: format!("https://mod.io/g/drg/m/TEMP#{}", d.mod_id), })
+                .map(|d| format!("https://mod.io/g/drg/m/FIXME#{}", d.mod_id))
+                .collect();
+
+            Ok(ModResponse::Resolve(Mod {
                 status: ResolvableStatus::Resolvable {
                     url: url.to_owned(),
                 },
                 path,
-            })
+                suggested_require: false,
+                suggested_dependencies: deps,
+            }))
         } else if let Some(mod_id) = captures.name("mod_id") {
             let name_id = captures.name("name_id").unwrap().as_str();
 

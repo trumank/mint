@@ -3,7 +3,7 @@ use std::sync::{Arc, RwLock};
 
 use anyhow::{anyhow, Result};
 
-use super::{BlobCache, CacheWrapper, ModProvider, ModResponse, ResolvableStatus};
+use super::{BlobCache, CacheWrapper, Mod, ModProvider, ModResponse, ResolvableStatus};
 
 inventory::submit! {
     super::ProviderFactory {
@@ -35,7 +35,7 @@ impl ModProvider for FileProvider {
         _blob_cache: &BlobCache,
     ) -> Result<ModResponse> {
         let path = Path::new(url);
-        Ok(ModResponse::Resolve {
+        Ok(ModResponse::Resolve(Mod {
             status: ResolvableStatus::Unresolvable {
                 name: path
                     .file_name()
@@ -44,6 +44,8 @@ impl ModProvider for FileProvider {
                     .to_string(),
             },
             path: path.to_path_buf(),
-        })
+            suggested_require: false,
+            suggested_dependencies: vec![],
+        }))
     }
 }

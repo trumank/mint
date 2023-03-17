@@ -5,7 +5,8 @@ use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
 
 use super::{
-    BlobCache, BlobRef, CacheWrapper, ModProvider, ModProviderCache, ModResponse, ResolvableStatus,
+    BlobCache, BlobRef, CacheWrapper, Mod, ModProvider, ModProviderCache, ModResponse,
+    ResolvableStatus,
 };
 
 inventory::submit! {
@@ -81,15 +82,17 @@ impl ModProvider for HttpProvider {
                 .and_then(|c| c.url_blobs.get(url))
                 .and_then(|r| blob_cache.get_path(r))
         } {
-            Ok(ModResponse::Resolve {
+            Ok(ModResponse::Resolve(Mod {
                 status: ResolvableStatus::Resolvable {
                     url: url.to_owned(),
                 },
                 path,
-            })
+                suggested_require: false,
+                suggested_dependencies: vec![],
+            }))
         } else {
             println!("downloading mod {url}...");
-            Ok(ModResponse::Resolve {
+            Ok(ModResponse::Resolve(Mod {
                 status: ResolvableStatus::Resolvable {
                     url: url.to_owned(),
                 },
@@ -117,7 +120,9 @@ impl ModProvider for HttpProvider {
 
                     path
                 },
-            })
+                suggested_require: false,
+                suggested_dependencies: vec![],
+            }))
         }
     }
 }
