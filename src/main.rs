@@ -106,10 +106,40 @@ async fn action_integrate(action: ActionIntegrate) -> Result<()> {
         }
     }
 
-    integrate(
-        path_game,
-        action.mods.iter().map(|u| mods[u].clone()).collect(),
-    )
+    let mods_set = action
+        .mods
+        .iter()
+        .flat_map(|m| match &mods[m].status {
+            ResolvableStatus::Resolvable { url } => Some(url),
+            _ => None,
+        })
+        .collect::<HashSet<_>>();
+
+    let missing_deps = action
+        .mods
+        .iter()
+        .flat_map(|m| {
+            mods[m]
+                .suggested_dependencies
+                .iter()
+                .filter_map(|m| match &mods[m].status {
+                    ResolvableStatus::Resolvable { url } => {
+                        (!mods_set.contains(url)).then_some(url)
+                    }
+                    _ => Some(m),
+                })
+        })
+        .collect::<HashSet<_>>();
+    if !missing_deps.is_empty() {
+        println!("WARNING: The following dependencies are missing:");
+        for d in missing_deps {
+            println!("  {d}");
+        }
+    }
+
+    let to_integrate = action.mods.iter().map(|u| mods[u].clone()).collect();
+
+    integrate(path_game, to_integrate)
 }
 
 fn integrate<P: AsRef<Path>>(path_game: P, mods: Vec<providers::Mod>) -> Result<()> {
