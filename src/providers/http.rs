@@ -5,9 +5,9 @@ use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
 
 use super::{
-    BlobCache, BlobRef, CacheWrapper, Mod, ModProvider, ModProviderCache, ModResponse,
-    ResolvableStatus,
+    BlobCache, BlobRef, Cache, Mod, ModProvider, ModProviderCache, ModResponse, ResolvableStatus,
 };
+use crate::config::ConfigWrapper;
 
 inventory::submit! {
     super::ProviderFactory {
@@ -68,7 +68,7 @@ impl ModProvider for HttpProvider {
         &self,
         url: &str,
         update: bool,
-        cache: Arc<RwLock<CacheWrapper>>,
+        cache: Arc<RwLock<ConfigWrapper<Cache>>>,
         blob_cache: &BlobCache,
     ) -> Result<ModResponse> {
         let pid = "http";

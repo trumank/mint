@@ -4,7 +4,8 @@ use std::sync::{Arc, RwLock};
 
 use anyhow::{anyhow, Result};
 
-use super::{BlobCache, CacheWrapper, Mod, ModProvider, ModResponse, ResolvableStatus};
+use super::{BlobCache, Cache, Mod, ModProvider, ModResponse, ResolvableStatus};
+use crate::config::ConfigWrapper;
 
 inventory::submit! {
     super::ProviderFactory {
@@ -33,7 +34,7 @@ impl ModProvider for FileProvider {
         &self,
         url: &str,
         _update: bool,
-        _cache: Arc<RwLock<CacheWrapper>>,
+        _cache: Arc<RwLock<ConfigWrapper<Cache>>>,
         _blob_cache: &BlobCache,
     ) -> Result<ModResponse> {
         let path = Path::new(url);

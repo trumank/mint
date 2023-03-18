@@ -1,3 +1,4 @@
+mod config;
 mod error;
 mod integrate;
 mod providers;
@@ -5,13 +6,13 @@ mod providers;
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
-use providers::ResolvableStatus;
-
 use anyhow::{anyhow, Result};
 use clap::{Parser, Subcommand};
 use serde::{Deserialize, Serialize};
 
-use crate::error::IntegrationError;
+use config::ConfigWrapper;
+use error::IntegrationError;
+use providers::ResolvableStatus;
 
 #[derive(Parser, Debug)]
 struct ActionIntegrate {
@@ -49,42 +50,6 @@ async fn main() -> Result<()> {
     }
 }
 
-struct ConfigWrapper {
-    path: PathBuf,
-    config: Config,
-}
-impl ConfigWrapper {
-    fn new<P: AsRef<Path>>(path: P) -> Self {
-        Self {
-            config: std::fs::read(&path)
-                .ok()
-                .and_then(|s| serde_json::from_slice(&s).ok())
-                .unwrap_or_default(),
-            path: path.as_ref().to_path_buf(),
-        }
-    }
-    fn save(&self) -> Result<()> {
-        std::fs::write(&self.path, serde_json::to_vec_pretty(&self.config)?)?;
-        Ok(())
-    }
-}
-impl std::ops::Deref for ConfigWrapper {
-    type Target = Config;
-    fn deref(&self) -> &Self::Target {
-        &self.config
-    }
-}
-impl std::ops::DerefMut for ConfigWrapper {
-    fn deref_mut(&mut self) -> &mut Config {
-        &mut self.config
-    }
-}
-impl Drop for ConfigWrapper {
-    fn drop(&mut self) {
-        self.save().unwrap();
-    }
-}
-
 #[derive(Debug, Default, Serialize, Deserialize)]
 struct Config {
     provider_parameters: HashMap<String, HashMap<String, String>>,
@@ -109,7 +74,7 @@ async fn action_integrate(action: ActionIntegrate) -> Result<()> {
     let data_dir = Path::new("data");
 
     std::fs::create_dir(data_dir).ok();
-    let mut config = ConfigWrapper::new(data_dir.join("config.json"));
+    let mut config: ConfigWrapper<Config> = ConfigWrapper::new(data_dir.join("config.json"));
     let mut store = providers::ModStore::new(data_dir, &config.provider_parameters)?;
 
     let mods = loop {

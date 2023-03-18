@@ -2,6 +2,7 @@ pub mod file;
 pub mod http;
 pub mod modio;
 
+use crate::config::ConfigWrapper;
 use crate::error::IntegrationError;
 
 use anyhow::{anyhow, Result};
@@ -16,7 +17,7 @@ use std::sync::{Arc, RwLock};
 
 pub struct ModStore {
     providers: HashMap<&'static str, Box<dyn ModProvider>>,
-    cache: Arc<RwLock<CacheWrapper>>,
+    cache: Arc<RwLock<ConfigWrapper<Cache>>>,
     blob_cache: BlobCache,
 }
 impl ModStore {
@@ -39,7 +40,7 @@ impl ModStore {
 
         Ok(Self {
             providers,
-            cache: Arc::new(RwLock::new(CacheWrapper::from_path(
+            cache: Arc::new(RwLock::new(ConfigWrapper::new(
                 cache_path.as_ref().join("cache.json"),
             ))),
             blob_cache: BlobCache::new(cache_path.as_ref().join("blobs")),
@@ -157,7 +158,7 @@ pub trait ModProvider: Sync + std::fmt::Debug {
         &self,
         url: &str,
         update: bool,
-        cache: Arc<RwLock<CacheWrapper>>,
+        cache: Arc<RwLock<ConfigWrapper<Cache>>>,
         blob_cache: &BlobCache,
     ) -> Result<ModResponse>;
 }
@@ -196,47 +197,23 @@ pub trait ModProviderCache: Sync + Send + std::fmt::Debug {
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any;
 }
 
-type Cache = HashMap<String, Box<dyn ModProviderCache>>;
-#[derive(Debug, Default)]
-pub struct CacheWrapper {
-    path: PathBuf,
-    cache: HashMap<String, Box<dyn ModProviderCache>>,
-}
-impl Drop for CacheWrapper {
-    fn drop(&mut self) {
-        self.write().ok();
-    }
-}
-impl CacheWrapper {
-    fn from_path<P: AsRef<Path>>(path: P) -> Self {
-        Self {
-            path: path.as_ref().to_path_buf(),
-            cache: std::fs::read(path)
-                .ok()
-                .and_then(|d| serde_json::from_slice::<Cache>(&d).ok())
-                .unwrap_or_default(),
-        }
-    }
-    fn write(&self) -> Result<()> {
-        std::fs::write(&self.path, serde_json::to_string(&self.cache)?.as_bytes())?;
-        Ok(())
-    }
+#[derive(Debug, Default, Serialize, Deserialize)]
+pub struct Cache(HashMap<String, Box<dyn ModProviderCache>>);
+impl Cache {
     fn has<T: ModProviderCache + 'static>(&self, id: &str) -> bool {
-        self.cache
+        self.0
             .get(id)
             .and_then(|c| c.as_any().downcast_ref::<T>())
             .is_none()
     }
     fn get<T: ModProviderCache + 'static>(&self, id: &str) -> Option<&T> {
-        self.cache
-            .get(id)
-            .and_then(|c| c.as_any().downcast_ref::<T>())
+        self.0.get(id).and_then(|c| c.as_any().downcast_ref::<T>())
     }
     fn get_mut<T: ModProviderCache + 'static>(&mut self, id: &str) -> &mut T {
         if self.has::<T>(id) {
-            self.cache.insert(id.to_owned(), Box::new(T::new()));
+            self.0.insert(id.to_owned(), Box::new(T::new()));
         }
-        self.cache
+        self.0
             .get_mut(id)
             .and_then(|c| c.as_any_mut().downcast_mut::<T>())
             .unwrap()

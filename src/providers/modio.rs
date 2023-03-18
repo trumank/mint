@@ -8,9 +8,9 @@ use serde::{Deserialize, Serialize};
 use task_local_extensions::Extensions;
 
 use super::{
-    BlobCache, BlobRef, CacheWrapper, Mod, ModProvider, ModProviderCache, ModResponse,
-    ResolvableStatus,
+    BlobCache, BlobRef, Cache, Mod, ModProvider, ModProviderCache, ModResponse, ResolvableStatus,
 };
+use crate::config::ConfigWrapper;
 
 lazy_static::lazy_static! {
     static ref RE_MOD: regex::Regex = regex::Regex::new("^https://mod.io/g/drg/m/(?P<name_id>[^/#]+)(:?#(?P<mod_id>\\d+)(:?/(?P<modfile_id>\\d+))?)?$").unwrap();
@@ -141,7 +141,7 @@ impl ModProvider for ModioProvider {
         &self,
         url: &str,
         update: bool,
-        cache: Arc<RwLock<CacheWrapper>>,
+        cache: Arc<RwLock<ConfigWrapper<Cache>>>,
         blob_cache: &BlobCache,
     ) -> Result<ModResponse> {
         let captures = RE_MOD
