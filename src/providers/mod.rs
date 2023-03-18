@@ -15,36 +15,56 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, RwLock};
 
 pub struct ModStore {
-    providers: HashMap<ProviderFactory, Box<dyn ModProvider>>,
+    providers: HashMap<&'static str, Box<dyn ModProvider>>,
     cache: Arc<RwLock<CacheWrapper>>,
     blob_cache: BlobCache,
 }
 impl ModStore {
-    pub fn new<P: AsRef<Path>>(cache_path: P) -> Self {
-        ModStore {
-            providers: HashMap::new(),
+    pub fn new<P: AsRef<Path>>(
+        cache_path: P,
+        parameters: &HashMap<String, HashMap<String, String>>,
+    ) -> Result<Self> {
+        let factories = inventory::iter::<ProviderFactory>()
+            .map(|f| (f.id, f))
+            .collect::<HashMap<_, _>>();
+        let providers = parameters
+            .iter()
+            .flat_map(|(id, params)| {
+                factories
+                    .get(id.as_str())
+                    .ok_or_else(|| anyhow!("unknown provider: {id}"))
+                    .map(|f| (f.new)(params).map(|p| (f.id, p)))
+            })
+            .collect::<Result<HashMap<_, _>>>()?;
+
+        Ok(Self {
+            providers,
             cache: Arc::new(RwLock::new(CacheWrapper::from_path(
                 cache_path.as_ref().join("cache.json"),
             ))),
             blob_cache: BlobCache::new(cache_path.as_ref().join("blobs")),
-        }
+        })
     }
-    pub fn add_provider(&mut self, provider_factory: ProviderFactory) -> Result<()> {
-        let provider = (provider_factory.new)()?;
-        self.providers.insert(provider_factory, provider);
+    pub fn add_provider(
+        &mut self,
+        provider_factory: &ProviderFactory,
+        parameters: &HashMap<String, String>,
+    ) -> Result<()> {
+        let provider = (provider_factory.new)(parameters)?;
+        self.providers.insert(provider_factory.id, provider);
         Ok(())
     }
     pub fn get_provider(&self, url: &str) -> Result<&dyn ModProvider> {
         let factory = inventory::iter::<ProviderFactory>()
             .find(|f| (f.can_provide)(url.to_owned()))
             .ok_or_else(|| anyhow!("Could not find mod provider for {}", url))?;
-        let entry = self.providers.get(factory);
+        let entry = self.providers.get(factory.id);
         Ok(match entry {
             Some(e) => e.as_ref(),
             None => {
                 return Err(IntegrationError::NoProvider {
                     url: url.to_owned(),
-                    factory: factory.clone(),
+                    factory,
                 }
                 .into())
             }
@@ -142,11 +162,29 @@ pub trait ModProvider: Sync + std::fmt::Debug {
     ) -> Result<ModResponse>;
 }
 
-#[derive(Debug, Clone, Eq, Ord, Hash, PartialEq, PartialOrd)]
+#[derive(Clone)]
 pub struct ProviderFactory {
-    id: &'static str,
-    new: fn() -> Result<Box<dyn ModProvider>>,
+    pub id: &'static str,
+    #[allow(clippy::type_complexity)]
+    new: fn(&HashMap<String, String>) -> Result<Box<dyn ModProvider>>,
     can_provide: fn(String) -> bool,
+    pub parameters: &'static [ProviderParameter<'static>],
+}
+
+impl std::fmt::Debug for ProviderFactory {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ProviderFactory")
+            .field("id", &self.id)
+            .field("parameters", &self.parameters)
+            .finish()
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct ProviderParameter<'a> {
+    pub id: &'a str,
+    pub name: &'a str,
+    pub description: &'a str,
 }
 
 #[typetag::serde(tag = "type")]

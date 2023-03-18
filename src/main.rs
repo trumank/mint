@@ -10,6 +10,7 @@ use providers::{ReadSeek, ResolvableStatus};
 
 use anyhow::{anyhow, Result};
 use clap::{Parser, Subcommand};
+use serde::{Deserialize, Serialize};
 use unreal_asset::{
     exports::ExportBaseTrait,
     flags::EObjectFlags,
@@ -59,12 +60,52 @@ struct Args {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    dotenvy::dotenv().ok();
     let args = Args::parse();
 
     match args.action {
         Action::Integrate(action) => action_integrate(action).await,
     }
+}
+
+struct ConfigWrapper {
+    path: PathBuf,
+    config: Config,
+}
+impl ConfigWrapper {
+    fn new<P: AsRef<Path>>(path: P) -> Self {
+        Self {
+            config: std::fs::read(&path)
+                .ok()
+                .and_then(|s| serde_json::from_slice(&s).ok())
+                .unwrap_or_default(),
+            path: path.as_ref().to_path_buf(),
+        }
+    }
+    fn save(&self) -> Result<()> {
+        std::fs::write(&self.path, serde_json::to_vec_pretty(&self.config)?)?;
+        Ok(())
+    }
+}
+impl std::ops::Deref for ConfigWrapper {
+    type Target = Config;
+    fn deref(&self) -> &Self::Target {
+        &self.config
+    }
+}
+impl std::ops::DerefMut for ConfigWrapper {
+    fn deref_mut(&mut self) -> &mut Config {
+        &mut self.config
+    }
+}
+impl Drop for ConfigWrapper {
+    fn drop(&mut self) {
+        self.save().unwrap();
+    }
+}
+
+#[derive(Debug, Default, Serialize, Deserialize)]
+struct Config {
+    provider_parameters: HashMap<String, HashMap<String, String>>,
 }
 
 async fn action_integrate(action: ActionIntegrate) -> Result<()> {
@@ -83,8 +124,11 @@ async fn action_integrate(action: ActionIntegrate) -> Result<()> {
             )
         })?;
 
-    std::fs::create_dir("cache").ok();
-    let mut store = providers::ModStore::new("cache");
+    let data_dir = Path::new("data");
+
+    std::fs::create_dir(data_dir).ok();
+    let mut config = ConfigWrapper::new(data_dir.join("config.json"));
+    let mut store = providers::ModStore::new(data_dir, &config.provider_parameters)?;
 
     let mods = loop {
         match store.resolve_mods(&action.mods, action.update).await {
@@ -92,7 +136,22 @@ async fn action_integrate(action: ActionIntegrate) -> Result<()> {
             Err(e) => match e.downcast::<IntegrationError>() {
                 Ok(IntegrationError::NoProvider { url, factory }) => {
                     println!("Initializing provider for {url}");
-                    store.add_provider(factory)?;
+                    let params = config
+                        .provider_parameters
+                        .entry(factory.id.to_owned())
+                        .or_default();
+                    for p in factory.parameters {
+                        if !params.contains_key(p.name) {
+                            let value = dialoguer::Password::with_theme(
+                                &dialoguer::theme::ColorfulTheme::default(),
+                            )
+                            .with_prompt(p.description)
+                            .interact()
+                            .unwrap();
+                            params.insert(p.id.to_owned(), value);
+                        }
+                    }
+                    store.add_provider(factory, params)?;
                 }
                 Err(e) => return Err(e),
             },

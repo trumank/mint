@@ -5,6 +5,6 @@ pub enum IntegrationError {
     #[error("No provider found for {url}")]
     NoProvider {
         url: String,
-        factory: crate::providers::ProviderFactory,
+        factory: &'static crate::providers::ProviderFactory,
     },
 }

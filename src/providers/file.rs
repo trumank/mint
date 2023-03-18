@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::path::Path;
 use std::sync::{Arc, RwLock};
 
@@ -9,7 +10,8 @@ inventory::submit! {
     super::ProviderFactory {
         id: "file",
         new: FileProvider::new_provider,
-        can_provide: |url| Path::new(&url).exists()
+        can_provide: |url| Path::new(&url).exists(),
+        parameters: &[],
     }
 }
 
@@ -17,7 +19,7 @@ inventory::submit! {
 pub struct FileProvider {}
 
 impl FileProvider {
-    pub fn new_provider() -> Result<Box<dyn ModProvider>> {
+    pub fn new_provider(_parameters: &HashMap<String, String>) -> Result<Box<dyn ModProvider>> {
         Ok(Box::new(Self::new()))
     }
     pub fn new() -> Self {

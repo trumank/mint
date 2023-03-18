@@ -20,7 +20,8 @@ inventory::submit! {
                 .map_or(false, |h| {
                     !["mod.io", "drg.mod.io", "drg.old.mod.io"].contains(&h.as_str())
                 })
-        }
+        },
+        parameters: &[],
     }
 }
 
@@ -47,7 +48,7 @@ pub struct HttpProvider {
 }
 
 impl HttpProvider {
-    pub fn new_provider() -> Result<Box<dyn ModProvider>> {
+    pub fn new_provider(_parameters: &HashMap<String, String>) -> Result<Box<dyn ModProvider>> {
         Ok(Box::new(Self::new()))
     }
     pub fn new() -> Self {

@@ -7,7 +7,7 @@ edition = "2021"
 anyhow = "1.0.69"
 async-trait = "0.1.64"
 clap = { version = "4.1.6", features = ["derive"] }
-dotenvy = "0.15.6"
+dialoguer = "0.10.3"
 futures = "0.3.26"
 hex = "0.4.3"
 inventory = "0.3.4"

@@ -12,11 +12,25 @@ use super::{
     ResolvableStatus,
 };
 
+lazy_static::lazy_static! {
+    static ref RE_MOD: regex::Regex = regex::Regex::new("^https://mod.io/g/drg/m/(?P<name_id>[^/#]+)(:?#(?P<mod_id>\\d+)(:?/(?P<modfile_id>\\d+))?)?$").unwrap();
+}
+
+const MODIO_DRG_ID: u32 = 2475;
+const MODIO_PROVIDER_ID: &str = "modio";
+
 inventory::submit! {
     super::ProviderFactory {
         id: MODIO_PROVIDER_ID,
         new: ModioProvider::new_provider,
         can_provide: |url| RE_MOD.is_match(&url),
+        parameters: &[
+            super::ProviderParameter {
+                id: "oauth",
+                name: "OAuth Token",
+                description: "mod.io OAuth token. Obtain from https://mod.io/me/access",
+            },
+        ]
     }
 }
 
@@ -26,29 +40,21 @@ pub struct ModioProvider {
 }
 
 impl ModioProvider {
-    fn new_provider() -> Result<Box<dyn ModProvider>> {
-        if let Ok(modio_key) = std::env::var("MODIO_KEY") {
-            let token = std::env::var("MODIO_ACCESS_TOKEN").ok();
-            let client = reqwest_middleware::ClientBuilder::new(reqwest::Client::new())
-                .with(LoggingMiddleware {
-                    requests: Default::default(),
-                })
-                .build();
-            let modio = modio::Modio::new(
-                if let Some(token) = token {
-                    modio::Credentials::with_token(modio_key, token)
-                } else {
-                    modio::Credentials::new(modio_key)
-                },
-                client,
-            )?;
+    fn new_provider(parameters: &HashMap<String, String>) -> Result<Box<dyn ModProvider>> {
+        let client = reqwest_middleware::ClientBuilder::new(reqwest::Client::new())
+            .with::<LoggingMiddleware>(Default::default())
+            .build();
+        let modio = modio::Modio::new(
+            modio::Credentials::with_token(
+                "".to_owned(), // TODO patch modio to not use API key at all
+                parameters
+                    .get("oauth")
+                    .ok_or_else(|| anyhow!("missing OAuth token param"))?,
+            ),
+            client,
+        )?;
 
-            Ok(Box::new(Self::new(modio)))
-        } else {
-            Err(anyhow!(
-                "MODIO_KEY env var not found, modio provider will be unavailable"
-            ))
-        }
+        Ok(Box::new(Self::new(modio)))
     }
     fn new(modio: modio::Modio) -> Self {
         Self { modio }
@@ -93,13 +99,7 @@ impl From<modio::mods::Mod> for ModioMod {
     }
 }
 
-lazy_static::lazy_static! {
-    static ref RE_MOD: regex::Regex = regex::Regex::new("^https://mod.io/g/drg/m/(?P<name_id>[^/#]+)(:?#(?P<mod_id>\\d+)(:?/(?P<modfile_id>\\d+))?)?$").unwrap();
-}
-
-const MODIO_DRG_ID: u32 = 2475;
-const MODIO_PROVIDER_ID: &str = "modio";
-
+#[derive(Default)]
 struct LoggingMiddleware {
     requests: std::sync::Arc<std::sync::atomic::AtomicUsize>,
 }
