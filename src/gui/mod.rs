@@ -11,22 +11,15 @@ pub fn gui() -> Result<()> {
     eframe::run_native(
         "DRG Mod Integration",
         options,
-        Box::new(|_cc| Box::new(MyApp::default())),
+        Box::new(|_cc| Box::<MyApp>::default()),
     )
     .map_err(|e| anyhow!("{e}"))?;
     Ok(())
 }
 
+#[derive(Default)]
 struct MyApp {
     table: TableDemo,
-}
-
-impl Default for MyApp {
-    fn default() -> Self {
-        Self {
-            table: Default::default(),
-        }
-    }
 }
 
 struct Mod {
@@ -52,7 +45,8 @@ pub struct TableDemo {
 impl Default for TableDemo {
     fn default() -> Self {
         Self {
-            mods: { let mut mods = vec![];
+            mods: {
+                let mut mods = vec![];
                 for _ in 0..100 {
                     mods.push(Mod {
                         url: "asdf".to_owned(),
@@ -100,7 +94,7 @@ impl TableDemo {
 
         let text_height = egui::TextStyle::Body.resolve(ui.style()).size + 6.0;
 
-        let mut table = TableBuilder::new(ui)
+        let table = TableBuilder::new(ui)
             .striped(true)
             .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
             .column(Column::auto())
@@ -133,30 +127,19 @@ impl TableDemo {
                         ui.label(&mod_.url);
                     });
                     row.col(|ui| {
-                            egui::ComboBox::from_id_source(row_index)
-                                .selected_text(
-                                    match mod_.version {
-                                        Some(index) => &mod_.versions[index],
-                                        None => "latest",
-                                    }
-                                )
-                                .show_ui(ui, |ui| {
-                                    ui.style_mut().wrap = Some(false);
-                                    ui.set_min_width(60.0);
-                                    ui.selectable_value(&mut mod_.version, None, "latest");
-                                    for (i, v) in mod_.versions.iter().enumerate() {
-                                        ui.selectable_value(&mut mod_.version, Some(i), v);
-                                    }
-                                });
-                            /*
-                            ui.label(
-                            match mod_.version {
+                        egui::ComboBox::from_id_source(row_index)
+                            .selected_text(match mod_.version {
                                 Some(index) => &mod_.versions[index],
-                                None => "-",
-                            }
-                            );
-                            */
-                            //expanding_content(ui);
+                                None => "latest",
+                            })
+                            .show_ui(ui, |ui| {
+                                ui.style_mut().wrap = Some(false);
+                                ui.set_min_width(60.0);
+                                ui.selectable_value(&mut mod_.version, None, "latest");
+                                for (i, v) in mod_.versions.iter().enumerate() {
+                                    ui.selectable_value(&mut mod_.version, Some(i), v);
+                                }
+                            });
                     });
                     row.col(|ui| {
                         ui.add(egui::Checkbox::without_text(&mut mod_.required));
@@ -164,15 +147,4 @@ impl TableDemo {
                 });
             });
     }
-}
-
-fn expanding_content(ui: &mut egui::Ui) {
-    let width = ui.available_width().clamp(20.0, 200.0);
-    let height = ui.available_height();
-    let (rect, _response) = ui.allocate_exact_size(egui::vec2(width, height), egui::Sense::hover());
-    ui.painter().hline(
-        rect.x_range(),
-        rect.center().y,
-        (1.0, ui.visuals().text_color()),
-    );
 }

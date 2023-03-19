@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 use std::fs::{File, OpenOptions};
 use std::io::{self, BufReader, BufWriter, Cursor, Read, Seek};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use anyhow::{anyhow, Result};
 
@@ -25,7 +25,7 @@ use unreal_asset::{
     Asset,
 };
 
-pub fn integrate<P: AsRef<Path>>(path_game: P, mods: Vec<Mod>) -> Result<()> {
+pub fn integrate<P: AsRef<Path>>(path_game: P, mods: Vec<(Mod, PathBuf)>) -> Result<()> {
     let path_paks = Path::join(path_game.as_ref(), "FSD/Content/Paks/");
     let path_pak = Path::join(&path_paks, "FSD-WindowsNoEditor.pak");
     let path_mod_pak = Path::join(&path_paks, "mods_P.pak");
@@ -76,9 +76,9 @@ pub fn integrate<P: AsRef<Path>>(path_game: P, mods: Vec<Mod>) -> Result<()> {
 
     let mods = mods
         .into_iter()
-        .map(|m| {
+        .map(|(m, path)| {
             println!("integrating {m:?}");
-            let mut buf = get_pak_from_data(Box::new(BufReader::new(File::open(m.path)?)))?;
+            let mut buf = get_pak_from_data(Box::new(BufReader::new(File::open(path)?)))?;
             let pak = repak::PakReader::new_any(&mut buf, None)?;
 
             let mount = Path::new(pak.mount_point());

@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
 
 use anyhow::{anyhow, Result};
@@ -62,68 +63,71 @@ lazy_static::lazy_static! {
     static ref RE_MOD: regex::Regex = regex::Regex::new(r"^https?://(?P<hostname>[^/]+)(/|$)").unwrap();
 }
 
+const HTTP_PROVIDER_ID: &str = "http";
+
 #[async_trait::async_trait]
 impl ModProvider for HttpProvider {
-    async fn get_mod(
+    async fn resolve_mod(
+        &self,
+        url: &str,
+        _update: bool,
+        _cache: Arc<RwLock<ConfigWrapper<Cache>>>,
+        _blob_cache: &BlobCache,
+    ) -> Result<ModResponse> {
+        Ok(ModResponse::Resolve(Mod {
+            url: url.to_owned(),
+            status: ResolvableStatus::Resolvable {
+                url: url.to_owned(),
+            },
+            suggested_require: false,
+            suggested_dependencies: vec![],
+        }))
+    }
+
+    async fn fetch_mod(
         &self,
         url: &str,
         update: bool,
         cache: Arc<RwLock<ConfigWrapper<Cache>>>,
         blob_cache: &BlobCache,
-    ) -> Result<ModResponse> {
-        let pid = "http";
-
-        if let Some(path) = if update {
-            None
-        } else {
-            cache
-                .read()
-                .unwrap()
-                .get::<HttpProviderCache>(pid)
-                .and_then(|c| c.url_blobs.get(url))
-                .and_then(|r| blob_cache.get_path(r))
-        } {
-            Ok(ModResponse::Resolve(Mod {
-                status: ResolvableStatus::Resolvable {
-                    url: url.to_owned(),
-                },
-                path,
-                suggested_require: false,
-                suggested_dependencies: vec![],
-            }))
-        } else {
-            println!("downloading mod {url}...");
-            Ok(ModResponse::Resolve(Mod {
-                status: ResolvableStatus::Resolvable {
-                    url: url.to_owned(),
-                },
-                path: {
-                    let res = self.client.get(url).send().await?.error_for_status()?;
-                    if let Some(mime) = res
-                        .headers()
-                        .get(reqwest::header::HeaderName::from_static("content-type"))
-                    {
-                        let content_type = &mime.to_str()?;
-                        if !["application/zip", "application/octet-stream"].contains(content_type) {
-                            return Err(anyhow!("unexpected content-type: {content_type}"));
-                        }
+    ) -> Result<PathBuf> {
+        Ok(
+            if let Some(path) = if update {
+                None
+            } else {
+                cache
+                    .read()
+                    .unwrap()
+                    .get::<HttpProviderCache>(HTTP_PROVIDER_ID)
+                    .and_then(|c| c.url_blobs.get(url))
+                    .and_then(|r| blob_cache.get_path(r))
+            } {
+                path
+            } else {
+                println!("downloading mod {url}...");
+                let res = self.client.get(url).send().await?.error_for_status()?;
+                if let Some(mime) = res
+                    .headers()
+                    .get(reqwest::header::HeaderName::from_static("content-type"))
+                {
+                    let content_type = &mime.to_str()?;
+                    if !["application/zip", "application/octet-stream"].contains(content_type) {
+                        return Err(anyhow!("unexpected content-type: {content_type}"));
                     }
+                }
 
-                    let data = res.bytes().await?.to_vec();
-                    let blob = blob_cache.write(&data)?;
-                    let path = blob_cache.get_path(&blob).unwrap();
-                    cache
-                        .write()
-                        .unwrap()
-                        .get_mut::<HttpProviderCache>(pid)
-                        .url_blobs
-                        .insert(url.to_owned(), blob);
+                let data = res.bytes().await?.to_vec();
+                let blob = blob_cache.write(&data)?;
+                let path = blob_cache.get_path(&blob).unwrap();
+                cache
+                    .write()
+                    .unwrap()
+                    .get_mut::<HttpProviderCache>(HTTP_PROVIDER_ID)
+                    .url_blobs
+                    .insert(url.to_owned(), blob);
 
-                    path
-                },
-                suggested_require: false,
-                suggested_dependencies: vec![],
-            }))
-        }
+                path
+            },
+        )
     }
 }

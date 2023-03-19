@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, RwLock};
 
 use anyhow::{anyhow, Result};
@@ -30,7 +30,7 @@ impl FileProvider {
 
 #[async_trait::async_trait]
 impl ModProvider for FileProvider {
-    async fn get_mod(
+    async fn resolve_mod(
         &self,
         url: &str,
         _update: bool,
@@ -39,6 +39,7 @@ impl ModProvider for FileProvider {
     ) -> Result<ModResponse> {
         let path = Path::new(url);
         Ok(ModResponse::Resolve(Mod {
+            url: url.to_owned(),
             status: ResolvableStatus::Unresolvable {
                 name: path
                     .file_name()
@@ -46,9 +47,18 @@ impl ModProvider for FileProvider {
                     .to_string_lossy()
                     .to_string(),
             },
-            path: path.to_path_buf(),
             suggested_require: false,
             suggested_dependencies: vec![],
         }))
+    }
+
+    async fn fetch_mod(
+        &self,
+        url: &str,
+        _update: bool,
+        _cache: Arc<RwLock<ConfigWrapper<Cache>>>,
+        _blob_cache: &BlobCache,
+    ) -> Result<PathBuf> {
+        Ok(PathBuf::from(url))
     }
 }

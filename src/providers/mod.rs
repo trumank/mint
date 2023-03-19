@@ -85,7 +85,7 @@ impl ModStore {
             for (u, m) in stream::iter(
                 to_resolve
                     .iter()
-                    .map(|u| self.get_mod(u.to_owned(), update)),
+                    .map(|u| self.resolve_mod(u.to_owned(), update)),
             )
             .buffered(5)
             .try_collect::<Vec<_>>()
@@ -105,12 +105,12 @@ impl ModStore {
 
         Ok(mods_map)
     }
-    pub async fn get_mod(&self, original_url: String, update: bool) -> Result<(String, Mod)> {
+    pub async fn resolve_mod(&self, original_url: String, update: bool) -> Result<(String, Mod)> {
         let mut url = original_url.clone();
         loop {
             match self
                 .get_provider(&url)?
-                .get_mod(&url, update, self.cache.clone(), &self.blob_cache.clone())
+                .resolve_mod(&url, update, self.cache.clone(), &self.blob_cache.clone())
                 .await?
             {
                 ModResponse::Resolve(m) => {
@@ -121,6 +121,19 @@ impl ModStore {
                 } => url = redirected_url,
             };
         }
+    }
+    pub async fn fetch_mods(self, mods: &[&str], update: bool) -> Result<Vec<PathBuf>> {
+        use futures::stream::{self, StreamExt, TryStreamExt};
+
+        stream::iter(mods.iter().map(|url| self.fetch_mod(url, update)))
+            .buffered(5)
+            .try_collect::<Vec<_>>()
+            .await
+    }
+    pub async fn fetch_mod(&self, url: &str, update: bool) -> Result<PathBuf> {
+        self.get_provider(url)?
+            .fetch_mod(url, update, self.cache.clone(), &self.blob_cache.clone())
+            .await
     }
 }
 
@@ -139,8 +152,8 @@ pub enum ResolvableStatus {
 /// Returned from ModStore
 #[derive(Debug, Clone)]
 pub struct Mod {
+    pub url: String,
     pub status: ResolvableStatus,
-    pub path: PathBuf,
     pub suggested_require: bool,
     pub suggested_dependencies: Vec<String>, // ModResponse
 }
@@ -154,13 +167,20 @@ pub enum ModResponse {
 
 #[async_trait::async_trait]
 pub trait ModProvider: Sync + std::fmt::Debug {
-    async fn get_mod(
+    async fn resolve_mod(
         &self,
         url: &str,
         update: bool,
         cache: Arc<RwLock<ConfigWrapper<Cache>>>,
         blob_cache: &BlobCache,
     ) -> Result<ModResponse>;
+    async fn fetch_mod(
+        &self,
+        url: &str,
+        update: bool,
+        cache: Arc<RwLock<ConfigWrapper<Cache>>>,
+        blob_cache: &BlobCache,
+    ) -> Result<PathBuf>;
 }
 
 #[derive(Clone)]

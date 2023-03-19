@@ -161,12 +161,22 @@ async fn action_integrate(action: ActionIntegrate) -> Result<()> {
         }
     }
 
-    let to_integrate = action.mods.iter().map(|u| mods[u].clone()).collect();
+    let to_integrate = action
+        .mods
+        .iter()
+        .map(|u| mods[u].clone())
+        .collect::<Vec<_>>();
+    let urls = to_integrate
+        .iter()
+        .map(|m| m.url.as_ref())
+        .collect::<Vec<&str>>();
 
-    integrate::integrate(path_game, to_integrate)
+    println!("fetching mods...");
+    let paths = store.fetch_mods(&urls, action.update).await?;
+
+    integrate::integrate(path_game, to_integrate.into_iter().zip(paths).collect())
 }
 
-fn action_gui(action: ActionGui) -> Result<()> {
-    gui()?;
-    Ok(())
+fn action_gui(_action: ActionGui) -> Result<()> {
+    gui()
 }

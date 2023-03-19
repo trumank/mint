@@ -1,4 +1,5 @@
 use std::collections::{HashMap, HashSet};
+use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
 
 use anyhow::{anyhow, Result};
@@ -137,59 +138,21 @@ impl Middleware for LoggingMiddleware {
 
 #[async_trait::async_trait]
 impl ModProvider for ModioProvider {
-    async fn get_mod(
+    async fn resolve_mod(
         &self,
         url: &str,
         update: bool,
         cache: Arc<RwLock<ConfigWrapper<Cache>>>,
-        blob_cache: &BlobCache,
+        _blob_cache: &BlobCache,
     ) -> Result<ModResponse> {
         let captures = RE_MOD
             .captures(url)
             .ok_or_else(|| anyhow!("invalid modio URL {url}"))?;
 
-        if let (Some(mod_id), Some(modfile_id)) =
+        if let (Some(mod_id), Some(_modfile_id)) =
             (captures.name("mod_id"), captures.name("modfile_id"))
         {
             let mod_id = mod_id.as_str().parse::<u32>().unwrap();
-            let modfile_id = modfile_id.as_str().parse::<u32>().unwrap();
-
-            let path = if let Some(path) = {
-                let path = cache
-                    .read()
-                    .unwrap()
-                    .get::<ModioCache>(MODIO_PROVIDER_ID)
-                    .and_then(|c| c.modfile_blobs.get(&modfile_id))
-                    .and_then(|r| blob_cache.get_path(r));
-                path
-            } {
-                path
-            } else {
-                let file = self
-                    .modio
-                    .game(MODIO_DRG_ID)
-                    .mod_(mod_id)
-                    .file(modfile_id)
-                    .get()
-                    .await?;
-
-                let download: modio::download::DownloadAction = file.into();
-
-                println!("downloading mod {url}...");
-
-                let data = self.modio.download(download).bytes().await?.to_vec();
-                let blob = blob_cache.write(&data)?;
-                let path = blob_cache.get_path(&blob).unwrap();
-
-                cache
-                    .write()
-                    .unwrap()
-                    .get_mut::<ModioCache>(MODIO_PROVIDER_ID)
-                    .modfile_blobs
-                    .insert(modfile_id, blob);
-
-                path
-            };
 
             let mod_ = if let Some(mod_) = (!update)
                 .then(|| {
@@ -257,10 +220,10 @@ impl ModProvider for ModioProvider {
             .collect();
 
             Ok(ModResponse::Resolve(Mod {
+                url: url.to_owned(),
                 status: ResolvableStatus::Resolvable {
                     url: url.to_owned(),
                 },
-                path,
                 suggested_require: mod_.tags.contains("RequiredByAll"),
                 suggested_dependencies: deps,
             }))
@@ -392,6 +355,67 @@ impl ModProvider for ModioProvider {
                     Err(anyhow!("no mods returned for mod name_id {}", &name_id))
                 }
             }
+        }
+    }
+    async fn fetch_mod(
+        &self,
+        url: &str,
+        _update: bool,
+        cache: Arc<RwLock<ConfigWrapper<Cache>>>,
+        blob_cache: &BlobCache,
+    ) -> Result<PathBuf> {
+        let captures = RE_MOD
+            .captures(url)
+            .ok_or_else(|| anyhow!("invalid modio URL {url}"))?;
+
+        if let (Some(_name_id), Some(mod_id), Some(modfile_id)) = (
+            captures.name("name_id"),
+            captures.name("mod_id"),
+            captures.name("modfile_id"),
+        ) {
+            let mod_id = mod_id.as_str().parse::<u32>().unwrap();
+            let modfile_id = modfile_id.as_str().parse::<u32>().unwrap();
+
+            Ok(
+                if let Some(path) = {
+                    let path = cache
+                        .read()
+                        .unwrap()
+                        .get::<ModioCache>(MODIO_PROVIDER_ID)
+                        .and_then(|c| c.modfile_blobs.get(&modfile_id))
+                        .and_then(|r| blob_cache.get_path(r));
+                    path
+                } {
+                    path
+                } else {
+                    let file = self
+                        .modio
+                        .game(MODIO_DRG_ID)
+                        .mod_(mod_id)
+                        .file(modfile_id)
+                        .get()
+                        .await?;
+
+                    let download: modio::download::DownloadAction = file.into();
+
+                    println!("downloading mod {url}...");
+
+                    let data = self.modio.download(download).bytes().await?.to_vec();
+                    let blob = blob_cache.write(&data)?;
+                    let path = blob_cache.get_path(&blob).unwrap();
+
+                    cache
+                        .write()
+                        .unwrap()
+                        .get_mut::<ModioCache>(MODIO_PROVIDER_ID)
+                        .modfile_blobs
+                        .insert(modfile_id, blob);
+
+                    path
+                },
+            )
+        } else {
+            Err(anyhow!("download URL must be fully specified"))
         }
     }
 }
