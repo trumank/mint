@@ -8,6 +8,8 @@ anyhow = "1.0.69"
 async-trait = "0.1.64"
 clap = { version = "4.1.6", features = ["derive"] }
 dialoguer = "0.10.3"
+eframe = "0.21.3"
+egui_extras = "0.21.0"
 futures = "0.3.26"
 hex = "0.4.3"
 inventory = "0.3.4"

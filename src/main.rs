@@ -1,5 +1,6 @@
 mod config;
 mod error;
+mod gui;
 mod integrate;
 mod providers;
 
@@ -8,6 +9,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{anyhow, Result};
 use clap::{Parser, Subcommand};
+use gui::gui;
 use serde::{Deserialize, Serialize};
 
 use config::ConfigWrapper;
@@ -29,9 +31,13 @@ struct ActionIntegrate {
     mods: Vec<String>,
 }
 
+#[derive(Parser, Debug)]
+struct ActionGui {}
+
 #[derive(Subcommand, Debug)]
 enum Action {
     Integrate(ActionIntegrate),
+    Gui(ActionGui),
 }
 
 #[derive(Parser, Debug)]
@@ -41,12 +47,24 @@ struct Args {
     action: Action,
 }
 
-#[tokio::main]
-async fn main() -> Result<()> {
+fn main() -> Result<()> {
+    let rt = tokio::runtime::Runtime::new().expect("Unable to create Runtime");
+    let _enter = rt.enter();
+
     let args = Args::parse();
 
     match args.action {
-        Action::Integrate(action) => action_integrate(action).await,
+        Action::Integrate(action) => rt.block_on(async {
+            action_integrate(action).await?;
+            Ok(())
+        }),
+        Action::Gui(action) => {
+            std::thread::spawn(move || {
+                rt.block_on(std::future::pending::<()>());
+            });
+            action_gui(action)?;
+            Ok(())
+        }
     }
 }
 
@@ -146,4 +164,9 @@ async fn action_integrate(action: ActionIntegrate) -> Result<()> {
     let to_integrate = action.mods.iter().map(|u| mods[u].clone()).collect();
 
     integrate::integrate(path_game, to_integrate)
+}
+
+fn action_gui(action: ActionGui) -> Result<()> {
+    gui()?;
+    Ok(())
 }
