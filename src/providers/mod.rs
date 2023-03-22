@@ -72,7 +72,7 @@ impl ModStore {
         })
     }
     pub async fn resolve_mods(
-        &mut self,
+        &self,
         mods: &[String],
         update: bool,
     ) -> Result<HashMap<String, Mod>> {
@@ -166,7 +166,7 @@ pub enum ModResponse {
 }
 
 #[async_trait::async_trait]
-pub trait ModProvider: Sync + std::fmt::Debug {
+pub trait ModProvider: Send + Sync + std::fmt::Debug {
     async fn resolve_mod(
         &self,
         url: &str,

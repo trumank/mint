@@ -1,7 +1,16 @@
+mod message;
+
 //#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")] // hide console window on Windows in release
+
+use std::sync::{
+    mpsc::{Receiver, Sender},
+    Arc,
+};
 
 use anyhow::{anyhow, Result};
 use eframe::egui;
+
+use crate::{config::ConfigWrapper, error::IntegrationError, providers::ModStore, Config};
 
 pub fn gui() -> Result<()> {
     let options = eframe::NativeOptions {
@@ -11,15 +20,41 @@ pub fn gui() -> Result<()> {
     eframe::run_native(
         "DRG Mod Integration",
         options,
-        Box::new(|_cc| Box::<MyApp>::default()),
+        Box::new(|_cc| Box::new(App::new().unwrap())),
     )
     .map_err(|e| anyhow!("{e}"))?;
     Ok(())
 }
 
-#[derive(Default)]
-struct MyApp {
+struct App {
+    tx: Sender<message::Message>,
+    rx: Receiver<message::Message>,
+    store: Arc<ModStore>,
+    config: ConfigWrapper<Config>,
     table: TableDemo,
+    log: String,
+    resolve_mod: String,
+}
+
+impl App {
+    fn new() -> Result<Self> {
+        let (tx, rx) = std::sync::mpsc::channel();
+
+        let data_dir = std::path::Path::new("data");
+        std::fs::create_dir(data_dir).ok();
+        let config: ConfigWrapper<Config> = ConfigWrapper::new(data_dir.join("config.json"));
+        let store = ModStore::new(data_dir, &config.provider_parameters)?.into();
+
+        Ok(Self {
+            tx,
+            rx,
+            store,
+            config,
+            table: Default::default(),
+            log: Default::default(),
+            resolve_mod: Default::default(),
+        })
+    }
 }
 
 struct Mod {
@@ -29,12 +64,92 @@ struct Mod {
     versions: Vec<String>,
 }
 
-impl eframe::App for MyApp {
+impl eframe::App for App {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        if let Ok(msg) = self.rx.try_recv() {
+            match msg {
+                message::Message::Log(log) => {
+                    self.log.push_str(&log);
+                    self.log.push('\n');
+                }
+                message::Message::ResolveMod(res) => {
+                    match res {
+                        Ok(mod_) => {
+                            println!("{mod_:?}");
+                        }
+                        Err(e) => match e.downcast::<IntegrationError>() {
+                            Ok(IntegrationError::NoProvider { url, factory }) => {
+                                println!("Initializing provider for {url}");
+                                let params = self
+                                    .config
+                                    .provider_parameters
+                                    .entry(factory.id.to_owned())
+                                    .or_default();
+                                for p in factory.parameters {
+                                    if !params.contains_key(p.name) {
+                                        let value = dialoguer::Password::with_theme(
+                                            &dialoguer::theme::ColorfulTheme::default(),
+                                        )
+                                        .with_prompt(p.description)
+                                        .interact()
+                                        .unwrap();
+                                        params.insert(p.id.to_owned(), value);
+                                    }
+                                }
+                                //self.store.add_provider(factory, params).unwrap();
+                            }
+                            _ => {}
+                        },
+                    }
+                }
+            }
+        }
+        egui::SidePanel::left("left_panel").show(ctx, |ui| {
+            ui.with_layout(
+                egui::Layout::top_down_justified(egui::Align::Center),
+                |ui| {
+                    if ui.button("Log stuff").clicked() {
+                        self.tx
+                            .send(message::Message::Log("asdf".to_owned()))
+                            .unwrap();
+                    }
+                    egui::ScrollArea::both().show(ui, |ui| {
+                        ui.add(egui::TextEdit::multiline(&mut self.log.as_str()));
+                    });
+                },
+            );
+        });
         egui::CentralPanel::default().show(ctx, |ui| {
+            ui.horizontal(|ui| {
+                let resolve = ui.add(
+                    egui::TextEdit::singleline(&mut self.resolve_mod).hint_text("Resolve mod..."),
+                );
+                if is_committed(&resolve) {
+                    let ctx = ui.ctx().clone();
+                    let tx = self.tx.clone();
+                    let store = self.store.clone();
+                    let url = self.resolve_mod.to_owned();
+                    tokio::spawn(async move {
+                        match store.resolve_mod(url, false).await {
+                            Ok((url, mod_)) => tx
+                                .send(message::Message::Log(format!("Resolved mod: {url}")))
+                                .unwrap(),
+                            Err(e) => tx.send(message::Message::Log(format!("{e}"))).unwrap(),
+                        }
+                        ctx.request_repaint();
+                    });
+                }
+            });
+
+            ui.separator();
+
             self.table.ui(ui);
         });
     }
+}
+
+fn is_committed(res: &egui::Response) -> bool {
+    res.lost_focus() && res.ctx.input(|i| i.key_pressed(egui::Key::Enter))
 }
 
 /// Shows off a table with dynamic layout
