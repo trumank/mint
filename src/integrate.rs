@@ -41,10 +41,8 @@ pub fn integrate<P: AsRef<Path>>(path_game: P, mods: Vec<(Mod, PathBuf)>) -> Res
     let mut pcb_asset = unreal_asset::Asset::new(
         Cursor::new(fsd_pak.get(pcb_path.0, &mut fsd_pak_reader)?),
         Some(Cursor::new(fsd_pak.get(pcb_path.1, &mut fsd_pak_reader)?)),
-    );
-
-    pcb_asset.set_engine_version(unreal_asset::engine_version::EngineVersion::VER_UE4_27);
-    pcb_asset.parse_data()?;
+        unreal_asset::engine_version::EngineVersion::VER_UE4_27,
+    )?;
 
     hook_pcb(&mut pcb_asset);
 
@@ -162,10 +160,8 @@ pub fn integrate<P: AsRef<Path>>(path_game: P, mods: Vec<(Mod, PathBuf)>) -> Res
     let mut int_asset = unreal_asset::Asset::new(
         Cursor::new(int_pak.get(int_path.0, &mut int_pak_reader)?),
         Some(Cursor::new(int_pak.get(int_path.1, &mut int_pak_reader)?)),
-    );
-
-    int_asset.set_engine_version(unreal_asset::engine_version::EngineVersion::VER_UE4_27);
-    int_asset.parse_data()?;
+        unreal_asset::engine_version::EngineVersion::VER_UE4_27,
+    )?;
 
     inject_init_actors(
         &mut int_asset,
