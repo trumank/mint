@@ -1,10 +1,12 @@
 use thiserror::Error;
 
+use crate::providers::ModSpecification;
+
 #[derive(Error, Debug)]
 pub enum IntegrationError {
-    #[error("No provider found for {url}")]
+    #[error("No provider found for {:?}", spec)]
     NoProvider {
-        url: String,
+        spec: ModSpecification,
         factory: &'static crate::providers::ProviderFactory,
     },
 }

@@ -55,16 +55,16 @@ impl ModStore {
         self.providers.insert(provider_factory.id, provider);
         Ok(())
     }
-    pub fn get_provider(&self, url: &str) -> Result<&dyn ModProvider> {
+    pub fn get_provider(&self, spec: &ModSpecification) -> Result<&dyn ModProvider> {
         let factory = inventory::iter::<ProviderFactory>()
-            .find(|f| (f.can_provide)(url.to_owned()))
-            .ok_or_else(|| anyhow!("Could not find mod provider for {}", url))?;
+            .find(|f| (f.can_provide)(spec))
+            .ok_or_else(|| anyhow!("Could not find mod provider for {:?}", spec))?;
         let entry = self.providers.get(factory.id);
         Ok(match entry {
             Some(e) => e.as_ref(),
             None => {
                 return Err(IntegrationError::NoProvider {
-                    url: url.to_owned(),
+                    spec: spec.clone(),
                     factory,
                 }
                 .into())
@@ -73,12 +73,12 @@ impl ModStore {
     }
     pub async fn resolve_mods(
         &self,
-        mods: &[String],
+        mods: &[ModSpecification],
         update: bool,
-    ) -> Result<HashMap<String, Mod>> {
+    ) -> Result<HashMap<ModSpecification, Mod>> {
         use futures::stream::{self, StreamExt, TryStreamExt};
 
-        let mut to_resolve = mods.iter().cloned().collect::<HashSet<String>>();
+        let mut to_resolve = mods.iter().cloned().collect::<HashSet<ModSpecification>>();
         let mut mods_map = HashMap::new();
 
         while !to_resolve.is_empty() {
@@ -95,8 +95,8 @@ impl ModStore {
                 to_resolve.clear();
                 for m in mods_map.values() {
                     for d in &m.suggested_dependencies {
-                        if !mods_map.contains_key(d) {
-                            to_resolve.insert(d.to_string());
+                        if !mods_map.contains_key(&d) {
+                            to_resolve.insert(d.clone());
                         }
                     }
                 }
@@ -105,34 +105,45 @@ impl ModStore {
 
         Ok(mods_map)
     }
-    pub async fn resolve_mod(&self, original_url: String, update: bool) -> Result<(String, Mod)> {
-        let mut url = original_url.clone();
+    pub async fn resolve_mod(
+        &self,
+        original_spec: ModSpecification,
+        update: bool,
+    ) -> Result<(ModSpecification, Mod)> {
+        let mut spec = original_spec.clone();
         loop {
             match self
-                .get_provider(&url)?
-                .resolve_mod(&url, update, self.cache.clone(), &self.blob_cache.clone())
+                .get_provider(&spec)?
+                .resolve_mod(&spec, update, self.cache.clone(), &self.blob_cache.clone())
                 .await?
             {
                 ModResponse::Resolve(m) => {
-                    return Ok((original_url, m));
+                    return Ok((original_spec, m));
                 }
-                ModResponse::Redirect {
-                    url: redirected_url,
-                } => url = redirected_url,
+                ModResponse::Redirect(redirected_spec) => spec = redirected_spec,
             };
         }
     }
-    pub async fn fetch_mods(self, mods: &[&str], update: bool) -> Result<Vec<PathBuf>> {
+    pub async fn fetch_mods(
+        self,
+        mods: &[&ModSpecification],
+        update: bool,
+    ) -> Result<Vec<PathBuf>> {
         use futures::stream::{self, StreamExt, TryStreamExt};
 
-        stream::iter(mods.iter().map(|url| self.fetch_mod(url, update)))
+        stream::iter(mods.iter().map(|spec| self.fetch_mod(spec, update)))
             .buffered(5)
             .try_collect::<Vec<_>>()
             .await
     }
-    pub async fn fetch_mod(&self, url: &str, update: bool) -> Result<PathBuf> {
-        self.get_provider(url)?
-            .fetch_mod(url, update, self.cache.clone(), &self.blob_cache.clone())
+    pub async fn fetch_mod(&self, spec: &ModSpecification, update: bool) -> Result<PathBuf> {
+        self.get_provider(spec)?
+            .fetch_mod(
+                &spec.url,
+                update,
+                self.cache.clone(),
+                &self.blob_cache.clone(),
+            )
             .await
     }
 }
@@ -152,21 +163,21 @@ pub enum ResolvableStatus {
 /// Returned from ModStore
 #[derive(Debug, Clone)]
 pub struct Mod {
-    pub url: String,
+    pub spec: ModSpecification,
     pub status: ResolvableStatus,
     pub suggested_require: bool,
-    pub suggested_dependencies: Vec<String>, // ModResponse
+    pub suggested_dependencies: Vec<ModSpecification>, // ModResponse
 }
 
 /// Returned from ModProvider
 #[derive(Debug, Clone)]
 pub enum ModResponse {
-    Redirect { url: String },
+    Redirect(ModSpecification),
     Resolve(Mod),
 }
 
 /// Points to a mod, optionally a specific version
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Hash, PartialEq, Eq)]
 pub struct ModSpecification {
     pub url: String,
 }
@@ -177,11 +188,23 @@ pub struct ModResolution {
     pub url: String,
 }
 
+/// Mod configuration, holds ModSpecification as well as other metadata
+#[derive(Debug, Clone)]
+pub struct ModConfig {
+    pub spec: ModSpecification,
+    pub required: bool,
+}
+
+#[derive(Debug, Clone)]
+pub struct ModProfile {
+    pub mods: Vec<ModConfig>,
+}
+
 #[async_trait::async_trait]
 pub trait ModProvider: Send + Sync + std::fmt::Debug {
     async fn resolve_mod(
         &self,
-        url: &str,
+        spec: &ModSpecification,
         update: bool,
         cache: Arc<RwLock<ConfigWrapper<Cache>>>,
         blob_cache: &BlobCache,
@@ -200,7 +223,7 @@ pub struct ProviderFactory {
     pub id: &'static str,
     #[allow(clippy::type_complexity)]
     new: fn(&HashMap<String, String>) -> Result<Box<dyn ModProvider>>,
-    can_provide: fn(String) -> bool,
+    can_provide: fn(&ModSpecification) -> bool,
     pub parameters: &'static [ProviderParameter<'static>],
 }
 

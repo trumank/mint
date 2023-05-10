@@ -10,7 +10,7 @@ use task_local_extensions::Extensions;
 
 use super::{
     BlobCache, BlobRef, Cache, Mod, ModProvider, ModProviderCache, ModResolution, ModResponse,
-    ResolvableStatus,
+    ModSpecification, ResolvableStatus,
 };
 use crate::config::ConfigWrapper;
 
@@ -25,7 +25,7 @@ inventory::submit! {
     super::ProviderFactory {
         id: MODIO_PROVIDER_ID,
         new: ModioProvider::new_provider,
-        can_provide: |url| RE_MOD.is_match(&url),
+        can_provide: |spec| RE_MOD.is_match(&spec.url),
         parameters: &[
             super::ProviderParameter {
                 id: "oauth",
@@ -141,11 +141,12 @@ impl Middleware for LoggingMiddleware {
 impl ModProvider for ModioProvider {
     async fn resolve_mod(
         &self,
-        url: &str,
+        spec: &ModSpecification,
         update: bool,
         cache: Arc<RwLock<ConfigWrapper<Cache>>>,
         _blob_cache: &BlobCache,
     ) -> Result<ModResponse> {
+        let url = &spec.url;
         let captures = RE_MOD
             .captures(url)
             .ok_or_else(|| anyhow!("invalid modio URL {url}"))?;
@@ -218,13 +219,15 @@ impl ModProvider for ModioProvider {
                 }
             }
             .into_iter()
-            .map(|d| format!("https://mod.io/g/drg/m/FIXME#{d}")) // since we found mod based on
+            .map(|d| ModSpecification {
+                url: format!("https://mod.io/g/drg/m/FIXME#{d}"),
+            }) // since we found mod based on
             // ID, we haven't verified mod
             // name is actually correct
             .collect();
 
             Ok(ModResponse::Resolve(Mod {
-                url: url.to_owned(),
+                spec: spec.clone(),
                 status: ResolvableStatus::Resolvable(ModResolution {
                     url: url.to_owned(),
                 }),
@@ -264,7 +267,7 @@ impl ModProvider for ModioProvider {
                 mod_
             };
 
-            Ok(ModResponse::Redirect {
+            Ok(ModResponse::Redirect(ModSpecification {
                 url: format!(
                     "https://mod.io/g/drg/m/{}#{}/{}",
                     mod_.name_id,
@@ -274,7 +277,7 @@ impl ModProvider for ModioProvider {
                         url
                     ))?
                 ),
-            })
+            }))
         } else {
             use modio::filter::{Eq, In};
             use modio::mods::filters::{NameId, Visible};
@@ -317,9 +320,9 @@ impl ModProvider for ModioProvider {
                         .ok_or_else(|| anyhow!("mod {} does not have an associated modfile", url))?
                 };
 
-                Ok(ModResponse::Redirect {
+                Ok(ModResponse::Redirect(ModSpecification {
                     url: format!("https://mod.io/g/drg/m/{}#{}/{}", &name_id, id, modfile_id),
-                })
+                }))
             } else {
                 let filter = NameId::eq(name_id).and(Visible::_in(vec![0, 1]));
                 let mut mods = self
@@ -353,9 +356,9 @@ impl ModProvider for ModioProvider {
                         anyhow!("mod {} does not have an associated modfile", url)
                     })?;
 
-                    Ok(ModResponse::Redirect {
+                    Ok(ModResponse::Redirect(ModSpecification {
                         url: format!("https://mod.io/g/drg/m/{}#{}/{}", &name_id, mod_id, file),
-                    })
+                    }))
                 } else {
                     Err(anyhow!("no mods returned for mod name_id {}", &name_id))
                 }

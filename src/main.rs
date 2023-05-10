@@ -16,7 +16,7 @@ use config::ConfigWrapper;
 use error::IntegrationError;
 use providers::ResolvableStatus;
 
-use crate::providers::ModResolution;
+use crate::providers::{ModResolution, ModSpecification};
 
 #[derive(Parser, Debug)]
 struct ActionIntegrate {
@@ -97,12 +97,20 @@ async fn action_integrate(action: ActionIntegrate) -> Result<()> {
     let mut config: ConfigWrapper<Config> = ConfigWrapper::new(data_dir.join("config.json"));
     let mut store = providers::ModStore::new(data_dir, &config.provider_parameters)?;
 
+    let mod_specs = action
+        .mods
+        .iter()
+        .map(|url| ModSpecification {
+            url: url.to_owned(),
+        })
+        .collect::<Vec<_>>();
+
     let mods = loop {
-        match store.resolve_mods(&action.mods, action.update).await {
+        match store.resolve_mods(&mod_specs, action.update).await {
             Ok(mods) => break mods,
             Err(e) => match e.downcast::<IntegrationError>() {
-                Ok(IntegrationError::NoProvider { url, factory }) => {
-                    println!("Initializing provider for {url}");
+                Ok(IntegrationError::NoProvider { spec, factory }) => {
+                    println!("Initializing provider for {:?}", spec);
                     let params = config
                         .provider_parameters
                         .entry(factory.id.to_owned())
@@ -126,14 +134,13 @@ async fn action_integrate(action: ActionIntegrate) -> Result<()> {
     };
 
     println!("resolvable mods:");
-    for m in &action.mods {
-        if let ResolvableStatus::Resolvable(ModResolution { url }) = &mods[m].status {
-            println!("{url}");
+    for m in &mod_specs {
+        if let ResolvableStatus::Resolvable(resolution) = &mods[m].status {
+            println!("{:?}", resolution);
         }
     }
 
-    let mods_set = action
-        .mods
+    let mods_set = mod_specs
         .iter()
         .flat_map(|m| match &mods[m].status {
             ResolvableStatus::Resolvable(ModResolution { url }) => Some(url),
@@ -141,18 +148,17 @@ async fn action_integrate(action: ActionIntegrate) -> Result<()> {
         })
         .collect::<HashSet<_>>();
 
-    let missing_deps = action
-        .mods
+    let missing_deps = mod_specs
         .iter()
         .flat_map(|m| {
             mods[m]
                 .suggested_dependencies
                 .iter()
-                .filter_map(|m| match &mods[m].status {
+                .filter_map(|m| match &mods[&m].status {
                     ResolvableStatus::Resolvable(ModResolution { url }) => {
                         (!mods_set.contains(url)).then_some(url)
                     }
-                    _ => Some(m),
+                    _ => Some(&m.url),
                 })
         })
         .collect::<HashSet<_>>();
@@ -163,15 +169,14 @@ async fn action_integrate(action: ActionIntegrate) -> Result<()> {
         }
     }
 
-    let to_integrate = action
-        .mods
+    let to_integrate = mod_specs
         .iter()
         .map(|u| mods[u].clone())
         .collect::<Vec<_>>();
     let urls = to_integrate
         .iter()
-        .map(|m| m.url.as_ref())
-        .collect::<Vec<&str>>();
+        .map(|m| &m.spec) // TODO this should be a ModResolution not a ModSpecification, we're missing a step here
+        .collect::<Vec<&ModSpecification>>();
 
     println!("fetching mods...");
     let paths = store.fetch_mods(&urls, action.update).await?;

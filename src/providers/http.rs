@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 
 use super::{
     BlobCache, BlobRef, Cache, Mod, ModProvider, ModProviderCache, ModResolution, ModResponse,
-    ResolvableStatus,
+    ModSpecification, ResolvableStatus,
 };
 use crate::config::ConfigWrapper;
 
@@ -15,9 +15,9 @@ inventory::submit! {
     super::ProviderFactory {
         id: "http",
         new: HttpProvider::new_provider,
-        can_provide: |url| -> bool {
+        can_provide: |spec| -> bool {
             RE_MOD
-                .captures(&url)
+                .captures(&spec.url)
                 .and_then(|c| c.name("hostname"))
                 .map_or(false, |h| {
                     !["mod.io", "drg.mod.io", "drg.old.mod.io"].contains(&h.as_str())
@@ -70,15 +70,15 @@ const HTTP_PROVIDER_ID: &str = "http";
 impl ModProvider for HttpProvider {
     async fn resolve_mod(
         &self,
-        url: &str,
+        spec: &ModSpecification,
         _update: bool,
         _cache: Arc<RwLock<ConfigWrapper<Cache>>>,
         _blob_cache: &BlobCache,
     ) -> Result<ModResponse> {
         Ok(ModResponse::Resolve(Mod {
-            url: url.to_owned(),
+            spec: spec.clone(),
             status: ResolvableStatus::Resolvable(ModResolution {
-                url: url.to_owned(),
+                url: spec.url.to_owned(),
             }),
             suggested_require: false,
             suggested_dependencies: vec![],

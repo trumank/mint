@@ -10,7 +10,12 @@ use std::sync::{
 use anyhow::{anyhow, Result};
 use eframe::egui;
 
-use crate::{config::ConfigWrapper, error::IntegrationError, providers::ModStore, Config};
+use crate::{
+    config::ConfigWrapper,
+    error::IntegrationError,
+    providers::{ModSpecification, ModStore},
+    Config,
+};
 
 pub fn gui() -> Result<()> {
     let options = eframe::NativeOptions {
@@ -78,8 +83,8 @@ impl eframe::App for App {
                             println!("{mod_:?}");
                         }
                         Err(e) => match e.downcast::<IntegrationError>() {
-                            Ok(IntegrationError::NoProvider { url, factory }) => {
-                                println!("Initializing provider for {url}");
+                            Ok(IntegrationError::NoProvider { spec, factory }) => {
+                                println!("Initializing provider for {:?}", spec);
                                 let params = self
                                     .config
                                     .provider_parameters
@@ -128,11 +133,13 @@ impl eframe::App for App {
                     let ctx = ui.ctx().clone();
                     let tx = self.tx.clone();
                     let store = self.store.clone();
-                    let url = self.resolve_mod.to_owned();
+                    let spec = ModSpecification {
+                        url: self.resolve_mod.to_owned(),
+                    };
                     tokio::spawn(async move {
-                        match store.resolve_mod(url, false).await {
-                            Ok((url, mod_)) => tx
-                                .send(message::Message::Log(format!("Resolved mod: {url}")))
+                        match store.resolve_mod(spec, false).await {
+                            Ok((spec, mod_)) => tx
+                                .send(message::Message::Log(format!("Resolved mod: {spec:?}")))
                                 .unwrap(),
                             Err(e) => tx.send(message::Message::Log(format!("{e}"))).unwrap(),
                         }

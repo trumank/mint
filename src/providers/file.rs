@@ -4,14 +4,14 @@ use std::sync::{Arc, RwLock};
 
 use anyhow::{anyhow, Result};
 
-use super::{BlobCache, Cache, Mod, ModProvider, ModResponse, ResolvableStatus};
+use super::{BlobCache, Cache, Mod, ModProvider, ModResponse, ModSpecification, ResolvableStatus};
 use crate::config::ConfigWrapper;
 
 inventory::submit! {
     super::ProviderFactory {
         id: "file",
         new: FileProvider::new_provider,
-        can_provide: |url| Path::new(&url).exists(),
+        can_provide: |spec| Path::new(&spec.url).exists(),
         parameters: &[],
     }
 }
@@ -32,18 +32,18 @@ impl FileProvider {
 impl ModProvider for FileProvider {
     async fn resolve_mod(
         &self,
-        url: &str,
+        spec: &ModSpecification,
         _update: bool,
         _cache: Arc<RwLock<ConfigWrapper<Cache>>>,
         _blob_cache: &BlobCache,
     ) -> Result<ModResponse> {
-        let path = Path::new(url);
+        let path = Path::new(&spec.url);
         Ok(ModResponse::Resolve(Mod {
-            url: url.to_owned(),
+            spec: spec.clone(),
             status: ResolvableStatus::Unresolvable {
                 name: path
                     .file_name()
-                    .ok_or_else(|| anyhow!("could not determine file name of {}", url))?
+                    .ok_or_else(|| anyhow!("could not determine file name of {:?}", spec))?
                     .to_string_lossy()
                     .to_string(),
             },
