@@ -6,7 +6,8 @@ use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
 
 use super::{
-    BlobCache, BlobRef, Cache, Mod, ModProvider, ModProviderCache, ModResponse, ResolvableStatus,
+    BlobCache, BlobRef, Cache, Mod, ModProvider, ModProviderCache, ModResolution, ModResponse,
+    ResolvableStatus,
 };
 use crate::config::ConfigWrapper;
 
@@ -76,9 +77,9 @@ impl ModProvider for HttpProvider {
     ) -> Result<ModResponse> {
         Ok(ModResponse::Resolve(Mod {
             url: url.to_owned(),
-            status: ResolvableStatus::Resolvable {
+            status: ResolvableStatus::Resolvable(ModResolution {
                 url: url.to_owned(),
-            },
+            }),
             suggested_require: false,
             suggested_dependencies: vec![],
         }))

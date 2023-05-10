@@ -16,6 +16,8 @@ use config::ConfigWrapper;
 use error::IntegrationError;
 use providers::ResolvableStatus;
 
+use crate::providers::ModResolution;
+
 #[derive(Parser, Debug)]
 struct ActionIntegrate {
     /// Path to the "Deep Rock Galactic" installation directory
@@ -125,7 +127,7 @@ async fn action_integrate(action: ActionIntegrate) -> Result<()> {
 
     println!("resolvable mods:");
     for m in &action.mods {
-        if let ResolvableStatus::Resolvable { url } = &mods[m].status {
+        if let ResolvableStatus::Resolvable(ModResolution { url }) = &mods[m].status {
             println!("{url}");
         }
     }
@@ -134,7 +136,7 @@ async fn action_integrate(action: ActionIntegrate) -> Result<()> {
         .mods
         .iter()
         .flat_map(|m| match &mods[m].status {
-            ResolvableStatus::Resolvable { url } => Some(url),
+            ResolvableStatus::Resolvable(ModResolution { url }) => Some(url),
             _ => None,
         })
         .collect::<HashSet<_>>();
@@ -147,7 +149,7 @@ async fn action_integrate(action: ActionIntegrate) -> Result<()> {
                 .suggested_dependencies
                 .iter()
                 .filter_map(|m| match &mods[m].status {
-                    ResolvableStatus::Resolvable { url } => {
+                    ResolvableStatus::Resolvable(ModResolution { url }) => {
                         (!mods_set.contains(url)).then_some(url)
                     }
                     _ => Some(m),

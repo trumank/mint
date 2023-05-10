@@ -146,7 +146,7 @@ pub enum ResolvableStatus {
     /// If a mod can not be resolved, specify just a name
     Unresolvable { name: String },
     /// Ifa mod can be resolved, specify the URL
-    Resolvable { url: String },
+    Resolvable(ModResolution),
 }
 
 /// Returned from ModStore
@@ -163,6 +163,18 @@ pub struct Mod {
 pub enum ModResponse {
     Redirect { url: String },
     Resolve(Mod),
+}
+
+/// Points to a mod, optionally a specific version
+#[derive(Debug, Clone)]
+pub struct ModSpecification {
+    pub url: String,
+}
+
+/// Points to a specific version of a specific mod
+#[derive(Debug, Clone)]
+pub struct ModResolution {
+    pub url: String,
 }
 
 #[async_trait::async_trait]

@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{anyhow, Result};
 
-use crate::providers::{Mod, ReadSeek, ResolvableStatus};
+use crate::providers::{Mod, ModResolution, ReadSeek, ResolvableStatus};
 
 use unreal_asset::{
     exports::ExportBaseTrait,
@@ -117,7 +117,7 @@ pub fn integrate<P: AsRef<Path>>(path_game: P, mods: Vec<(Mod, PathBuf)>) -> Res
             }
             Ok(match m.status {
                 ResolvableStatus::Unresolvable { name } => name,
-                ResolvableStatus::Resolvable { url } => url,
+                ResolvableStatus::Resolvable(ModResolution { url }) => url,
             })
         })
         .collect::<Result<Vec<String>>>()?;

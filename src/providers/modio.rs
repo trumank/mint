@@ -9,7 +9,8 @@ use serde::{Deserialize, Serialize};
 use task_local_extensions::Extensions;
 
 use super::{
-    BlobCache, BlobRef, Cache, Mod, ModProvider, ModProviderCache, ModResponse, ResolvableStatus,
+    BlobCache, BlobRef, Cache, Mod, ModProvider, ModProviderCache, ModResolution, ModResponse,
+    ResolvableStatus,
 };
 use crate::config::ConfigWrapper;
 
@@ -152,6 +153,7 @@ impl ModProvider for ModioProvider {
         if let (Some(mod_id), Some(_modfile_id)) =
             (captures.name("mod_id"), captures.name("modfile_id"))
         {
+            // both mod ID and modfile ID specified, but not necessarily name
             let mod_id = mod_id.as_str().parse::<u32>().unwrap();
 
             let mod_ = if let Some(mod_) = (!update)
@@ -216,18 +218,21 @@ impl ModProvider for ModioProvider {
                 }
             }
             .into_iter()
-            .map(|d| format!("https://mod.io/g/drg/m/FIXME#{d}"))
+            .map(|d| format!("https://mod.io/g/drg/m/FIXME#{d}")) // since we found mod based on
+            // ID, we haven't verified mod
+            // name is actually correct
             .collect();
 
             Ok(ModResponse::Resolve(Mod {
                 url: url.to_owned(),
-                status: ResolvableStatus::Resolvable {
+                status: ResolvableStatus::Resolvable(ModResolution {
                     url: url.to_owned(),
-                },
+                }),
                 suggested_require: mod_.tags.contains("RequiredByAll"),
                 suggested_dependencies: deps,
             }))
         } else if let Some(mod_id) = captures.name("mod_id") {
+            // only mod ID specified, use latest version (either cached local or remote depending)
             let mod_id = mod_id.as_str().parse::<u32>().unwrap();
 
             let cached = (!update)
