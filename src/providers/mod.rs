@@ -156,7 +156,7 @@ impl<T: Seek + Read + Send> ReadSeek for T {}
 pub enum ResolvableStatus {
     /// If a mod can not be resolved, specify just a name
     Unresolvable { name: String },
-    /// Ifa mod can be resolved, specify the URL
+    /// If a mod can be resolved, specify the URL
     Resolvable(ModResolution),
 }
 
