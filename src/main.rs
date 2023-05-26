@@ -18,21 +18,29 @@ use providers::ResolvableStatus;
 
 use crate::providers::{ModResolution, ModSpecification};
 
+/// Command line integration tool.
 #[derive(Parser, Debug)]
 struct ActionIntegrate {
-    /// Path to the "Deep Rock Galactic" installation directory
+    /// Path to the "Deep Rock Galactic" installation directory. Only necessary if it cannot be found automatically.
     #[arg(short, long)]
     drg: Option<PathBuf>,
 
-    /// Update mods. By default only offline cached data will be used without this flag.
+    /// Update mods. By default all mods and metadata are cached offline so this is necessary to check for updates.
     #[arg(short, long)]
     update: bool,
 
-    /// Path of mods to integrate
-    #[arg(short, long, num_args=0..)]
+    /// Paths of mods to integrate
+    ///
+    /// Can be a file path or URL to a .pak or .zip file or a URL to a mod on https://mod.io/g/drg
+    /// Examples:
+    ///     ./local/path/test-mod.pak
+    ///     https://mod.io/g/drg/m/custom-difficulty
+    ///     https://example.org/some-online-mod-repository/public-mod.zip
+    #[arg(short, long, num_args=0.., verbatim_doc_comment)]
     mods: Vec<String>,
 }
 
+/// Work in progress GUI. Not usable yet.
 #[derive(Parser, Debug)]
 struct ActionGui {}
 
