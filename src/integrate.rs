@@ -4,6 +4,9 @@ use std::io::{self, BufReader, BufWriter, Cursor, Read, Seek};
 use std::path::{Path, PathBuf};
 
 use anyhow::{anyhow, Result};
+use unreal_asset::properties::object_property::TopLevelAssetPath;
+use unreal_asset::types::vector::Vector;
+use unreal_asset::unversioned::ancestry::Ancestry;
 
 use crate::providers::{Mod, ModResolution, ReadSeek, ResolvableStatus};
 
@@ -21,7 +24,7 @@ use unreal_asset::{
         struct_property::StructProperty,
         Property,
     },
-    types::{FName, PackageIndex},
+    types::{fname::FName, PackageIndex},
     Asset,
 };
 
@@ -241,9 +244,9 @@ fn get_import<R: Read + Seek>(asset: &mut Asset<R>, import: ImportChain) -> Pack
             .iter()
             .enumerate()
             .find(|(_, ai)| {
-                ai.class_package.content == i.class_package
-                    && ai.class_name.content == i.class_name
-                    && ai.object_name.content == i.object_name
+                ai.class_package.get_content() == i.class_package
+                    && ai.class_name.get_content() == i.class_name
+                    && ai.object_name.get_content() == i.object_name
                     && ai.outer_index == pi
             })
             .map(|(index, _)| PackageIndex::from_import(index as i32).unwrap());
@@ -253,6 +256,7 @@ fn get_import<R: Read + Seek>(asset: &mut Asset<R>, import: ImportChain) -> Pack
                 asset.add_fname(i.class_name),
                 pi,
                 asset.add_fname(i.object_name),
+                false,
             );
             asset.add_import(new_import)
         });
@@ -264,9 +268,9 @@ fn find_export_named<'a, R: io::Read + io::Seek>(
     asset: &'a mut unreal_asset::Asset<R>,
     name: &'a str,
 ) -> Option<&'a mut unreal_asset::exports::normal_export::NormalExport> {
-    for export in &mut asset.exports {
+    for export in &mut asset.asset_data.exports {
         if let unreal_asset::exports::Export::NormalExport(export) = export {
-            if export.base_export.object_name.content == name {
+            if export.base_export.object_name.get_content() == name {
                 return Some(export);
             }
         }
@@ -282,7 +286,7 @@ fn find_array_property_named<'a>(
 )> {
     for (i, prop) in &mut export.properties.iter_mut().enumerate() {
         if let unreal_asset::properties::Property::ArrayProperty(prop) = prop {
-            if prop.name.content == name {
+            if prop.name.get_content() == name {
                 return Some((i, prop));
             }
         }
@@ -357,25 +361,23 @@ fn hook_pcb<R: Read + Seek>(asset: &mut Asset<R>) {
             ExVectorConst {
                 token: EExprToken::ExVectorConst,
                 value: unreal_asset::types::vector::Vector::new(
-                    0f32.into(),
-                    0f32.into(),
-                    0f32.into(),
+                    0f64.into(),
+                    0f64.into(),
+                    0f64.into(),
                 ),
             }
             .into(),
             ExRotationConst {
                 token: EExprToken::ExVectorConst,
-                pitch: 0,
-                roll: 0,
-                yaw: 0,
+                rotator: Vector::new(0f64.into(), 0f64.into(), 0f64.into()),
             }
             .into(),
             ExVectorConst {
                 token: EExprToken::ExVectorConst,
                 value: unreal_asset::types::vector::Vector::new(
-                    1f32.into(),
-                    1f32.into(),
-                    1f32.into(),
+                    1f64.into(),
+                    1f64.into(),
+                    1f64.into(),
                 ),
             }
             .into(),
@@ -413,12 +415,13 @@ fn hook_pcb<R: Read + Seek>(asset: &mut Asset<R>) {
     };
 
     let (fi, func) = asset
+        .asset_data
         .exports
         .iter_mut()
         .enumerate()
         .find_map(|(i, e)| {
             if let unreal_asset::exports::Export::FunctionExport(func) = e {
-                if func.get_base_export().object_name.content == "ReceiveBeginPlay" {
+                if func.get_base_export().object_name.get_content() == "ReceiveBeginPlay" {
                     return Some((PackageIndex::from_export(i as i32).unwrap(), func));
                 }
             }
@@ -570,11 +573,14 @@ fn inject_init_actors<R: Read + Seek>(
         .map(|p| asset.add_fname(&p))
         .collect::<Vec<_>>();
 
+    let ancestry = Ancestry::new(FName::new_dummy("".to_owned(), 0));
+
     let structs = mods
         .iter()
         .map(|m| {
             StructProperty {
                 name: asset.add_fname("LoadedMods"),
+                ancestry: Ancestry::new(FName::new_dummy("".to_owned(), 0)),
                 struct_type: Some(asset.add_fname("MI_Mod")),
                 struct_guid: Some([
                     59, 201, 35, 171, 89, 71, 206, 180, 185, 207, 203, 190, 80, 216, 194, 203,
@@ -585,6 +591,7 @@ fn inject_init_actors<R: Read + Seek>(
                 value: [
                     StrProperty {
                         name: asset.add_fname("Name_2_34C619CC6D494CA58075DEC3D6BA8888"),
+                        ancestry: ancestry.clone(),
                         property_guid: None,
                         duplication_index: 0,
                         value: Some(m.to_owned()),
@@ -592,6 +599,7 @@ fn inject_init_actors<R: Read + Seek>(
                     .into(),
                     StrProperty {
                         name: asset.add_fname("ID_6_9947C5279BF5459380939CBA188C9805"),
+                        ancestry: ancestry.clone(),
                         property_guid: None,
                         duplication_index: 0,
                         value: Some("".to_string()),
@@ -599,6 +607,7 @@ fn inject_init_actors<R: Read + Seek>(
                     .into(),
                     StrProperty {
                         name: asset.add_fname("Version_7_B0FB8B97A09949F59B8F7142D9DA23A4"),
+                        ancestry: ancestry.clone(),
                         property_guid: None,
                         duplication_index: 0,
                         value: Some("".to_string()),
@@ -606,6 +615,7 @@ fn inject_init_actors<R: Read + Seek>(
                     .into(),
                     BoolProperty {
                         name: asset.add_fname("Required_9_B258E5345EEE4548A6292DEF342D3FBB"),
+                        ancestry: ancestry.clone(),
                         property_guid: None,
                         duplication_index: 0,
                         value: false,
@@ -624,11 +634,12 @@ fn inject_init_actors<R: Read + Seek>(
             for path in init_spacerig_fnames {
                 p.value.push(
                     SoftObjectProperty {
-                        name: FName::new("0".to_owned(), -2147483648),
+                        name: FName::new_dummy("0".to_owned(), -2147483648),
+                        ancestry: ancestry.clone(),
                         property_guid: None,
                         duplication_index: 0,
                         value: SoftObjectPath {
-                            asset_path_name: path,
+                            asset_path: TopLevelAssetPath::new(None, path),
                             sub_path_string: None,
                         },
                     }
@@ -641,11 +652,12 @@ fn inject_init_actors<R: Read + Seek>(
             for path in init_cave_fnames {
                 p.value.push(
                     SoftObjectProperty {
-                        name: FName::new("0".to_owned(), -2147483648),
+                        name: FName::new_dummy("0".to_owned(), -2147483648),
+                        ancestry: ancestry.clone(),
                         property_guid: None,
                         duplication_index: 0,
                         value: SoftObjectPath {
-                            asset_path_name: path,
+                            asset_path: TopLevelAssetPath::new(None, path),
                             sub_path_string: None,
                         },
                     }
