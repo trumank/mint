@@ -95,7 +95,7 @@ impl ModStore {
                 to_resolve.clear();
                 for m in mods_map.values() {
                     for d in &m.suggested_dependencies {
-                        if !mods_map.contains_key(&d) {
+                        if !mods_map.contains_key(d) {
                             to_resolve.insert(d.clone());
                         }
                     }

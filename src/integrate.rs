@@ -544,7 +544,7 @@ fn hook_pcb<R: Read + Seek>(asset: &mut Asset<R>) {
                             variable: KismetPropertyPointer {
                                 old: None,
                                 new: Some(FieldPath {
-                                    path: vec![prop_class_name.clone()],
+                                    path: vec![prop_class_name],
                                     resolved_owner: fi,
                                 }),
                             },

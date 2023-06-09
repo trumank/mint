@@ -162,7 +162,7 @@ async fn action_integrate(action: ActionIntegrate) -> Result<()> {
             mods[m]
                 .suggested_dependencies
                 .iter()
-                .filter_map(|m| match &mods[&m].status {
+                .filter_map(|m| match &mods[m].status {
                     ResolvableStatus::Resolvable(ModResolution { url }) => {
                         (!mods_set.contains(url)).then_some(url)
                     }
