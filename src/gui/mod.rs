@@ -2,20 +2,25 @@ mod message;
 
 //#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")] // hide console window on Windows in release
 
-use std::sync::{
-    mpsc::{Receiver, Sender},
-    Arc,
+use std::{
+    collections::HashMap,
+    sync::{
+        mpsc::{Receiver, Sender},
+        Arc,
+    },
 };
 
 use anyhow::{anyhow, Result};
-use eframe::egui;
+use eframe::{egui, epaint::text::LayoutJob};
 
 use crate::{
     config::ConfigWrapper,
     error::IntegrationError,
-    providers::{ModSpecification, ModStore},
+    providers::{ModConfig, ModProfile, ModSpecification, ModStore},
     Config,
 };
+
+use request_counter::{RequestCounter, RequestID};
 
 pub fn gui() -> Result<()> {
     let options = eframe::NativeOptions {
@@ -31,14 +36,46 @@ pub fn gui() -> Result<()> {
     Ok(())
 }
 
+#[derive(serde::Serialize, serde::Deserialize)]
+struct ModProfiles {
+    active_profile: String,
+    profiles: HashMap<String, ModProfile>,
+}
+impl Default for ModProfiles {
+    fn default() -> Self {
+        Self {
+            active_profile: "default".to_string(),
+            profiles: [("default".to_string(), Default::default())]
+                .into_iter()
+                .collect(),
+        }
+    }
+}
+impl ModProfiles {
+    fn get_active_profile(&self) -> &ModProfile {
+        &self.profiles[&self.active_profile]
+    }
+    fn get_active_profile_mut(&mut self) -> &mut ModProfile {
+        self.profiles.get_mut(&self.active_profile).unwrap()
+    }
+    fn remove_active(&mut self) {
+        self.profiles.remove(&self.active_profile);
+        self.active_profile = self.profiles.keys().next().unwrap().to_string();
+    }
+}
+
 struct App {
     tx: Sender<message::Message>,
     rx: Receiver<message::Message>,
     store: Arc<ModStore>,
     config: ConfigWrapper<Config>,
-    table: TableDemo,
+    profiles: ConfigWrapper<ModProfiles>,
+    profile_dropdown: String,
     log: String,
     resolve_mod: String,
+    resolve_mod_rid: Option<RequestID>,
+    integrate_rid: Option<RequestID>,
+    request_counter: RequestCounter,
 }
 
 impl App {
@@ -48,88 +85,295 @@ impl App {
         let data_dir = std::path::Path::new("data");
         std::fs::create_dir(data_dir).ok();
         let config: ConfigWrapper<Config> = ConfigWrapper::new(data_dir.join("config.json"));
+        let profiles: ConfigWrapper<ModProfiles> =
+            ConfigWrapper::new(data_dir.join("profiles.json"));
         let store = ModStore::new(data_dir, &config.provider_parameters)?.into();
 
         Ok(Self {
             tx,
             rx,
+            request_counter: Default::default(),
             store,
             config,
-            table: Default::default(),
+            profiles,
+            profile_dropdown: "default".to_string(),
             log: Default::default(),
             resolve_mod: Default::default(),
+            resolve_mod_rid: None,
+            integrate_rid: None,
         })
+    }
+
+    fn ui_profile(&mut self, ui: &mut egui::Ui) {
+        use egui_extras::{Size, StripBuilder};
+        StripBuilder::new(ui)
+            .size(Size::remainder().at_least(100.0)) // for the table
+            .vertical(|mut strip| {
+                strip.cell(|ui| {
+                    egui::ScrollArea::horizontal().show(ui, |ui| {
+                        self.ui_profile_table(ui);
+                    });
+                });
+            });
+    }
+
+    fn ui_profile_table(&mut self, ui: &mut egui::Ui) {
+        use egui_extras::{Column, TableBuilder};
+
+        let mods = &mut self.profiles.get_active_profile_mut().mods;
+        let mut needs_save = false;
+
+        let text_height = egui::TextStyle::Body.resolve(ui.style()).size + 6.0;
+
+        let table = TableBuilder::new(ui)
+            .striped(true)
+            .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
+            .column(Column::auto())
+            .column(
+                Column::initial(100.0)
+                    .at_least(40.0)
+                    .resizable(true)
+                    .clip(true),
+            )
+            //.column(Column::initial(100.0).range(40.0..=300.0).resizable(true))
+            .column(
+                Column::initial(100.0)
+                    .at_least(40.0)
+                    .resizable(true)
+                    .clip(true),
+            )
+            .column(Column::remainder())
+            .min_scrolled_height(0.0)
+            .max_scroll_height(f32::INFINITY);
+
+        let mut btn_remove = None;
+        let mut btn_up = None;
+        let mut btn_down = None;
+
+        let mods_len = mods.len();
+
+        table
+            .header(20.0, |mut header| {
+                header.col(|ui| {
+                    ui.strong("rm");
+                });
+                header.col(|ui| {
+                    ui.strong("Mod");
+                });
+                header.col(|ui| {
+                    ui.strong("Version");
+                });
+                header.col(|ui| {
+                    ui.strong("Required");
+                });
+            })
+            .body(|body| {
+                body.rows(text_height, mods.len(), |row_index, mut row| {
+                    let mod_ = &mut mods[row_index];
+                    row.col(|ui| {
+                        if ui.button("remove").clicked() {
+                            btn_remove = Some(row_index);
+                        }
+                        ui.add_enabled_ui(row_index != 0, |ui| {
+                            if ui.button("up").clicked() {
+                                btn_up = Some(row_index);
+                            }
+                        });
+                        ui.add_enabled_ui(row_index != mods_len - 1, |ui| {
+                            if ui.button("down").clicked() {
+                                btn_down = Some(row_index);
+                            }
+                        });
+                    });
+                    row.col(|ui| {
+                        ui.label(&mod_.spec.url);
+                    });
+                    row.col(|ui| {
+                        /*
+                        egui::ComboBox::from_id_source(row_index)
+                            .selected_text(match mod_.version {
+                                Some(index) => &mod_.versions[index],
+                                None => "latest",
+                            })
+                            .show_ui(ui, |ui| {
+                                ui.style_mut().wrap = Some(false);
+                                ui.set_min_width(60.0);
+                                ui.selectable_value(&mut mod_.version, None, "latest");
+                                for (i, v) in mod_.versions.iter().enumerate() {
+                                    ui.selectable_value(&mut mod_.version, Some(i), v);
+                                }
+                            });
+                            */
+                    });
+                    row.col(|ui| {
+                        if ui
+                            .add(egui::Checkbox::without_text(&mut mod_.required))
+                            .changed()
+                        {
+                            needs_save = true;
+                        }
+                    });
+                });
+            });
+        if let Some(remove) = btn_remove {
+            mods.remove(remove);
+            needs_save = true;
+        }
+        if let Some(up) = btn_up {
+            mods.swap(up, up - 1);
+            needs_save = true;
+        }
+        if let Some(down) = btn_down {
+            mods.swap(down, down + 1);
+            needs_save = true;
+        }
+        if needs_save {
+            self.profiles.save().unwrap();
+        }
     }
 }
 
-struct Mod {
-    url: String,
-    required: bool,
-    version: Option<usize>,
-    versions: Vec<String>,
+mod request_counter {
+    /// Simple counter that returns a new ID each time it is called
+    #[derive(Default)]
+    pub struct RequestCounter(u32);
+
+    impl RequestCounter {
+        /// Get next ID
+        pub fn next(&mut self) -> RequestID {
+            let id = self.0;
+            self.0 += 1;
+            RequestID { id }
+        }
+    }
+
+    #[derive(Debug, Clone, Copy, Eq, PartialEq)]
+    pub struct RequestID {
+        id: u32,
+    }
 }
 
 impl eframe::App for App {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        // message handling
         if let Ok(msg) = self.rx.try_recv() {
             match msg {
                 message::Message::Log(log) => {
                     self.log.push_str(&log);
                     self.log.push('\n');
                 }
-                message::Message::ResolveMod(res) => {
-                    match res {
-                        Ok(mod_) => {
-                            println!("{mod_:?}");
-                        }
-                        Err(e) => match e.downcast::<IntegrationError>() {
-                            Ok(IntegrationError::NoProvider { spec, factory }) => {
-                                println!("Initializing provider for {:?}", spec);
-                                let params = self
-                                    .config
-                                    .provider_parameters
-                                    .entry(factory.id.to_owned())
-                                    .or_default();
-                                for p in factory.parameters {
-                                    if !params.contains_key(p.name) {
-                                        let value = dialoguer::Password::with_theme(
-                                            &dialoguer::theme::ColorfulTheme::default(),
-                                        )
-                                        .with_prompt(p.description)
-                                        .interact()
-                                        .unwrap();
-                                        params.insert(p.id.to_owned(), value);
-                                    }
-                                }
-                                //self.store.add_provider(factory, params).unwrap();
+                message::Message::ResolveMod(rid, res) => {
+                    if Some(rid) == self.resolve_mod_rid {
+                        match res {
+                            Ok((_spec, mod_)) => {
+                                self.profiles.get_active_profile_mut().mods.push(ModConfig {
+                                    spec: mod_.spec,
+                                    required: mod_.suggested_require,
+                                });
+                                self.profiles.save().unwrap();
                             }
-                            _ => {}
-                        },
+                            Err(e) => match e.downcast::<IntegrationError>() {
+                                Ok(IntegrationError::NoProvider { spec, factory }) => {
+                                    println!("Initializing provider for {:?}", spec);
+                                    let params = self
+                                        .config
+                                        .provider_parameters
+                                        .entry(factory.id.to_owned())
+                                        .or_default();
+                                    for p in factory.parameters {
+                                        if !params.contains_key(p.name) {
+                                            let value = dialoguer::Password::with_theme(
+                                                &dialoguer::theme::ColorfulTheme::default(),
+                                            )
+                                            .with_prompt(p.description)
+                                            .interact()
+                                            .unwrap();
+                                            params.insert(p.id.to_owned(), value);
+                                        }
+                                    }
+                                    //self.store.add_provider(factory, params).unwrap();
+                                }
+                                Err(e) => {
+                                    self.log.push_str(&format!("{:#?}\n", e));
+                                }
+                            },
+                        }
+                        self.resolve_mod_rid = None;
+                    }
+                }
+                message::Message::Integrate(rid, res) => {
+                    if Some(rid) == self.integrate_rid {
+                        match res {
+                            Ok(()) => {
+                                self.log.push_str("Integration complete\n");
+                            }
+                            Err(e) => {
+                                self.log.push_str(&format!("{:#?}\n", e));
+                            }
+                        }
+                        self.integrate_rid = None;
                     }
                 }
             }
         }
+
+        // begin draw
         egui::SidePanel::left("left_panel").show(ctx, |ui| {
             ui.with_layout(
                 egui::Layout::top_down_justified(egui::Align::Center),
                 |ui| {
-                    if ui.button("Log stuff").clicked() {
-                        self.tx
-                            .send(message::Message::Log("asdf".to_owned()))
-                            .unwrap();
-                    }
                     egui::ScrollArea::both().show(ui, |ui| {
                         ui.add(egui::TextEdit::multiline(&mut self.log.as_str()));
                     });
                 },
             );
         });
+        egui::TopBottomPanel::bottom("bottom_panel").show(ctx, |ui| {
+            ui.with_layout(
+                egui::Layout::top_down_justified(egui::Align::Center),
+                |ui| {
+                    ui.add(egui::widgets::ProgressBar::new(0.5));
+                    ui.add_enabled_ui(self.integrate_rid.is_none(), |ui| {
+                        if ui.button("integrate").clicked() {
+                            self.integrate_rid = integrate(
+                                &mut self.request_counter,
+                                self.store.clone(),
+                                self.profiles
+                                    .get_active_profile()
+                                    .mods
+                                    .iter()
+                                    .map(|m| m.spec.clone())
+                                    .collect(),
+                                self.tx.clone(),
+                                ctx.clone(),
+                            );
+                        }
+                    });
+                },
+            );
+        });
         egui::CentralPanel::default().show(ctx, |ui| {
             ui.horizontal(|ui| {
-                let resolve = ui.add(
+                let resolve = ui.add_enabled(
+                    self.resolve_mod_rid.is_none(),
                     egui::TextEdit::singleline(&mut self.resolve_mod).hint_text("Resolve mod..."),
                 );
                 if is_committed(&resolve) {
+                    let rid = self.request_counter.next();
+                    let spec = ModSpecification {
+                        url: self.resolve_mod.to_string(),
+                    };
+                    let store = self.store.clone();
+                    let tx = self.tx.clone();
+                    let ctx = ctx.clone();
+                    tokio::spawn(async move {
+                        let res = store.resolve_mod(spec, false).await;
+                        tx.send(message::Message::ResolveMod(rid, res)).unwrap();
+                        ctx.request_repaint();
+                    });
+                    self.resolve_mod_rid = Some(rid);
+
+                    /*
                     let ctx = ui.ctx().clone();
                     let tx = self.tx.clone();
                     let store = self.store.clone();
@@ -145,12 +389,66 @@ impl eframe::App for App {
                         }
                         ctx.request_repaint();
                     });
+                    */
                 }
+                if self.resolve_mod_rid.is_some() {
+                    ui.spinner();
+                }
+            });
+
+            // profile selection
+            ui.horizontal(|ui| {
+                let res = ui.add(egui_dropdown::DropDownBox::from_iter(
+                    self.profiles.profiles.keys(),
+                    "profile_dropdown",
+                    &mut self.profile_dropdown,
+                    |ui, text| {
+                        let mut job = LayoutJob {
+                            halign: egui::Align::LEFT,
+                            ..Default::default()
+                        };
+                        job.append(text, 0.0, Default::default());
+                        ui.selectable_label(text == self.profiles.active_profile, job)
+                    },
+                ));
+                if res.gained_focus() {
+                    self.profile_dropdown.clear();
+                }
+
+                if self.profiles.profiles.contains_key(&self.profile_dropdown) {
+                    self.profiles.active_profile = self.profile_dropdown.to_string();
+                    self.profiles.save().unwrap();
+                }
+
+                ui.add_enabled_ui(
+                    self.profiles.profiles.contains_key(&self.profile_dropdown)
+                        && self.profiles.profiles.len() > 1,
+                    |ui| {
+                        if ui.button("-").clicked() {
+                            self.profiles.remove_active();
+                            self.profile_dropdown = self.profiles.active_profile.to_string();
+                            self.profiles.save().unwrap();
+                        }
+                    },
+                );
+                ui.add_enabled_ui(
+                    self.profile_dropdown != self.profiles.active_profile,
+                    |ui| {
+                        if ui.button("+").clicked() {
+                            self.profiles
+                                .profiles
+                                .entry(self.profile_dropdown.to_string())
+                                .or_default();
+                            self.profiles.active_profile = self.profile_dropdown.to_string();
+                            self.profiles.save().unwrap();
+                        }
+                    },
+                );
             });
 
             ui.separator();
 
-            self.table.ui(ui);
+            self.ui_profile(ui);
         });
     }
 }
@@ -159,114 +457,66 @@ fn is_committed(res: &egui::Response) -> bool {
     res.lost_focus() && res.ctx.input(|i| i.key_pressed(egui::Key::Enter))
 }
 
-/// Shows off a table with dynamic layout
-pub struct TableDemo {
-    mods: Vec<Mod>,
-}
+fn integrate(
+    rc: &mut RequestCounter,
+    store: Arc<ModStore>,
+    mods: Vec<ModSpecification>,
+    tx: Sender<message::Message>,
+    ctx: egui::Context,
+) -> Option<RequestID> {
+    let rid = rc.next();
 
-impl Default for TableDemo {
-    fn default() -> Self {
-        Self {
-            mods: {
-                let mut mods = vec![];
-                for _ in 0..100 {
-                    mods.push(Mod {
-                        url: "asdf".to_owned(),
-                        required: false,
-                        version: Some(1),
-                        versions: vec!["a".to_owned(), "b".to_owned(), "c".to_owned()],
-                    });
-                    mods.push(Mod {
-                        url: "asdf2".to_owned(),
-                        required: true,
-                        version: Some(1),
-                        versions: vec!["1".to_owned(), "2".to_owned(), "3".to_owned()],
-                    });
-                    mods.push(Mod {
-                        url: "asdf2".to_owned(),
-                        required: true,
-                        version: None,
-                        versions: vec![],
-                    });
-                }
-                mods
-            },
+    async fn integrate(store: Arc<ModStore>, mod_specs: Vec<ModSpecification>) -> Result<()> {
+        use anyhow::Context;
+
+        let path_game = if let Some(mut steamdir) = steamlocate::SteamDir::locate() {
+            steamdir.app(&548430).map(|a| a.path.clone())
+        } else {
+            None
         }
+        .context(
+            "Could not find DRG install directory, please specify manually with the --drg flag",
+        )?;
+
+        let update = false;
+
+        let mods = loop {
+            match store.resolve_mods(&mod_specs, update).await {
+                Ok(mods) => break mods,
+                Err(e) => match e.downcast::<IntegrationError>() {
+                    Ok(IntegrationError::NoProvider {
+                        spec: _,
+                        factory: _,
+                    }) => {
+                        // TODO providers should already be initialized by now?
+                        unimplemented!();
+                    }
+                    Err(e) => return Err(e),
+                },
+            }
+        };
+
+        let to_integrate = mod_specs
+            .iter()
+            .map(|u| mods[u].clone())
+            .collect::<Vec<_>>();
+        let urls = to_integrate
+            .iter()
+            .map(|m| &m.spec) // TODO this should be a ModResolution not a ModSpecification, we're missing a step here
+            .collect::<Vec<&ModSpecification>>();
+
+        println!("fetching mods...");
+        let paths = store.fetch_mods(&urls, update).await?;
+
+        crate::integrate::integrate(path_game, to_integrate.into_iter().zip(paths).collect())?;
+
+        Ok(())
     }
-}
 
-impl TableDemo {
-    fn ui(&mut self, ui: &mut egui::Ui) {
-        use egui_extras::{Size, StripBuilder};
-        StripBuilder::new(ui)
-            .size(Size::remainder().at_least(100.0)) // for the table
-            .vertical(|mut strip| {
-                strip.cell(|ui| {
-                    egui::ScrollArea::horizontal().show(ui, |ui| {
-                        self.table_ui(ui);
-                    });
-                });
-            });
-    }
-}
-
-impl TableDemo {
-    fn table_ui(&mut self, ui: &mut egui::Ui) {
-        use egui_extras::{Column, TableBuilder};
-
-        let text_height = egui::TextStyle::Body.resolve(ui.style()).size + 6.0;
-
-        let table = TableBuilder::new(ui)
-            .striped(true)
-            .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
-            .column(Column::auto())
-            //.column(Column::initial(100.0).range(40.0..=300.0).resizable(true))
-            .column(
-                Column::initial(100.0)
-                    .at_least(40.0)
-                    .resizable(true)
-                    .clip(true),
-            )
-            .column(Column::remainder())
-            .min_scrolled_height(0.0);
-
-        table
-            .header(20.0, |mut header| {
-                header.col(|ui| {
-                    ui.strong("Mod");
-                });
-                header.col(|ui| {
-                    ui.strong("Version");
-                });
-                header.col(|ui| {
-                    ui.strong("Required");
-                });
-            })
-            .body(|body| {
-                body.rows(text_height, self.mods.len(), |row_index, mut row| {
-                    let mod_ = &mut self.mods[row_index];
-                    row.col(|ui| {
-                        ui.label(&mod_.url);
-                    });
-                    row.col(|ui| {
-                        egui::ComboBox::from_id_source(row_index)
-                            .selected_text(match mod_.version {
-                                Some(index) => &mod_.versions[index],
-                                None => "latest",
-                            })
-                            .show_ui(ui, |ui| {
-                                ui.style_mut().wrap = Some(false);
-                                ui.set_min_width(60.0);
-                                ui.selectable_value(&mut mod_.version, None, "latest");
-                                for (i, v) in mod_.versions.iter().enumerate() {
-                                    ui.selectable_value(&mut mod_.version, Some(i), v);
-                                }
-                            });
-                    });
-                    row.col(|ui| {
-                        ui.add(egui::Checkbox::without_text(&mut mod_.required));
-                    });
-                });
-            });
-    }
+    tokio::task::spawn(async move {
+        let res = integrate(store, mods).await;
+        tx.send(message::Message::Integrate(rid, res)).unwrap();
+        ctx.request_repaint();
+    });
+    Some(rid)
 }

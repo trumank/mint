@@ -977,6 +977,7 @@ dependencies = [
  "clap",
  "dialoguer",
  "eframe",
+ "egui-dropdown",
  "egui_extras",
  "futures",
  "hex",
@@ -1059,6 +1060,14 @@ dependencies = [
  "epaint",
  "log",
  "nohash-hasher",
+]
+
+[[package]]
+name = "egui-dropdown"
+version = "0.2.1"
+source = "git+https://github.com/trumank/egui-dropdown.git?branch=egui-0.22#5c8452f73923b28def6c1e9f0d5a6507b747a3fd"
+dependencies = [
+ "egui",
 ]
 
 [[package]]

@@ -87,6 +87,7 @@ impl ModStore {
                     .iter()
                     .map(|u| self.resolve_mod(u.to_owned(), update)),
             )
+            .boxed()
             .buffered(5)
             .try_collect::<Vec<_>>()
             .await?
@@ -125,13 +126,14 @@ impl ModStore {
         }
     }
     pub async fn fetch_mods(
-        self,
+        &self,
         mods: &[&ModSpecification],
         update: bool,
     ) -> Result<Vec<PathBuf>> {
         use futures::stream::{self, StreamExt, TryStreamExt};
 
         stream::iter(mods.iter().map(|spec| self.fetch_mod(spec, update)))
+            .boxed() // without this the future becomes !Send https://github.com/rust-lang/rust/issues/104382
             .buffered(5)
             .try_collect::<Vec<_>>()
             .await
@@ -177,7 +179,7 @@ pub enum ModResponse {
 }
 
 /// Points to a mod, optionally a specific version
-#[derive(Debug, Clone, Hash, PartialEq, Eq)]
+#[derive(Debug, Clone, Hash, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ModSpecification {
     pub url: String,
 }
@@ -189,13 +191,13 @@ pub struct ModResolution {
 }
 
 /// Mod configuration, holds ModSpecification as well as other metadata
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ModConfig {
     pub spec: ModSpecification,
     pub required: bool,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 pub struct ModProfile {
     pub mods: Vec<ModConfig>,
 }
