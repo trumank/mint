@@ -10,6 +10,7 @@ clap = { version = "4.3.0", features = ["derive"] }
 dialoguer = "0.10.4"
 eframe = "0.22.0"
 egui-dropdown = "0.2.1"
+egui_dnd = "0.4.0"
 egui_extras = "0.22.0"
 futures = "0.3.28"
 hex = "0.4.3"

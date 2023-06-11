@@ -978,6 +978,7 @@ dependencies = [
  "dialoguer",
  "eframe",
  "egui-dropdown",
+ "egui_dnd",
  "egui_extras",
  "futures",
  "hex",
@@ -1085,6 +1086,15 @@ dependencies = [
  "smithay-clipboard",
  "webbrowser",
  "winit",
+]
+
+[[package]]
+name = "egui_dnd"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "76b5e31bc4354958b29a1aff9db4c1a15fa63f4cf8e51b8b0edbfcf9e87761de"
+dependencies = [
+ "egui",
 ]
 
 [[package]]

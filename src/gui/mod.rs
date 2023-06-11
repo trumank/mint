@@ -76,6 +76,7 @@ struct App {
     resolve_mod_rid: Option<RequestID>,
     integrate_rid: Option<RequestID>,
     request_counter: RequestCounter,
+    dnd: egui_dnd::DragDropUi,
 }
 
 impl App {
@@ -101,6 +102,7 @@ impl App {
             resolve_mod: Default::default(),
             resolve_mod_rid: None,
             integrate_rid: None,
+            dnd: Default::default(),
         })
     }
 
@@ -118,113 +120,59 @@ impl App {
     }
 
     fn ui_profile_table(&mut self, ui: &mut egui::Ui) {
-        use egui_extras::{Column, TableBuilder};
-
         let mods = &mut self.profiles.get_active_profile_mut().mods;
         let mut needs_save = false;
-
-        let text_height = egui::TextStyle::Body.resolve(ui.style()).size + 6.0;
-
-        let table = TableBuilder::new(ui)
-            .striped(true)
-            .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
-            .column(Column::auto())
-            .column(
-                Column::initial(100.0)
-                    .at_least(40.0)
-                    .resizable(true)
-                    .clip(true),
-            )
-            //.column(Column::initial(100.0).range(40.0..=300.0).resizable(true))
-            .column(
-                Column::initial(100.0)
-                    .at_least(40.0)
-                    .resizable(true)
-                    .clip(true),
-            )
-            .column(Column::remainder())
-            .min_scrolled_height(0.0)
-            .max_scroll_height(f32::INFINITY);
-
         let mut btn_remove = None;
-        let mut btn_up = None;
-        let mut btn_down = None;
 
-        let mods_len = mods.len();
+        use egui_dnd::utils::shift_vec;
+        use egui_dnd::DragDropItem;
 
-        table
-            .header(20.0, |mut header| {
-                header.col(|ui| {
-                    ui.strong("rm");
-                });
-                header.col(|ui| {
-                    ui.strong("Mod");
-                });
-                header.col(|ui| {
-                    ui.strong("Version");
-                });
-                header.col(|ui| {
-                    ui.strong("Required");
-                });
-            })
-            .body(|body| {
-                body.rows(text_height, mods.len(), |row_index, mut row| {
-                    let mod_ = &mut mods[row_index];
-                    row.col(|ui| {
-                        if ui.button("remove").clicked() {
-                            btn_remove = Some(row_index);
-                        }
-                        ui.add_enabled_ui(row_index != 0, |ui| {
-                            if ui.button("up").clicked() {
-                                btn_up = Some(row_index);
-                            }
-                        });
-                        ui.add_enabled_ui(row_index != mods_len - 1, |ui| {
-                            if ui.button("down").clicked() {
-                                btn_down = Some(row_index);
-                            }
-                        });
+        struct DndItem<'item> {
+            index: usize,
+            item: &'item mut ModConfig,
+        }
+
+        impl<'item> DragDropItem for DndItem<'item> {
+            fn id(&self) -> egui::Id {
+                egui::Id::new(self.index)
+            }
+        }
+
+        let mut items = mods
+            .iter_mut()
+            .enumerate()
+            .map(|(index, item)| DndItem { index, item })
+            .collect::<Vec<_>>();
+
+        let res = self
+            .dnd
+            .ui::<DndItem>(ui, items.iter_mut(), |item, ui, handle| {
+                ui.horizontal(|ui| {
+                    handle.ui(ui, item, |ui| {
+                        ui.label("☰");
                     });
-                    row.col(|ui| {
-                        ui.label(&mod_.spec.url);
-                    });
-                    row.col(|ui| {
-                        /*
-                        egui::ComboBox::from_id_source(row_index)
-                            .selected_text(match mod_.version {
-                                Some(index) => &mod_.versions[index],
-                                None => "latest",
-                            })
-                            .show_ui(ui, |ui| {
-                                ui.style_mut().wrap = Some(false);
-                                ui.set_min_width(60.0);
-                                ui.selectable_value(&mut mod_.version, None, "latest");
-                                for (i, v) in mod_.versions.iter().enumerate() {
-                                    ui.selectable_value(&mut mod_.version, Some(i), v);
-                                }
-                            });
-                            */
-                    });
-                    row.col(|ui| {
-                        if ui
-                            .add(egui::Checkbox::without_text(&mut mod_.required))
-                            .changed()
-                        {
-                            needs_save = true;
-                        }
-                    });
+
+                    if ui.button("remove").clicked() {
+                        btn_remove = Some(item.index);
+                    }
+
+                    if ui
+                        .add(egui::Checkbox::without_text(&mut item.item.required))
+                        .changed()
+                    {
+                        needs_save = true;
+                    }
+
+                    ui.label(&item.item.spec.url);
                 });
             });
+
+        if let Some(response) = res.completed {
+            shift_vec(response.from, response.to, mods);
+        }
+
         if let Some(remove) = btn_remove {
             mods.remove(remove);
-            needs_save = true;
-        }
-        if let Some(up) = btn_up {
-            mods.swap(up, up - 1);
-            needs_save = true;
-        }
-        if let Some(down) = btn_down {
-            mods.swap(down, down + 1);
             needs_save = true;
         }
         if needs_save {
