@@ -2,10 +2,10 @@ pub mod file;
 pub mod http;
 pub mod modio;
 
-use crate::state::config::ConfigWrapper;
 use crate::error::IntegrationError;
+use crate::state::config::ConfigWrapper;
 
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, Context, Result};
 
 use serde::{Deserialize, Serialize};
 
@@ -15,10 +15,11 @@ use std::io::{BufReader, Read, Seek};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, RwLock};
 
+type Providers = RwLock<HashMap<&'static str, Arc<dyn ModProvider>>>;
 pub type ProviderCache = Arc<RwLock<ConfigWrapper<Cache>>>;
 
 pub struct ModStore {
-    providers: HashMap<&'static str, Box<dyn ModProvider>>,
+    providers: Providers,
     cache: ProviderCache,
     blob_cache: BlobCache,
 }
@@ -41,7 +42,7 @@ impl ModStore {
             .collect::<Result<HashMap<_, _>>>()?;
 
         Ok(Self {
-            providers,
+            providers: RwLock::new(providers),
             cache: Arc::new(RwLock::new(ConfigWrapper::new(
                 cache_path.as_ref().join("cache.json"),
             ))),
@@ -49,21 +50,24 @@ impl ModStore {
         })
     }
     pub fn add_provider(
-        &mut self,
+        &self,
         provider_factory: &ProviderFactory,
         parameters: &HashMap<String, String>,
     ) -> Result<()> {
         let provider = (provider_factory.new)(parameters)?;
-        self.providers.insert(provider_factory.id, provider);
+        self.providers
+            .write()
+            .unwrap()
+            .insert(provider_factory.id, provider);
         Ok(())
     }
-    pub fn get_provider(&self, spec: &ModSpecification) -> Result<&dyn ModProvider> {
+    pub fn get_provider(&self, spec: &ModSpecification) -> Result<Arc<dyn ModProvider>> {
         let factory = inventory::iter::<ProviderFactory>()
             .find(|f| (f.can_provide)(spec))
-            .ok_or_else(|| anyhow!("Could not find mod provider for {:?}", spec))?;
-        let entry = self.providers.get(factory.id);
-        Ok(match entry {
-            Some(e) => e.as_ref(),
+            .with_context(|| anyhow!("Could not find mod provider for {:?}", spec))?;
+        let lock = self.providers.read().unwrap();
+        Ok(match lock.get(factory.id) {
+            Some(e) => e.clone(),
             None => {
                 return Err(IntegrationError::NoProvider {
                     spec: spec.clone(),
@@ -221,11 +225,7 @@ pub trait ModProvider: Send + Sync + std::fmt::Debug {
         cache: ProviderCache,
         blob_cache: &BlobCache,
     ) -> Result<PathBuf>;
-    fn get_mod_info(
-        &self,
-        spec: &ModSpecification,
-        cache: ProviderCache,
-    ) -> Option<ModInfo>;
+    fn get_mod_info(&self, spec: &ModSpecification, cache: ProviderCache) -> Option<ModInfo>;
     fn is_pinned(&self, spec: &ModSpecification, cache: ProviderCache) -> bool;
 }
 
@@ -233,7 +233,7 @@ pub trait ModProvider: Send + Sync + std::fmt::Debug {
 pub struct ProviderFactory {
     pub id: &'static str,
     #[allow(clippy::type_complexity)]
-    new: fn(&HashMap<String, String>) -> Result<Box<dyn ModProvider>>,
+    new: fn(&HashMap<String, String>) -> Result<Arc<dyn ModProvider>>,
     can_provide: fn(&ModSpecification) -> bool,
     pub parameters: &'static [ProviderParameter<'static>],
 }

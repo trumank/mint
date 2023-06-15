@@ -2,21 +2,18 @@ mod message;
 
 //#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")] // hide console window on Windows in release
 
-use std::{
-    sync::{
-        mpsc::{Receiver, Sender},
-        Arc,
-    },
+use std::sync::{
+    mpsc::{Receiver, Sender},
+    Arc,
 };
 
 use anyhow::{anyhow, Result};
 use eframe::{egui, epaint::text::LayoutJob};
 
 use crate::{
-    state::{config::ConfigWrapper, ModProfiles, ModConfig},
     error::IntegrationError,
     providers::{ModSpecification, ModStore},
-    Config,
+    state::{ModConfig, State},
 };
 
 use request_counter::{RequestCounter, RequestID};
@@ -38,9 +35,7 @@ pub fn gui() -> Result<()> {
 struct App {
     tx: Sender<message::Message>,
     rx: Receiver<message::Message>,
-    store: Arc<ModStore>,
-    config: ConfigWrapper<Config>,
-    profiles: ConfigWrapper<ModProfiles>,
+    state: State,
     profile_dropdown: String,
     log: String,
     resolve_mod: String,
@@ -54,20 +49,11 @@ impl App {
     fn new() -> Result<Self> {
         let (tx, rx) = std::sync::mpsc::channel();
 
-        let data_dir = std::path::Path::new("data");
-        std::fs::create_dir(data_dir).ok();
-        let config: ConfigWrapper<Config> = ConfigWrapper::new(data_dir.join("config.json"));
-        let profiles: ConfigWrapper<ModProfiles> =
-            ConfigWrapper::new(data_dir.join("profiles.json"));
-        let store = ModStore::new(data_dir, &config.provider_parameters)?.into();
-
         Ok(Self {
             tx,
             rx,
             request_counter: Default::default(),
-            store,
-            config,
-            profiles,
+            state: State::new()?,
             profile_dropdown: "default".to_string(),
             log: Default::default(),
             resolve_mod: Default::default(),
@@ -86,7 +72,7 @@ impl App {
     }
 
     fn ui_profile_table(&mut self, ui: &mut egui::Ui) {
-        let mods = &mut self.profiles.get_active_profile_mut().mods;
+        let mods = &mut self.state.profiles.get_active_profile_mut().mods;
         let mut needs_save = false;
         let mut btn_remove = None;
 
@@ -129,7 +115,7 @@ impl App {
                         needs_save = true;
                     }
 
-                    let info = self.store.get_mod_info(&item.item.spec);
+                    let info = self.state.store.get_mod_info(&item.item.spec);
                     if let Some(info) = info {
                         ui.label(&info.name);
                     } else {
@@ -147,7 +133,7 @@ impl App {
             needs_save = true;
         }
         if needs_save {
-            self.profiles.save().unwrap();
+            self.state.profiles.save().unwrap();
         }
     }
 
@@ -156,7 +142,7 @@ impl App {
         let spec = ModSpecification {
             url: self.resolve_mod.to_string(),
         };
-        let store = self.store.clone();
+        let store = self.state.store.clone();
         let tx = self.tx.clone();
         let ctx = ctx.clone();
         tokio::spawn(async move {
@@ -201,16 +187,21 @@ impl eframe::App for App {
                     if Some(rid) == self.resolve_mod_rid {
                         match res {
                             Ok((_spec, mod_)) => {
-                                self.profiles.get_active_profile_mut().mods.push(ModConfig {
-                                    spec: mod_.spec,
-                                    required: mod_.suggested_require,
-                                });
-                                self.profiles.save().unwrap();
+                                self.state
+                                    .profiles
+                                    .get_active_profile_mut()
+                                    .mods
+                                    .push(ModConfig {
+                                        spec: mod_.spec,
+                                        required: mod_.suggested_require,
+                                    });
+                                self.state.profiles.save().unwrap();
                             }
                             Err(e) => match e.downcast::<IntegrationError>() {
                                 Ok(IntegrationError::NoProvider { spec, factory }) => {
                                     println!("Initializing provider for {:?}", spec);
                                     let params = self
+                                        .state
                                         .config
                                         .provider_parameters
                                         .entry(factory.id.to_owned())
@@ -272,8 +263,9 @@ impl eframe::App for App {
                         if ui.button("integrate").clicked() {
                             self.integrate_rid = integrate(
                                 &mut self.request_counter,
-                                self.store.clone(),
-                                self.profiles
+                                self.state.store.clone(),
+                                self.state
+                                    .profiles
                                     .get_active_profile()
                                     .mods
                                     .iter()
@@ -304,7 +296,7 @@ impl eframe::App for App {
             // profile selection
             ui.horizontal(|ui| {
                 let res = ui.add(egui_dropdown::DropDownBox::from_iter(
-                    self.profiles.profiles.keys(),
+                    self.state.profiles.profiles.keys(),
                     "profile_dropdown",
                     &mut self.profile_dropdown,
                     |ui, text| {
@@ -313,39 +305,48 @@ impl eframe::App for App {
                             ..Default::default()
                         };
                         job.append(text, 0.0, Default::default());
-                        ui.selectable_label(text == self.profiles.active_profile, job)
+                        ui.selectable_label(text == self.state.profiles.active_profile, job)
                     },
                 ));
                 if res.gained_focus() {
                     self.profile_dropdown.clear();
                 }
 
-                if self.profiles.profiles.contains_key(&self.profile_dropdown) {
-                    self.profiles.active_profile = self.profile_dropdown.to_string();
-                    self.profiles.save().unwrap();
+                if self
+                    .state
+                    .profiles
+                    .profiles
+                    .contains_key(&self.profile_dropdown)
+                {
+                    self.state.profiles.active_profile = self.profile_dropdown.to_string();
+                    self.state.profiles.save().unwrap();
                 }
 
                 ui.add_enabled_ui(
-                    self.profiles.profiles.contains_key(&self.profile_dropdown)
-                        && self.profiles.profiles.len() > 1,
+                    self.state
+                        .profiles
+                        .profiles
+                        .contains_key(&self.profile_dropdown)
+                        && self.state.profiles.profiles.len() > 1,
                     |ui| {
                         if ui.button("-").clicked() {
-                            self.profiles.remove_active();
-                            self.profile_dropdown = self.profiles.active_profile.to_string();
-                            self.profiles.save().unwrap();
+                            self.state.profiles.remove_active();
+                            self.profile_dropdown = self.state.profiles.active_profile.to_string();
+                            self.state.profiles.save().unwrap();
                         }
                     },
                 );
                 ui.add_enabled_ui(
-                    self.profile_dropdown != self.profiles.active_profile,
+                    self.profile_dropdown != self.state.profiles.active_profile,
                     |ui| {
                         if ui.button("+").clicked() {
-                            self.profiles
+                            self.state
+                                .profiles
                                 .profiles
                                 .entry(self.profile_dropdown.to_string())
                                 .or_default();
-                            self.profiles.active_profile = self.profile_dropdown.to_string();
-                            self.profiles.save().unwrap();
+                            self.state.profiles.active_profile = self.profile_dropdown.to_string();
+                            self.state.profiles.save().unwrap();
                         }
                     },
                 );

@@ -1,22 +1,23 @@
-mod state;
 mod error;
 mod gui;
 mod integrate;
 mod providers;
+mod state;
 
-use std::collections::{HashMap, HashSet};
-use std::path::{Path, PathBuf};
+use std::collections::{HashSet};
+use std::path::{PathBuf};
 
 use anyhow::{anyhow, Result};
 use clap::{Parser, Subcommand};
 use gui::gui;
-use serde::{Deserialize, Serialize};
 
-use state::config::ConfigWrapper;
+
 use error::IntegrationError;
 use providers::ResolvableStatus;
 
+
 use crate::providers::{ModResolution, ModSpecification};
+use crate::state::State;
 
 /// Command line integration tool.
 #[derive(Parser, Debug)]
@@ -78,11 +79,6 @@ fn main() -> Result<()> {
     }
 }
 
-#[derive(Debug, Default, Serialize, Deserialize)]
-struct Config {
-    provider_parameters: HashMap<String, HashMap<String, String>>,
-}
-
 async fn action_integrate(action: ActionIntegrate) -> Result<()> {
     let path_game = action
         .drg
@@ -99,11 +95,7 @@ async fn action_integrate(action: ActionIntegrate) -> Result<()> {
             )
         })?;
 
-    let data_dir = Path::new("data");
-
-    std::fs::create_dir(data_dir).ok();
-    let mut config: ConfigWrapper<Config> = ConfigWrapper::new(data_dir.join("config.json"));
-    let mut store = providers::ModStore::new(data_dir, &config.provider_parameters)?;
+    let mut state = State::new()?;
 
     let mod_specs = action
         .mods
@@ -114,12 +106,13 @@ async fn action_integrate(action: ActionIntegrate) -> Result<()> {
         .collect::<Vec<_>>();
 
     let mods = loop {
-        match store.resolve_mods(&mod_specs, action.update).await {
+        match state.store.resolve_mods(&mod_specs, action.update).await {
             Ok(mods) => break mods,
             Err(e) => match e.downcast::<IntegrationError>() {
                 Ok(IntegrationError::NoProvider { spec, factory }) => {
                     println!("Initializing provider for {:?}", spec);
-                    let params = config
+                    let params = state
+                        .config
                         .provider_parameters
                         .entry(factory.id.to_owned())
                         .or_default();
@@ -134,7 +127,7 @@ async fn action_integrate(action: ActionIntegrate) -> Result<()> {
                             params.insert(p.id.to_owned(), value);
                         }
                     }
-                    store.add_provider(factory, params)?;
+                    state.store.add_provider(factory, params)?;
                 }
                 Err(e) => return Err(e),
             },
@@ -187,7 +180,7 @@ async fn action_integrate(action: ActionIntegrate) -> Result<()> {
         .collect::<Vec<&ModSpecification>>();
 
     println!("fetching mods...");
-    let paths = store.fetch_mods(&urls, action.update).await?;
+    let paths = state.store.fetch_mods(&urls, action.update).await?;
 
     integrate::integrate(path_game, to_integrate.into_iter().zip(paths).collect())
 }

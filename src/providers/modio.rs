@@ -1,5 +1,6 @@
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use anyhow::{anyhow, Context, Result};
 use reqwest::{Request, Response};
@@ -9,7 +10,7 @@ use task_local_extensions::Extensions;
 
 use super::{
     BlobCache, BlobRef, ModInfo, ModProvider, ModProviderCache, ModResolution, ModResponse,
-    ModSpecification, ResolvableStatus, ProviderCache,
+    ModSpecification, ProviderCache, ResolvableStatus,
 };
 
 lazy_static::lazy_static! {
@@ -46,7 +47,7 @@ pub struct ModioProvider {
 }
 
 impl ModioProvider {
-    fn new_provider(parameters: &HashMap<String, String>) -> Result<Box<dyn ModProvider>> {
+    fn new_provider(parameters: &HashMap<String, String>) -> Result<Arc<dyn ModProvider>> {
         let client = reqwest_middleware::ClientBuilder::new(reqwest::Client::new())
             .with::<LoggingMiddleware>(Default::default())
             .build();
@@ -60,7 +61,7 @@ impl ModioProvider {
             client,
         )?;
 
-        Ok(Box::new(Self::new(modio)))
+        Ok(Arc::new(Self::new(modio)))
     }
     fn new(modio: modio::Modio) -> Self {
         Self { modio }
@@ -451,11 +452,7 @@ impl ModProvider for ModioProvider {
             Err(anyhow!("download URL must be fully specified"))
         }
     }
-    fn get_mod_info(
-        &self,
-        spec: &ModSpecification,
-        cache: ProviderCache,
-    ) -> Option<ModInfo> {
+    fn get_mod_info(&self, spec: &ModSpecification, cache: ProviderCache) -> Option<ModInfo> {
         let url = &spec.url;
         let captures = RE_MOD.captures(url)?;
 
@@ -513,11 +510,7 @@ impl ModProvider for ModioProvider {
         None
     }
 
-    fn is_pinned(
-        &self,
-        spec: &ModSpecification,
-        _cache: ProviderCache,
-    ) -> bool {
+    fn is_pinned(&self, spec: &ModSpecification, _cache: ProviderCache) -> bool {
         let url = &spec.url;
         let captures = RE_MOD.captures(url).unwrap();
 

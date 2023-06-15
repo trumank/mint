@@ -1,12 +1,11 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-
+use std::sync::Arc;
 
 use anyhow::{anyhow, Result};
 
 use super::{
-    BlobCache, ModInfo, ModProvider, ModResponse, ModSpecification,
-    ResolvableStatus, ProviderCache,
+    BlobCache, ModInfo, ModProvider, ModResponse, ModSpecification, ProviderCache, ResolvableStatus,
 };
 
 inventory::submit! {
@@ -22,8 +21,8 @@ inventory::submit! {
 pub struct FileProvider {}
 
 impl FileProvider {
-    pub fn new_provider(_parameters: &HashMap<String, String>) -> Result<Box<dyn ModProvider>> {
-        Ok(Box::new(Self::new()))
+    pub fn new_provider(_parameters: &HashMap<String, String>) -> Result<Arc<dyn ModProvider>> {
+        Ok(Arc::new(Self::new()))
     }
     pub fn new() -> Self {
         Self {}
@@ -73,11 +72,7 @@ impl ModProvider for FileProvider {
         Ok(PathBuf::from(url))
     }
 
-    fn get_mod_info(
-        &self,
-        spec: &ModSpecification,
-        _cache: ProviderCache,
-    ) -> Option<ModInfo> {
+    fn get_mod_info(&self, spec: &ModSpecification, _cache: ProviderCache) -> Option<ModInfo> {
         let path = Path::new(&spec.url);
         let name = path
             .file_name()
@@ -101,11 +96,7 @@ impl ModProvider for FileProvider {
         })
     }
 
-    fn is_pinned(
-        &self,
-        _spec: &ModSpecification,
-        _cache: ProviderCache,
-    ) -> bool {
+    fn is_pinned(&self, _spec: &ModSpecification, _cache: ProviderCache) -> bool {
         true
     }
 }

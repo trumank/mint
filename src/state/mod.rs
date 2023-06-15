@@ -1,8 +1,27 @@
-use std::collections::HashMap;
-
-use crate::providers::ModSpecification;
-
 pub mod config;
+
+use std::{
+    collections::HashMap,
+    path::{Path, PathBuf},
+    sync::Arc,
+};
+
+use anyhow::Result;
+
+use crate::providers::{ModSpecification, ModStore};
+
+use self::config::ConfigWrapper;
+
+#[derive(serde::Serialize, serde::Deserialize)]
+pub struct ModProfiles {
+    pub active_profile: String,
+    pub profiles: HashMap<String, ModProfile>,
+}
+
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+pub struct ModProfile {
+    pub mods: Vec<ModConfig>,
+}
 
 /// Mod configuration, holds ModSpecification as well as other metadata
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -11,11 +30,6 @@ pub struct ModConfig {
     pub required: bool,
 }
 
-#[derive(serde::Serialize, serde::Deserialize)]
-pub struct ModProfiles {
-    pub active_profile: String,
-    pub profiles: HashMap<String, ModProfile>,
-}
 impl Default for ModProfiles {
     fn default() -> Self {
         Self {
@@ -39,7 +53,32 @@ impl ModProfiles {
     }
 }
 
-#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
-pub struct ModProfile {
-    pub mods: Vec<ModConfig>,
+#[derive(Debug, Default, serde::Serialize, serde::Deserialize)]
+pub struct Config {
+    pub provider_parameters: HashMap<String, HashMap<String, String>>,
+}
+
+pub struct State {
+    pub data_dir: PathBuf,
+    pub config: ConfigWrapper<Config>,
+    pub profiles: ConfigWrapper<ModProfiles>,
+    pub store: Arc<ModStore>,
+}
+impl State {
+    pub fn new() -> Result<Self> {
+        Self::new_from_path("data")
+    }
+    pub fn new_from_path<P: AsRef<Path>>(data_dir: P) -> Result<Self> {
+        let data_dir = data_dir.as_ref().to_path_buf();
+        std::fs::create_dir(&data_dir).ok();
+        let config = ConfigWrapper::<Config>::new(data_dir.join("config.json"));
+        let profiles = ConfigWrapper::<ModProfiles>::new(data_dir.join("profiles.json"));
+        let store = ModStore::new(&data_dir, &config.provider_parameters)?.into();
+        Ok(Self {
+            data_dir,
+            config,
+            profiles,
+            store,
+        })
+    }
 }

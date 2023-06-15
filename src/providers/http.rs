@@ -1,13 +1,12 @@
-use std::collections::HashMap;
 use std::path::PathBuf;
-
+use std::{collections::HashMap, sync::Arc};
 
 use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
 
 use super::{
     BlobCache, BlobRef, ModInfo, ModProvider, ModProviderCache, ModResolution, ModResponse,
-    ModSpecification, ResolvableStatus, ProviderCache,
+    ModSpecification, ProviderCache, ResolvableStatus,
 };
 
 inventory::submit! {
@@ -49,8 +48,8 @@ pub struct HttpProvider {
 }
 
 impl HttpProvider {
-    pub fn new_provider(_parameters: &HashMap<String, String>) -> Result<Box<dyn ModProvider>> {
-        Ok(Box::new(Self::new()))
+    pub fn new_provider(_parameters: &HashMap<String, String>) -> Result<Arc<dyn ModProvider>> {
+        Ok(Arc::new(Self::new()))
     }
     pub fn new() -> Self {
         Self {
@@ -139,11 +138,7 @@ impl ModProvider for HttpProvider {
             },
         )
     }
-    fn get_mod_info(
-        &self,
-        spec: &ModSpecification,
-        _cache: ProviderCache,
-    ) -> Option<ModInfo> {
+    fn get_mod_info(&self, spec: &ModSpecification, _cache: ProviderCache) -> Option<ModInfo> {
         let url = url::Url::parse(&spec.url).ok()?;
         let name = url
             .path_segments()
@@ -163,11 +158,7 @@ impl ModProvider for HttpProvider {
         })
     }
 
-    fn is_pinned(
-        &self,
-        _spec: &ModSpecification,
-        _cache: ProviderCache,
-    ) -> bool {
+    fn is_pinned(&self, _spec: &ModSpecification, _cache: ProviderCache) -> bool {
         true
     }
 }
