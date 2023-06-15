@@ -184,6 +184,22 @@ impl App {
             self.profiles.save().unwrap();
         }
     }
+
+    fn add_mod(&mut self, ctx: &egui::Context) {
+        let rid = self.request_counter.next();
+        let spec = ModSpecification {
+            url: self.resolve_mod.to_string(),
+        };
+        let store = self.store.clone();
+        let tx = self.tx.clone();
+        let ctx = ctx.clone();
+        tokio::spawn(async move {
+            let res = store.resolve_mod(spec, false).await;
+            tx.send(message::Message::ResolveMod(rid, res)).unwrap();
+            ctx.request_repaint();
+        });
+        self.resolve_mod_rid = Some(rid);
+    }
 }
 
 mod request_counter {
@@ -312,37 +328,7 @@ impl eframe::App for App {
                     egui::TextEdit::singleline(&mut self.resolve_mod).hint_text("Resolve mod..."),
                 );
                 if is_committed(&resolve) {
-                    let rid = self.request_counter.next();
-                    let spec = ModSpecification {
-                        url: self.resolve_mod.to_string(),
-                    };
-                    let store = self.store.clone();
-                    let tx = self.tx.clone();
-                    let ctx = ctx.clone();
-                    tokio::spawn(async move {
-                        let res = store.resolve_mod(spec, false).await;
-                        tx.send(message::Message::ResolveMod(rid, res)).unwrap();
-                        ctx.request_repaint();
-                    });
-                    self.resolve_mod_rid = Some(rid);
-
-                    /*
-                    let ctx = ui.ctx().clone();
-                    let tx = self.tx.clone();
-                    let store = self.store.clone();
-                    let spec = ModSpecification {
-                        url: self.resolve_mod.to_owned(),
-                    };
-                    tokio::spawn(async move {
-                        match store.resolve_mod(spec, false).await {
-                            Ok((spec, mod_)) => tx
-                                .send(message::Message::Log(format!("Resolved mod: {spec:?}")))
-                                .unwrap(),
-                            Err(e) => tx.send(message::Message::Log(format!("{e}"))).unwrap(),
-                        }
-                        ctx.request_repaint();
-                    });
-                    */
+                    self.add_mod(ctx);
                 }
                 if self.resolve_mod_rid.is_some() {
                     ui.spinner();
@@ -402,6 +388,17 @@ impl eframe::App for App {
             ui.separator();
 
             self.ui_profile(ui);
+
+            ctx.input(|i| {
+                for e in &i.events {
+                    if let egui::Event::Paste(s) = e {
+                        if ctx.memory(|m| m.focus().is_none()) {
+                            self.resolve_mod = s.to_string();
+                            self.add_mod(ctx);
+                        }
+                    }
+                }
+            });
         });
     }
 }
