@@ -4,17 +4,15 @@ mod integrate;
 mod providers;
 mod state;
 
-use std::collections::{HashSet};
-use std::path::{PathBuf};
+use std::collections::HashSet;
+use std::path::PathBuf;
 
-use anyhow::{anyhow, Result};
+use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use gui::gui;
 
-
 use error::IntegrationError;
 use providers::ResolvableStatus;
-
 
 use crate::providers::{ModResolution, ModSpecification};
 use crate::state::State;
@@ -89,11 +87,9 @@ async fn action_integrate(action: ActionIntegrate) -> Result<()> {
                 None
             }
         })
-        .ok_or_else(|| {
-            anyhow!(
-                "Could not find DRG install directory, please specify manually with the --drg flag"
-            )
-        })?;
+        .context(
+            "Could not find DRG install directory, please specify manually with the --drg flag",
+        )?;
 
     let mut state = State::new()?;
 

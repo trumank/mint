@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use anyhow::{anyhow, Result};
+use anyhow::{Context, Result};
 
 use super::{
     BlobCache, ModInfo, ModProvider, ModResponse, ModSpecification, ProviderCache, ResolvableStatus,
@@ -53,7 +53,7 @@ impl ModProvider for FileProvider {
             status: ResolvableStatus::Unresolvable {
                 name: path
                     .file_name()
-                    .ok_or_else(|| anyhow!("could not determine file name of {:?}", spec))?
+                    .with_context(|| format!("could not determine file name of {:?}", spec))?
                     .to_string_lossy()
                     .to_string(),
             },
@@ -84,12 +84,7 @@ impl ModProvider for FileProvider {
             spec: spec.clone(),
             versions: vec![spec.clone()],
             status: ResolvableStatus::Unresolvable {
-                name: path
-                    .file_name()
-                    .ok_or_else(|| anyhow!("could not determine file name of {:?}", spec))
-                    .ok()?
-                    .to_string_lossy()
-                    .to_string(),
+                name: path.file_name()?.to_string_lossy().to_string(),
             },
             suggested_require: false,
             suggested_dependencies: vec![],

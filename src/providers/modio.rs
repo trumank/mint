@@ -56,7 +56,7 @@ impl ModioProvider {
                 "".to_owned(), // TODO patch modio to not use API key at all
                 parameters
                     .get("oauth")
-                    .ok_or_else(|| anyhow!("missing OAuth token param"))?,
+                    .context("missing OAuth token param")?,
             ),
             client,
         )?;
@@ -192,9 +192,7 @@ impl ModProvider for ModioProvider {
         use modio::mods::filters::{NameId, Visible};
 
         let url = &spec.url;
-        let captures = RE_MOD
-            .captures(url)
-            .ok_or_else(|| anyhow!("invalid modio URL {url}"))?;
+        let captures = RE_MOD.captures(url).context("invalid modio URL {url}")?;
 
         if let (Some(mod_id), Some(_modfile_id)) =
             (captures.name("mod_id"), captures.name("modfile_id"))
@@ -348,8 +346,9 @@ impl ModProvider for ModioProvider {
                     c.mods.insert(id, mod_.clone());
                     c.mod_id_map.insert(mod_.name_id, id);
 
-                    mod_.latest_modfile
-                        .ok_or_else(|| anyhow!("mod {} does not have an associated modfile", url))?
+                    mod_.latest_modfile.with_context(|| {
+                        format!("mod {} does not have an associated modfile", url)
+                    })?
                 };
 
                 Ok(ModResponse::Redirect(ModSpecification {
@@ -378,8 +377,8 @@ impl ModProvider for ModioProvider {
                     c.mods.insert(mod_id, mod_.clone());
                     c.mod_id_map.insert(mod_.name_id, mod_id);
 
-                    let file = mod_.latest_modfile.ok_or_else(|| {
-                        anyhow!("mod {} does not have an associated modfile", url)
+                    let file = mod_.latest_modfile.with_context(|| {
+                        format!("mod {} does not have an associated modfile", url)
                     })?;
 
                     Ok(ModResponse::Redirect(ModSpecification {
@@ -400,7 +399,7 @@ impl ModProvider for ModioProvider {
     ) -> Result<PathBuf> {
         let captures = RE_MOD
             .captures(url)
-            .ok_or_else(|| anyhow!("invalid modio URL {url}"))?;
+            .with_context(|| format!("invalid modio URL {url}"))?;
 
         if let (Some(_name_id), Some(mod_id), Some(modfile_id)) = (
             captures.name("name_id"),

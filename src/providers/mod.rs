@@ -5,7 +5,7 @@ pub mod modio;
 use crate::error::IntegrationError;
 use crate::state::config::ConfigWrapper;
 
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result};
 
 use serde::{Deserialize, Serialize};
 
@@ -36,7 +36,7 @@ impl ModStore {
             .flat_map(|(id, params)| {
                 factories
                     .get(id.as_str())
-                    .ok_or_else(|| anyhow!("unknown provider: {id}"))
+                    .with_context(|| format!("unknown provider: {id}"))
                     .map(|f| (f.new)(params).map(|p| (f.id, p)))
             })
             .collect::<Result<HashMap<_, _>>>()?;
@@ -64,7 +64,7 @@ impl ModStore {
     pub fn get_provider(&self, spec: &ModSpecification) -> Result<Arc<dyn ModProvider>> {
         let factory = inventory::iter::<ProviderFactory>()
             .find(|f| (f.can_provide)(spec))
-            .with_context(|| anyhow!("Could not find mod provider for {:?}", spec))?;
+            .with_context(|| format!("Could not find mod provider for {:?}", spec))?;
         let lock = self.providers.read().unwrap();
         Ok(match lock.get(factory.id) {
             Some(e) => e.clone(),

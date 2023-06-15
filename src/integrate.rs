@@ -3,7 +3,7 @@ use std::fs::{File, OpenOptions};
 use std::io::{self, BufReader, BufWriter, Cursor, Read, Seek};
 use std::path::{Path, PathBuf};
 
-use anyhow::{anyhow, Result};
+use anyhow::{Context, Result};
 use unreal_asset::properties::object_property::TopLevelAssetPath;
 use unreal_asset::types::vector::Vector;
 use unreal_asset::unversioned::ancestry::Ancestry;
@@ -212,7 +212,7 @@ fn get_pak_from_data(mut data: Box<dyn ReadSeek>) -> Result<Box<dyn ReadSeek>> {
                 }
             })
             .find_map(|e| e.transpose())
-            .ok_or_else(|| anyhow!("Zip does not contain pak"))?
+            .context("Zip does not contain pak")?
     } else {
         data.rewind()?;
         Ok(data)
