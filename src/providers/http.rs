@@ -1,15 +1,14 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::{Arc, RwLock};
+
 
 use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
 
 use super::{
-    BlobCache, BlobRef, Cache, ModInfo, ModProvider, ModProviderCache, ModResolution, ModResponse,
-    ModSpecification, ModVersion, ResolvableStatus,
+    BlobCache, BlobRef, ModInfo, ModProvider, ModProviderCache, ModResolution, ModResponse,
+    ModSpecification, ResolvableStatus, ProviderCache,
 };
-use crate::config::ConfigWrapper;
 
 inventory::submit! {
     super::ProviderFactory {
@@ -72,7 +71,7 @@ impl ModProvider for HttpProvider {
         &self,
         spec: &ModSpecification,
         _update: bool,
-        _cache: Arc<RwLock<ConfigWrapper<Cache>>>,
+        _cache: ProviderCache,
         _blob_cache: &BlobCache,
     ) -> Result<ModResponse> {
         let url = url::Url::parse(&spec.url)?;
@@ -98,7 +97,7 @@ impl ModProvider for HttpProvider {
         &self,
         url: &str,
         update: bool,
-        cache: Arc<RwLock<ConfigWrapper<Cache>>>,
+        cache: ProviderCache,
         blob_cache: &BlobCache,
     ) -> Result<PathBuf> {
         Ok(
@@ -143,7 +142,7 @@ impl ModProvider for HttpProvider {
     fn get_mod_info(
         &self,
         spec: &ModSpecification,
-        _cache: Arc<RwLock<ConfigWrapper<Cache>>>,
+        _cache: ProviderCache,
     ) -> Option<ModInfo> {
         let url = url::Url::parse(&spec.url).ok()?;
         let name = url
@@ -166,8 +165,8 @@ impl ModProvider for HttpProvider {
 
     fn is_pinned(
         &self,
-        spec: &ModSpecification,
-        _cache: Arc<RwLock<ConfigWrapper<Cache>>>,
+        _spec: &ModSpecification,
+        _cache: ProviderCache,
     ) -> bool {
         true
     }

@@ -2,7 +2,7 @@ pub mod file;
 pub mod http;
 pub mod modio;
 
-use crate::config::ConfigWrapper;
+use crate::state::config::ConfigWrapper;
 use crate::error::IntegrationError;
 
 use anyhow::{anyhow, Result};
@@ -15,9 +15,11 @@ use std::io::{BufReader, Read, Seek};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, RwLock};
 
+pub type ProviderCache = Arc<RwLock<ConfigWrapper<Cache>>>;
+
 pub struct ModStore {
     providers: HashMap<&'static str, Box<dyn ModProvider>>,
-    cache: Arc<RwLock<ConfigWrapper<Cache>>>,
+    cache: ProviderCache,
     blob_cache: BlobCache,
 }
 impl ModStore {
@@ -172,12 +174,6 @@ pub enum ResolvableStatus {
     Resolvable(ModResolution),
 }
 
-#[derive(Debug, Clone)]
-pub enum ModVersion {
-    Latest,
-    Other(ModSpecification),
-}
-
 /// Returned from ModStore
 #[derive(Debug, Clone)]
 pub struct ModInfo {
@@ -209,40 +205,28 @@ pub struct ModResolution {
     pub url: String,
 }
 
-/// Mod configuration, holds ModSpecification as well as other metadata
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct ModConfig {
-    pub spec: ModSpecification,
-    pub required: bool,
-}
-
-#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
-pub struct ModProfile {
-    pub mods: Vec<ModConfig>,
-}
-
 #[async_trait::async_trait]
 pub trait ModProvider: Send + Sync + std::fmt::Debug {
     async fn resolve_mod(
         &self,
         spec: &ModSpecification,
         update: bool,
-        cache: Arc<RwLock<ConfigWrapper<Cache>>>,
+        cache: ProviderCache,
         blob_cache: &BlobCache,
     ) -> Result<ModResponse>;
     async fn fetch_mod(
         &self,
         url: &str,
         update: bool,
-        cache: Arc<RwLock<ConfigWrapper<Cache>>>,
+        cache: ProviderCache,
         blob_cache: &BlobCache,
     ) -> Result<PathBuf>;
     fn get_mod_info(
         &self,
         spec: &ModSpecification,
-        cache: Arc<RwLock<ConfigWrapper<Cache>>>,
+        cache: ProviderCache,
     ) -> Option<ModInfo>;
-    fn is_pinned(&self, spec: &ModSpecification, cache: Arc<RwLock<ConfigWrapper<Cache>>>) -> bool;
+    fn is_pinned(&self, spec: &ModSpecification, cache: ProviderCache) -> bool;
 }
 
 #[derive(Clone)]

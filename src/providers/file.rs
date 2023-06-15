@@ -1,14 +1,13 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, RwLock};
+
 
 use anyhow::{anyhow, Result};
 
 use super::{
-    BlobCache, Cache, ModInfo, ModProvider, ModResponse, ModSpecification, ModVersion,
-    ResolvableStatus,
+    BlobCache, ModInfo, ModProvider, ModResponse, ModSpecification,
+    ResolvableStatus, ProviderCache,
 };
-use crate::config::ConfigWrapper;
 
 inventory::submit! {
     super::ProviderFactory {
@@ -39,7 +38,7 @@ impl ModProvider for FileProvider {
         &self,
         spec: &ModSpecification,
         _update: bool,
-        _cache: Arc<RwLock<ConfigWrapper<Cache>>>,
+        _cache: ProviderCache,
         _blob_cache: &BlobCache,
     ) -> Result<ModResponse> {
         let path = Path::new(&spec.url);
@@ -68,7 +67,7 @@ impl ModProvider for FileProvider {
         &self,
         url: &str,
         _update: bool,
-        _cache: Arc<RwLock<ConfigWrapper<Cache>>>,
+        _cache: ProviderCache,
         _blob_cache: &BlobCache,
     ) -> Result<PathBuf> {
         Ok(PathBuf::from(url))
@@ -77,7 +76,7 @@ impl ModProvider for FileProvider {
     fn get_mod_info(
         &self,
         spec: &ModSpecification,
-        _cache: Arc<RwLock<ConfigWrapper<Cache>>>,
+        _cache: ProviderCache,
     ) -> Option<ModInfo> {
         let path = Path::new(&spec.url);
         let name = path
@@ -104,8 +103,8 @@ impl ModProvider for FileProvider {
 
     fn is_pinned(
         &self,
-        spec: &ModSpecification,
-        _cache: Arc<RwLock<ConfigWrapper<Cache>>>,
+        _spec: &ModSpecification,
+        _cache: ProviderCache,
     ) -> bool {
         true
     }

@@ -3,7 +3,6 @@ mod message;
 //#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")] // hide console window on Windows in release
 
 use std::{
-    collections::HashMap,
     sync::{
         mpsc::{Receiver, Sender},
         Arc,
@@ -14,9 +13,9 @@ use anyhow::{anyhow, Result};
 use eframe::{egui, epaint::text::LayoutJob};
 
 use crate::{
-    config::ConfigWrapper,
+    state::{config::ConfigWrapper, ModProfiles, ModConfig},
     error::IntegrationError,
-    providers::{ModConfig, ModProfile, ModSpecification, ModStore},
+    providers::{ModSpecification, ModStore},
     Config,
 };
 
@@ -34,34 +33,6 @@ pub fn gui() -> Result<()> {
     )
     .map_err(|e| anyhow!("{e}"))?;
     Ok(())
-}
-
-#[derive(serde::Serialize, serde::Deserialize)]
-struct ModProfiles {
-    active_profile: String,
-    profiles: HashMap<String, ModProfile>,
-}
-impl Default for ModProfiles {
-    fn default() -> Self {
-        Self {
-            active_profile: "default".to_string(),
-            profiles: [("default".to_string(), Default::default())]
-                .into_iter()
-                .collect(),
-        }
-    }
-}
-impl ModProfiles {
-    fn get_active_profile(&self) -> &ModProfile {
-        &self.profiles[&self.active_profile]
-    }
-    fn get_active_profile_mut(&mut self) -> &mut ModProfile {
-        self.profiles.get_mut(&self.active_profile).unwrap()
-    }
-    fn remove_active(&mut self) {
-        self.profiles.remove(&self.active_profile);
-        self.active_profile = self.profiles.keys().next().unwrap().to_string();
-    }
 }
 
 struct App {

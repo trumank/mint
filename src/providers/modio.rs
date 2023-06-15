@@ -1,6 +1,5 @@
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
-use std::sync::{Arc, RwLock};
 
 use anyhow::{anyhow, Context, Result};
 use reqwest::{Request, Response};
@@ -9,10 +8,9 @@ use serde::{Deserialize, Serialize};
 use task_local_extensions::Extensions;
 
 use super::{
-    BlobCache, BlobRef, Cache, ModInfo, ModProvider, ModProviderCache, ModResolution, ModResponse,
-    ModSpecification, ModVersion, ResolvableStatus,
+    BlobCache, BlobRef, ModInfo, ModProvider, ModProviderCache, ModResolution, ModResponse,
+    ModSpecification, ResolvableStatus, ProviderCache,
 };
-use crate::config::ConfigWrapper;
 
 lazy_static::lazy_static! {
     static ref RE_MOD: regex::Regex = regex::Regex::new("^https://mod.io/g/drg/m/(?P<name_id>[^/#]+)(:?#(?P<mod_id>\\d+)(:?/(?P<modfile_id>\\d+))?)?$").unwrap();
@@ -186,7 +184,7 @@ impl ModProvider for ModioProvider {
         &self,
         spec: &ModSpecification,
         update: bool,
-        cache: Arc<RwLock<ConfigWrapper<Cache>>>,
+        cache: ProviderCache,
         _blob_cache: &BlobCache,
     ) -> Result<ModResponse> {
         use modio::filter::{Eq, In};
@@ -396,7 +394,7 @@ impl ModProvider for ModioProvider {
         &self,
         url: &str,
         _update: bool,
-        cache: Arc<RwLock<ConfigWrapper<Cache>>>,
+        cache: ProviderCache,
         blob_cache: &BlobCache,
     ) -> Result<PathBuf> {
         let captures = RE_MOD
@@ -456,7 +454,7 @@ impl ModProvider for ModioProvider {
     fn get_mod_info(
         &self,
         spec: &ModSpecification,
-        cache: Arc<RwLock<ConfigWrapper<Cache>>>,
+        cache: ProviderCache,
     ) -> Option<ModInfo> {
         let url = &spec.url;
         let captures = RE_MOD.captures(url)?;
@@ -518,7 +516,7 @@ impl ModProvider for ModioProvider {
     fn is_pinned(
         &self,
         spec: &ModSpecification,
-        _cache: Arc<RwLock<ConfigWrapper<Cache>>>,
+        _cache: ProviderCache,
     ) -> bool {
         let url = &spec.url;
         let captures = RE_MOD.captures(url).unwrap();

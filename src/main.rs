@@ -1,4 +1,4 @@
-mod config;
+mod state;
 mod error;
 mod gui;
 mod integrate;
@@ -12,7 +12,7 @@ use clap::{Parser, Subcommand};
 use gui::gui;
 use serde::{Deserialize, Serialize};
 
-use config::ConfigWrapper;
+use state::config::ConfigWrapper;
 use error::IntegrationError;
 use providers::ResolvableStatus;
 
