@@ -107,16 +107,11 @@ impl App {
     }
 
     fn ui_profile(&mut self, ui: &mut egui::Ui) {
-        use egui_extras::{Size, StripBuilder};
-        StripBuilder::new(ui)
-            .size(Size::remainder().at_least(100.0)) // for the table
-            .vertical(|mut strip| {
-                strip.cell(|ui| {
-                    egui::ScrollArea::horizontal().show(ui, |ui| {
-                        self.ui_profile_table(ui);
-                    });
-                });
+        ui.with_layout(ui.layout().with_cross_justify(true), |ui| {
+            egui::ScrollArea::vertical().show(ui, |ui| {
+                self.ui_profile_table(ui);
             });
+        });
     }
 
     fn ui_profile_table(&mut self, ui: &mut egui::Ui) {
