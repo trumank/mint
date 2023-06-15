@@ -75,7 +75,7 @@ impl ModStore {
         &self,
         mods: &[ModSpecification],
         update: bool,
-    ) -> Result<HashMap<ModSpecification, Mod>> {
+    ) -> Result<HashMap<ModSpecification, ModInfo>> {
         use futures::stream::{self, StreamExt, TryStreamExt};
 
         let mut to_resolve = mods.iter().cloned().collect::<HashSet<ModSpecification>>();
@@ -110,7 +110,7 @@ impl ModStore {
         &self,
         original_spec: ModSpecification,
         update: bool,
-    ) -> Result<(ModSpecification, Mod)> {
+    ) -> Result<(ModSpecification, ModInfo)> {
         let mut spec = original_spec.clone();
         loop {
             match self
@@ -148,6 +148,16 @@ impl ModStore {
             )
             .await
     }
+    pub fn get_mod_info(&self, spec: &ModSpecification) -> Option<ModInfo> {
+        self.get_provider(spec)
+            .ok()?
+            .get_mod_info(spec, self.cache.clone())
+    }
+    pub fn is_pinned(&self, spec: &ModSpecification) -> bool {
+        self.get_provider(spec)
+            .unwrap()
+            .is_pinned(spec, self.cache.clone())
+    }
 }
 
 pub trait ReadSeek: Read + Seek + Send {}
@@ -162,10 +172,19 @@ pub enum ResolvableStatus {
     Resolvable(ModResolution),
 }
 
+#[derive(Debug, Clone)]
+pub enum ModVersion {
+    Latest,
+    Other(ModSpecification),
+}
+
 /// Returned from ModStore
 #[derive(Debug, Clone)]
-pub struct Mod {
-    pub spec: ModSpecification,
+pub struct ModInfo {
+    pub provider: &'static str,
+    pub name: String,
+    pub spec: ModSpecification,          // unpinned version
+    pub versions: Vec<ModSpecification>, // pinned versions TODO make this a different type
     pub status: ResolvableStatus,
     pub suggested_require: bool,
     pub suggested_dependencies: Vec<ModSpecification>, // ModResponse
@@ -175,7 +194,7 @@ pub struct Mod {
 #[derive(Debug, Clone)]
 pub enum ModResponse {
     Redirect(ModSpecification),
-    Resolve(Mod),
+    Resolve(ModInfo),
 }
 
 /// Points to a mod, optionally a specific version
@@ -218,6 +237,12 @@ pub trait ModProvider: Send + Sync + std::fmt::Debug {
         cache: Arc<RwLock<ConfigWrapper<Cache>>>,
         blob_cache: &BlobCache,
     ) -> Result<PathBuf>;
+    fn get_mod_info(
+        &self,
+        spec: &ModSpecification,
+        cache: Arc<RwLock<ConfigWrapper<Cache>>>,
+    ) -> Option<ModInfo>;
+    fn is_pinned(&self, spec: &ModSpecification, cache: Arc<RwLock<ConfigWrapper<Cache>>>) -> bool;
 }
 
 #[derive(Clone)]

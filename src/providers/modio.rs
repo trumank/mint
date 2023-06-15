@@ -2,15 +2,15 @@ use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
 
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, Context, Result};
 use reqwest::{Request, Response};
 use reqwest_middleware::{Middleware, Next};
 use serde::{Deserialize, Serialize};
 use task_local_extensions::Extensions;
 
 use super::{
-    BlobCache, BlobRef, Cache, Mod, ModProvider, ModProviderCache, ModResolution, ModResponse,
-    ModSpecification, ResolvableStatus,
+    BlobCache, BlobRef, Cache, ModInfo, ModProvider, ModProviderCache, ModResolution, ModResponse,
+    ModSpecification, ModVersion, ResolvableStatus,
 };
 use crate::config::ConfigWrapper;
 
@@ -33,6 +33,12 @@ inventory::submit! {
                 description: "mod.io OAuth token. Obtain from https://mod.io/me/access",
             },
         ]
+    }
+}
+
+fn format_spec(name_id: &str, mod_id: u32, file_id: u32) -> ModSpecification {
+    ModSpecification {
+        url: format!("https://mod.io/g/drg/m/{}#{}/{}", name_id, mod_id, file_id,),
     }
 }
 
@@ -88,15 +94,52 @@ impl ModProviderCache for ModioCache {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ModioMod {
     name_id: String,
+    name: String,
     latest_modfile: Option<u32>,
+    modfiles: Vec<ModioFile>,
     tags: HashSet<String>,
 }
-impl From<modio::mods::Mod> for ModioMod {
-    fn from(value: modio::mods::Mod) -> Self {
+impl ModioMod {
+    fn new(mod_: modio::mods::Mod, files: Vec<modio::files::File>) -> Self {
         Self {
-            name_id: value.name_id,
-            latest_modfile: value.modfile.map(|f| f.id),
-            tags: value.tags.into_iter().map(|t| t.name).collect(),
+            name_id: mod_.name_id,
+            name: mod_.name,
+            latest_modfile: mod_.modfile.map(|f| f.id),
+            modfiles: files.into_iter().map(ModioFile::new).collect(),
+            tags: mod_.tags.into_iter().map(|t| t.name).collect(),
+        }
+    }
+    async fn fetch(modio: &modio::Modio, id: u32) -> Result<Self> {
+        use modio::filter::NotEq;
+        use modio::mods::filters::Id;
+
+        let files = modio
+            .game(MODIO_DRG_ID)
+            .mod_(id)
+            .files()
+            .search(Id::ne(0))
+            .collect()
+            .await?;
+        let mod_ = modio.game(MODIO_DRG_ID).mod_(id).get().await?;
+
+        Ok(ModioMod::new(mod_, files))
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ModioFile {
+    id: u32,
+    date_added: u64,
+    version: Option<String>,
+    changelog: Option<String>,
+}
+impl ModioFile {
+    fn new(file: modio::files::File) -> Self {
+        Self {
+            id: file.id,
+            date_added: file.date_added,
+            version: file.version,
+            changelog: file.changelog,
         }
     }
 }
@@ -146,6 +189,9 @@ impl ModProvider for ModioProvider {
         cache: Arc<RwLock<ConfigWrapper<Cache>>>,
         _blob_cache: &BlobCache,
     ) -> Result<ModResponse> {
+        use modio::filter::{Eq, In};
+        use modio::mods::filters::{NameId, Visible};
+
         let url = &spec.url;
         let captures = RE_MOD
             .captures(url)
@@ -169,13 +215,7 @@ impl ModProvider for ModioProvider {
             {
                 mod_
             } else {
-                let mod_: ModioMod = self
-                    .modio
-                    .game(MODIO_DRG_ID)
-                    .mod_(mod_id)
-                    .get()
-                    .await?
-                    .into();
+                let mod_ = ModioMod::fetch(&self.modio, mod_id).await?;
 
                 let mut lock = cache.write().unwrap();
                 let c = lock.get_mut::<ModioCache>(MODIO_PROVIDER_ID);
@@ -226,8 +266,15 @@ impl ModProvider for ModioProvider {
             // name is actually correct
             .collect();
 
-            Ok(ModResponse::Resolve(Mod {
+            Ok(ModResponse::Resolve(ModInfo {
+                provider: MODIO_PROVIDER_ID,
+                name: mod_.name,
                 spec: spec.clone(),
+                versions: mod_
+                    .modfiles
+                    .into_iter()
+                    .map(|f| format_spec(&mod_.name_id, mod_id, f.id))
+                    .collect(),
                 status: ResolvableStatus::Resolvable(ModResolution {
                     url: url.to_owned(),
                 }),
@@ -251,13 +298,7 @@ impl ModProvider for ModioProvider {
             let mod_ = if let Some(mod_) = cached {
                 mod_
             } else {
-                let mod_: ModioMod = self
-                    .modio
-                    .game(MODIO_DRG_ID)
-                    .mod_(mod_id)
-                    .get()
-                    .await?
-                    .into();
+                let mod_ = ModioMod::fetch(&self.modio, mod_id).await?;
 
                 let mut lock = cache.write().unwrap();
                 let c = lock.get_mut::<ModioCache>(MODIO_PROVIDER_ID);
@@ -267,21 +308,13 @@ impl ModProvider for ModioProvider {
                 mod_
             };
 
-            Ok(ModResponse::Redirect(ModSpecification {
-                url: format!(
-                    "https://mod.io/g/drg/m/{}#{}/{}",
-                    mod_.name_id,
-                    mod_id,
-                    mod_.latest_modfile.ok_or_else(|| anyhow!(
-                        "mod {} does not have an associated modfile",
-                        url
-                    ))?
-                ),
-            }))
+            Ok(ModResponse::Redirect(format_spec(
+                &mod_.name_id,
+                mod_id,
+                mod_.latest_modfile
+                    .with_context(|| format!("mod {} does not have an associated modfile", url))?,
+            )))
         } else {
-            use modio::filter::{Eq, In};
-            use modio::mods::filters::{NameId, Visible};
-
             let name_id = captures.name("name_id").unwrap().as_str();
 
             let cached_id = if update {
@@ -309,7 +342,7 @@ impl ModProvider for ModioProvider {
                 let modfile_id = if let Some(modfile_id) = cached {
                     modfile_id
                 } else {
-                    let mod_: ModioMod = self.modio.game(MODIO_DRG_ID).mod_(id).get().await?.into();
+                    let mod_ = ModioMod::fetch(&self.modio, id).await?;
 
                     let mut lock = cache.write().unwrap();
                     let c = lock.get_mut::<ModioCache>(MODIO_PROVIDER_ID);
@@ -339,13 +372,7 @@ impl ModProvider for ModioProvider {
                     ))
                 } else if let Some(mod_) = mods.pop() {
                     let mod_id = mod_.id;
-                    let mod_: ModioMod = self
-                        .modio
-                        .game(MODIO_DRG_ID)
-                        .mod_(mod_id)
-                        .get()
-                        .await?
-                        .into();
+                    let mod_ = ModioMod::fetch(&self.modio, mod_id).await?;
 
                     let mut lock = cache.write().unwrap();
                     let c = lock.get_mut::<ModioCache>(MODIO_PROVIDER_ID);
@@ -425,5 +452,77 @@ impl ModProvider for ModioProvider {
         } else {
             Err(anyhow!("download URL must be fully specified"))
         }
+    }
+    fn get_mod_info(
+        &self,
+        spec: &ModSpecification,
+        cache: Arc<RwLock<ConfigWrapper<Cache>>>,
+    ) -> Option<ModInfo> {
+        let url = &spec.url;
+        let captures = RE_MOD.captures(url)?;
+
+        let mod_id = if let Some(mod_id) = captures.name("mod_id") {
+            mod_id.as_str().parse::<u32>().ok()
+        } else if let Some(name_id) = captures.name("name_id") {
+            cache
+                .read()
+                .unwrap()
+                .get::<ModioCache>(MODIO_PROVIDER_ID)
+                .and_then(|c| c.mod_id_map.get(name_id.as_str()).cloned())
+        } else {
+            None
+        };
+
+        if let Some(mod_id) = mod_id {
+            if let Some(mod_) = cache
+                .read()
+                .unwrap()
+                .get::<ModioCache>(MODIO_PROVIDER_ID)
+                .and_then(|c| c.mods.get(&mod_id).cloned())
+            {
+                let deps = cache
+                    .read()
+                    .unwrap()
+                    .get::<ModioCache>(MODIO_PROVIDER_ID)
+                    .and_then(|c| c.dependencies.get(&mod_id).cloned())
+                    .map(|d| {
+                        d.into_iter()
+                            .map(|d| ModSpecification {
+                                url: format!("https://mod.io/g/drg/m/FIXME#{d}"),
+                            }) // since we found mod based on ID, we haven't verified mod name is actually correct
+                            .collect()
+                    });
+
+                if let Some(deps) = deps {
+                    return Some(ModInfo {
+                        provider: MODIO_PROVIDER_ID,
+                        name: mod_.name,
+                        spec: spec.clone(),
+                        versions: mod_
+                            .modfiles
+                            .into_iter()
+                            .map(|f| format_spec(&mod_.name_id, mod_id, f.id))
+                            .collect(),
+                        status: ResolvableStatus::Resolvable(ModResolution {
+                            url: url.to_owned(),
+                        }),
+                        suggested_require: mod_.tags.contains("RequiredByAll"),
+                        suggested_dependencies: deps,
+                    });
+                }
+            }
+        }
+        None
+    }
+
+    fn is_pinned(
+        &self,
+        spec: &ModSpecification,
+        _cache: Arc<RwLock<ConfigWrapper<Cache>>>,
+    ) -> bool {
+        let url = &spec.url;
+        let captures = RE_MOD.captures(url).unwrap();
+
+        captures.name("modfile_id").is_some()
     }
 }

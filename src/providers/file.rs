@@ -4,12 +4,15 @@ use std::sync::{Arc, RwLock};
 
 use anyhow::{anyhow, Result};
 
-use super::{BlobCache, Cache, Mod, ModProvider, ModResponse, ModSpecification, ResolvableStatus};
+use super::{
+    BlobCache, Cache, ModInfo, ModProvider, ModResponse, ModSpecification, ModVersion,
+    ResolvableStatus,
+};
 use crate::config::ConfigWrapper;
 
 inventory::submit! {
     super::ProviderFactory {
-        id: "file",
+        id: FILE_PROVIDER_ID,
         new: FileProvider::new_provider,
         can_provide: |spec| Path::new(&spec.url).exists(),
         parameters: &[],
@@ -28,6 +31,8 @@ impl FileProvider {
     }
 }
 
+const FILE_PROVIDER_ID: &str = "file";
+
 #[async_trait::async_trait]
 impl ModProvider for FileProvider {
     async fn resolve_mod(
@@ -38,8 +43,15 @@ impl ModProvider for FileProvider {
         _blob_cache: &BlobCache,
     ) -> Result<ModResponse> {
         let path = Path::new(&spec.url);
-        Ok(ModResponse::Resolve(Mod {
+        let name = path
+            .file_name()
+            .map(|s| s.to_string_lossy().to_string())
+            .unwrap_or_else(|| spec.url.to_string());
+        Ok(ModResponse::Resolve(ModInfo {
+            provider: FILE_PROVIDER_ID,
+            name,
             spec: spec.clone(),
+            versions: vec![spec.clone()],
             status: ResolvableStatus::Unresolvable {
                 name: path
                     .file_name()
@@ -60,5 +72,41 @@ impl ModProvider for FileProvider {
         _blob_cache: &BlobCache,
     ) -> Result<PathBuf> {
         Ok(PathBuf::from(url))
+    }
+
+    fn get_mod_info(
+        &self,
+        spec: &ModSpecification,
+        _cache: Arc<RwLock<ConfigWrapper<Cache>>>,
+    ) -> Option<ModInfo> {
+        let path = Path::new(&spec.url);
+        let name = path
+            .file_name()
+            .map(|s| s.to_string_lossy().to_string())
+            .unwrap_or_else(|| spec.url.to_string());
+        Some(ModInfo {
+            provider: FILE_PROVIDER_ID,
+            name,
+            spec: spec.clone(),
+            versions: vec![spec.clone()],
+            status: ResolvableStatus::Unresolvable {
+                name: path
+                    .file_name()
+                    .ok_or_else(|| anyhow!("could not determine file name of {:?}", spec))
+                    .ok()?
+                    .to_string_lossy()
+                    .to_string(),
+            },
+            suggested_require: false,
+            suggested_dependencies: vec![],
+        })
+    }
+
+    fn is_pinned(
+        &self,
+        spec: &ModSpecification,
+        _cache: Arc<RwLock<ConfigWrapper<Cache>>>,
+    ) -> bool {
+        true
     }
 }

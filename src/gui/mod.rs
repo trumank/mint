@@ -163,7 +163,12 @@ impl App {
                         needs_save = true;
                     }
 
-                    ui.label(&item.item.spec.url);
+                    let info = self.store.get_mod_info(&item.item.spec);
+                    if let Some(info) = info {
+                        ui.label(&info.name);
+                    } else {
+                        ui.label(&item.item.spec.url);
+                    }
                 });
             });
 

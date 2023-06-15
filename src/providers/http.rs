@@ -6,8 +6,8 @@ use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
 
 use super::{
-    BlobCache, BlobRef, Cache, Mod, ModProvider, ModProviderCache, ModResolution, ModResponse,
-    ModSpecification, ResolvableStatus,
+    BlobCache, BlobRef, Cache, ModInfo, ModProvider, ModProviderCache, ModResolution, ModResponse,
+    ModSpecification, ModVersion, ResolvableStatus,
 };
 use crate::config::ConfigWrapper;
 
@@ -75,8 +75,17 @@ impl ModProvider for HttpProvider {
         _cache: Arc<RwLock<ConfigWrapper<Cache>>>,
         _blob_cache: &BlobCache,
     ) -> Result<ModResponse> {
-        Ok(ModResponse::Resolve(Mod {
+        let url = url::Url::parse(&spec.url)?;
+        let name = url
+            .path_segments()
+            .and_then(|s| s.last())
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| url.to_string());
+        Ok(ModResponse::Resolve(ModInfo {
+            provider: HTTP_PROVIDER_ID,
+            name,
             spec: spec.clone(),
+            versions: vec![spec.clone()],
             status: ResolvableStatus::Resolvable(ModResolution {
                 url: spec.url.to_owned(),
             }),
@@ -130,5 +139,36 @@ impl ModProvider for HttpProvider {
                 path
             },
         )
+    }
+    fn get_mod_info(
+        &self,
+        spec: &ModSpecification,
+        _cache: Arc<RwLock<ConfigWrapper<Cache>>>,
+    ) -> Option<ModInfo> {
+        let url = url::Url::parse(&spec.url).ok()?;
+        let name = url
+            .path_segments()
+            .and_then(|s| s.last())
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| url.to_string());
+        Some(ModInfo {
+            provider: HTTP_PROVIDER_ID,
+            name,
+            spec: spec.clone(),
+            versions: vec![spec.clone()],
+            status: ResolvableStatus::Resolvable(ModResolution {
+                url: spec.url.to_owned(),
+            }),
+            suggested_require: false,
+            suggested_dependencies: vec![],
+        })
+    }
+
+    fn is_pinned(
+        &self,
+        spec: &ModSpecification,
+        _cache: Arc<RwLock<ConfigWrapper<Cache>>>,
+    ) -> bool {
+        true
     }
 }

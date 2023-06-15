@@ -8,7 +8,7 @@ use unreal_asset::properties::object_property::TopLevelAssetPath;
 use unreal_asset::types::vector::Vector;
 use unreal_asset::unversioned::ancestry::Ancestry;
 
-use crate::providers::{Mod, ModResolution, ReadSeek, ResolvableStatus};
+use crate::providers::{ModInfo, ModResolution, ReadSeek, ResolvableStatus};
 
 use unreal_asset::{
     exports::ExportBaseTrait,
@@ -28,7 +28,7 @@ use unreal_asset::{
     Asset,
 };
 
-pub fn integrate<P: AsRef<Path>>(path_game: P, mods: Vec<(Mod, PathBuf)>) -> Result<()> {
+pub fn integrate<P: AsRef<Path>>(path_game: P, mods: Vec<(ModInfo, PathBuf)>) -> Result<()> {
     let path_paks = Path::join(path_game.as_ref(), "FSD/Content/Paks/");
     let path_pak = Path::join(&path_paks, "FSD-WindowsNoEditor.pak");
     let path_mod_pak = Path::join(&path_paks, "mods_P.pak");
