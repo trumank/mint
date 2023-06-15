@@ -179,10 +179,6 @@ impl eframe::App for App {
         // message handling
         if let Ok(msg) = self.rx.try_recv() {
             match msg {
-                message::Message::Log(log) => {
-                    self.log.push_str(&log);
-                    self.log.push('\n');
-                }
                 message::Message::ResolveMod(rid, res) => {
                     if Some(rid) == self.resolve_mod_rid {
                         match res {

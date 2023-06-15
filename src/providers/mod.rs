@@ -10,8 +10,8 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
 use std::collections::{HashMap, HashSet};
-use std::fs::File;
-use std::io::{BufReader, Read, Seek};
+
+use std::io::{Read, Seek};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, RwLock};
 
@@ -312,12 +312,6 @@ impl BlobCache {
         std::fs::rename(tmp, self.path.join(&hash))?;
 
         Ok(BlobRef(hash))
-    }
-    fn read(&self, blob: &BlobRef) -> Result<Box<dyn ReadSeek>> {
-        // TODO verify hash, custom reader that hashes as it's read?
-        Ok(Box::new(BufReader::new(File::open(
-            self.path.join(&blob.0),
-        )?)))
     }
     fn get_path(&self, blob: &BlobRef) -> Option<PathBuf> {
         let path = self.path.join(&blob.0);
