@@ -12,6 +12,7 @@ use eframe::{egui, epaint::text::LayoutJob};
 
 use crate::{
     error::IntegrationError,
+    find_drg,
     providers::{ModSpecification, ModStore},
     state::{ModConfig, State},
 };
@@ -382,14 +383,7 @@ fn integrate(
     async fn integrate(store: Arc<ModStore>, mod_specs: Vec<ModSpecification>) -> Result<()> {
         use anyhow::Context;
 
-        let path_game = if let Some(mut steamdir) = steamlocate::SteamDir::locate() {
-            steamdir.app(&548430).map(|a| a.path.clone())
-        } else {
-            None
-        }
-        .context(
-            "Could not find DRG install directory, please specify manually with the --drg flag",
-        )?;
+        let path_game = find_drg().context("Could not find DRG install directory")?;
 
         let update = false;
 

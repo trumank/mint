@@ -1,21 +1,18 @@
-mod error;
-mod gui;
-mod integrate;
-mod providers;
-mod state;
-
 use std::collections::HashSet;
 use std::path::PathBuf;
 
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
-use gui::gui;
 
-use error::IntegrationError;
-use providers::ResolvableStatus;
-
-use crate::providers::{ModResolution, ModSpecification};
-use crate::state::State;
+use drg_mod_integration::{
+    error::IntegrationError,
+    find_drg,
+    gui::gui,
+    providers::ResolvableStatus,
+    providers::{ModResolution, ModSpecification},
+    state::State,
+    integrate,
+};
 
 /// Command line integration tool.
 #[derive(Parser, Debug)]
@@ -78,18 +75,9 @@ fn main() -> Result<()> {
 }
 
 async fn action_integrate(action: ActionIntegrate) -> Result<()> {
-    let path_game = action
-        .drg
-        .or_else(|| {
-            if let Some(mut steamdir) = steamlocate::SteamDir::locate() {
-                steamdir.app(&548430).map(|a| a.path.clone())
-            } else {
-                None
-            }
-        })
-        .context(
-            "Could not find DRG install directory, please specify manually with the --drg flag",
-        )?;
+    let path_game = action.drg.or_else(find_drg).context(
+        "Could not find DRG install directory, please specify manually with the --drg flag",
+    )?;
 
     let mut state = State::new()?;
 
@@ -178,7 +166,10 @@ async fn action_integrate(action: ActionIntegrate) -> Result<()> {
     println!("fetching mods...");
     let paths = state.store.fetch_mods(&urls, action.update).await?;
 
-    integrate::integrate(path_game, to_integrate.into_iter().zip(paths).collect())
+    integrate::integrate(
+        path_game,
+        to_integrate.into_iter().zip(paths).collect(),
+    )
 }
 
 fn action_gui(_action: ActionGui) -> Result<()> {
