@@ -24,7 +24,7 @@ inventory::submit! {
     super::ProviderFactory {
         id: MODIO_PROVIDER_ID,
         new: ModioProvider::new_provider,
-        can_provide: |spec| RE_MOD.is_match(&spec.url),
+        can_provide: |url| RE_MOD.is_match(url),
         parameters: &[
             super::ProviderParameter {
                 id: "oauth",
@@ -35,9 +35,13 @@ inventory::submit! {
     }
 }
 
-fn format_spec(name_id: &str, mod_id: u32, file_id: u32) -> ModSpecification {
+fn format_spec(name_id: &str, mod_id: u32, file_id: Option<u32>) -> ModSpecification {
     ModSpecification {
-        url: format!("https://mod.io/g/drg/m/{}#{}/{}", name_id, mod_id, file_id,),
+        url: if let Some(file_id) = file_id {
+            format!("https://mod.io/g/drg/m/{}#{}/{}", name_id, mod_id, file_id)
+        } else {
+            format!("https://mod.io/g/drg/m/{}#{}", name_id, mod_id)
+        },
     }
 }
 
@@ -265,12 +269,12 @@ impl ModProvider for ModioProvider {
 
             Ok(ModResponse::Resolve(ModInfo {
                 provider: MODIO_PROVIDER_ID,
+                spec: format_spec(&mod_.name_id, mod_id, None),
                 name: mod_.name,
-                spec: spec.clone(),
                 versions: mod_
                     .modfiles
                     .into_iter()
-                    .map(|f| format_spec(&mod_.name_id, mod_id, f.id))
+                    .map(|f| format_spec(&mod_.name_id, mod_id, Some(f.id)))
                     .collect(),
                 status: ResolvableStatus::Resolvable(ModResolution {
                     url: url.to_owned(),
@@ -308,8 +312,11 @@ impl ModProvider for ModioProvider {
             Ok(ModResponse::Redirect(format_spec(
                 &mod_.name_id,
                 mod_id,
-                mod_.latest_modfile
-                    .with_context(|| format!("mod {} does not have an associated modfile", url))?,
+                Some(
+                    mod_.latest_modfile.with_context(|| {
+                        format!("mod {} does not have an associated modfile", url)
+                    })?,
+                ),
             )))
         } else {
             let name_id = captures.name("name_id").unwrap().as_str();
@@ -392,13 +399,14 @@ impl ModProvider for ModioProvider {
     }
     async fn fetch_mod(
         &self,
-        url: &str,
+        res: &ModResolution,
         _update: bool,
         cache: ProviderCache,
         blob_cache: &BlobCache,
     ) -> Result<PathBuf> {
+        let url = &res.url;
         let captures = RE_MOD
-            .captures(url)
+            .captures(&res.url)
             .with_context(|| format!("invalid modio URL {url}"))?;
 
         if let (Some(_name_id), Some(mod_id), Some(modfile_id)) = (
@@ -455,29 +463,20 @@ impl ModProvider for ModioProvider {
         let url = &spec.url;
         let captures = RE_MOD.captures(url)?;
 
+        let cache = cache.read().unwrap();
+        let prov = cache.get::<ModioCache>(MODIO_PROVIDER_ID);
+
         let mod_id = if let Some(mod_id) = captures.name("mod_id") {
             mod_id.as_str().parse::<u32>().ok()
         } else if let Some(name_id) = captures.name("name_id") {
-            cache
-                .read()
-                .unwrap()
-                .get::<ModioCache>(MODIO_PROVIDER_ID)
-                .and_then(|c| c.mod_id_map.get(name_id.as_str()).cloned())
+            prov.and_then(|c| c.mod_id_map.get(name_id.as_str()).cloned())
         } else {
             None
         };
 
         if let Some(mod_id) = mod_id {
-            if let Some(mod_) = cache
-                .read()
-                .unwrap()
-                .get::<ModioCache>(MODIO_PROVIDER_ID)
-                .and_then(|c| c.mods.get(&mod_id).cloned())
-            {
-                let deps = cache
-                    .read()
-                    .unwrap()
-                    .get::<ModioCache>(MODIO_PROVIDER_ID)
+            if let Some(mod_) = prov.and_then(|c| c.mods.get(&mod_id).cloned()) {
+                let deps = prov
                     .and_then(|c| c.dependencies.get(&mod_id).cloned())
                     .map(|d| {
                         d.into_iter()
@@ -490,12 +489,12 @@ impl ModProvider for ModioProvider {
                 if let Some(deps) = deps {
                     return Some(ModInfo {
                         provider: MODIO_PROVIDER_ID,
+                        spec: format_spec(&mod_.name_id, mod_id, None),
                         name: mod_.name,
-                        spec: spec.clone(),
                         versions: mod_
                             .modfiles
                             .into_iter()
-                            .map(|f| format_spec(&mod_.name_id, mod_id, f.id))
+                            .map(|f| format_spec(&mod_.name_id, mod_id, Some(f.id)))
                             .collect(),
                         status: ResolvableStatus::Resolvable(ModResolution {
                             url: url.to_owned(),

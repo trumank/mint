@@ -14,7 +14,7 @@ use tokio::task::JoinHandle;
 use crate::{
     error::IntegrationError,
     find_drg,
-    providers::{ModSpecification, ModStore},
+    providers::{ModResolution, ModSpecification, ModStore, ResolvableStatus},
     state::{ModConfig, State},
 };
 
@@ -120,7 +120,29 @@ impl App {
 
                     let info = self.state.store.get_mod_info(&item.item.spec);
                     if let Some(info) = &info {
-                        ui.hyperlink_to(&info.name, &item.item.spec.url);
+                        egui::ComboBox::new(item.index, "version")
+                            .selected_text(&item.item.spec.url)
+                            .show_ui(ui, |ui| {
+                                ui.selectable_value(
+                                    &mut item.item.spec.url,
+                                    info.spec.url.to_string(),
+                                    "latest",
+                                );
+                                for version in &info.versions {
+                                    ui.selectable_value(
+                                        &mut item.item.spec.url,
+                                        version.url.to_string(),
+                                        &version.url,
+                                    );
+                                }
+                            });
+
+                        let text = format!(
+                            "{}\n{}\n{}",
+                            info.spec.url, info.provider, info.suggested_require
+                        );
+                        ui.hyperlink_to(&info.name, &item.item.spec.url)
+                            .on_hover_text_at_pointer(text);
                     } else {
                         ui.hyperlink(&item.item.spec.url);
                     }
@@ -197,8 +219,8 @@ impl eframe::App for App {
                                 self.state.profiles.save().unwrap();
                             }
                             Err(e) => match e.downcast::<IntegrationError>() {
-                                Ok(IntegrationError::NoProvider { spec, factory }) => {
-                                    println!("Initializing provider for {:?}", spec);
+                                Ok(IntegrationError::NoProvider { url, factory }) => {
+                                    println!("Initializing provider for {:?}", url);
                                     let params = self
                                         .state
                                         .config
@@ -406,10 +428,7 @@ fn integrate(
             match store.resolve_mods(&mod_specs, update).await {
                 Ok(mods) => break mods,
                 Err(e) => match e.downcast::<IntegrationError>() {
-                    Ok(IntegrationError::NoProvider {
-                        spec: _,
-                        factory: _,
-                    }) => {
+                    Ok(IntegrationError::NoProvider { url: _, factory: _ }) => {
                         // TODO providers should already be initialized by now?
                         unimplemented!();
                     }
@@ -424,8 +443,14 @@ fn integrate(
             .collect::<Vec<_>>();
         let urls = to_integrate
             .iter()
-            .map(|m| &m.spec) // TODO this should be a ModResolution not a ModSpecification, we're missing a step here
-            .collect::<Vec<&ModSpecification>>();
+            .filter_map(|m| {
+                if let ResolvableStatus::Resolvable(res) = &m.status {
+                    Some(res)
+                } else {
+                    None
+                }
+            })
+            .collect::<Vec<&ModResolution>>();
 
         println!("fetching mods...");
         let paths = store.fetch_mods(&urls, update).await?;

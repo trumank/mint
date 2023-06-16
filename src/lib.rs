@@ -70,8 +70,14 @@ pub async fn resolve_and_integrate<P: AsRef<Path>>(
         .collect::<Vec<_>>();
     let urls = to_integrate
         .iter()
-        .map(|m| &m.spec) // TODO this should be a ModResolution not a ModSpecification, we're missing a step here
-        .collect::<Vec<&ModSpecification>>();
+        .filter_map(|m| {
+            if let ResolvableStatus::Resolvable(res) = &m.status {
+                Some(res)
+            } else {
+                None
+            }
+        })
+        .collect::<Vec<&ModResolution>>();
 
     println!("fetching mods...");
     let paths = state.store.fetch_mods(&urls, update).await?;
@@ -88,13 +94,13 @@ pub async fn resolve_and_integrate_with_provider_init<P, F>(
 ) -> Result<()>
 where
     P: AsRef<Path>,
-    F: Fn(&mut State, ModSpecification, &ProviderFactory) -> Result<()>,
+    F: Fn(&mut State, String, &ProviderFactory) -> Result<()>,
 {
     loop {
         match resolve_and_integrate(&path_game, state, mod_specs, update).await {
             Ok(()) => return Ok(()),
             Err(e) => match e.downcast::<IntegrationError>() {
-                Ok(IntegrationError::NoProvider { spec, factory }) => init(state, spec, factory)?,
+                Ok(IntegrationError::NoProvider { url, factory }) => init(state, url, factory)?,
                 Err(e) => return Err(e),
             },
         }

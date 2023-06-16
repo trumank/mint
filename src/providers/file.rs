@@ -5,14 +5,15 @@ use std::sync::Arc;
 use anyhow::{Context, Result};
 
 use super::{
-    BlobCache, ModInfo, ModProvider, ModResponse, ModSpecification, ProviderCache, ResolvableStatus,
+    BlobCache, ModInfo, ModProvider, ModResolution, ModResponse, ModSpecification, ProviderCache,
+    ResolvableStatus,
 };
 
 inventory::submit! {
     super::ProviderFactory {
         id: FILE_PROVIDER_ID,
         new: FileProvider::new_provider,
-        can_provide: |spec| Path::new(&spec.url).exists(),
+        can_provide: |url| Path::new(url).exists(),
         parameters: &[],
     }
 }
@@ -64,12 +65,12 @@ impl ModProvider for FileProvider {
 
     async fn fetch_mod(
         &self,
-        url: &str,
+        res: &ModResolution,
         _update: bool,
         _cache: ProviderCache,
         _blob_cache: &BlobCache,
     ) -> Result<PathBuf> {
-        Ok(PathBuf::from(url))
+        Ok(PathBuf::from(&res.url))
     }
 
     fn get_mod_info(&self, spec: &ModSpecification, _cache: ProviderCache) -> Option<ModInfo> {

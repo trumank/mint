@@ -91,12 +91,8 @@ fn main() -> Result<()> {
     }
 }
 
-fn init_provider(
-    state: &mut State,
-    spec: ModSpecification,
-    factory: &ProviderFactory,
-) -> Result<()> {
-    println!("Initializing provider for {:?}", spec);
+fn init_provider(state: &mut State, url: String, factory: &ProviderFactory) -> Result<()> {
+    println!("Initializing provider for {:?}", url);
     let params = state
         .config
         .provider_parameters

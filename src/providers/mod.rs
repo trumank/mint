@@ -61,16 +61,16 @@ impl ModStore {
             .insert(provider_factory.id, provider);
         Ok(())
     }
-    pub fn get_provider(&self, spec: &ModSpecification) -> Result<Arc<dyn ModProvider>> {
+    pub fn get_provider(&self, url: &str) -> Result<Arc<dyn ModProvider>> {
         let factory = inventory::iter::<ProviderFactory>()
-            .find(|f| (f.can_provide)(spec))
-            .with_context(|| format!("Could not find mod provider for {:?}", spec))?;
+            .find(|f| (f.can_provide)(url))
+            .with_context(|| format!("Could not find mod provider for {:?}", url))?;
         let lock = self.providers.read().unwrap();
         Ok(match lock.get(factory.id) {
             Some(e) => e.clone(),
             None => {
                 return Err(IntegrationError::NoProvider {
-                    spec: spec.clone(),
+                    url: url.to_string(),
                     factory,
                 }
                 .into())
@@ -120,7 +120,7 @@ impl ModStore {
         let mut spec = original_spec.clone();
         loop {
             match self
-                .get_provider(&spec)?
+                .get_provider(&spec.url)?
                 .resolve_mod(&spec, update, self.cache.clone(), &self.blob_cache.clone())
                 .await?
             {
@@ -131,36 +131,27 @@ impl ModStore {
             };
         }
     }
-    pub async fn fetch_mods(
-        &self,
-        mods: &[&ModSpecification],
-        update: bool,
-    ) -> Result<Vec<PathBuf>> {
+    pub async fn fetch_mods(&self, mods: &[&ModResolution], update: bool) -> Result<Vec<PathBuf>> {
         use futures::stream::{self, StreamExt, TryStreamExt};
 
-        stream::iter(mods.iter().map(|spec| self.fetch_mod(spec, update)))
+        stream::iter(mods.iter().map(|res| self.fetch_mod(res, update)))
             .boxed() // without this the future becomes !Send https://github.com/rust-lang/rust/issues/104382
             .buffered(5)
             .try_collect::<Vec<_>>()
             .await
     }
-    pub async fn fetch_mod(&self, spec: &ModSpecification, update: bool) -> Result<PathBuf> {
-        self.get_provider(spec)?
-            .fetch_mod(
-                &spec.url,
-                update,
-                self.cache.clone(),
-                &self.blob_cache.clone(),
-            )
+    pub async fn fetch_mod(&self, res: &ModResolution, update: bool) -> Result<PathBuf> {
+        self.get_provider(&res.url)?
+            .fetch_mod(res, update, self.cache.clone(), &self.blob_cache.clone())
             .await
     }
     pub fn get_mod_info(&self, spec: &ModSpecification) -> Option<ModInfo> {
-        self.get_provider(spec)
+        self.get_provider(&spec.url)
             .ok()?
             .get_mod_info(spec, self.cache.clone())
     }
     pub fn is_pinned(&self, spec: &ModSpecification) -> bool {
-        self.get_provider(spec)
+        self.get_provider(&spec.url)
             .unwrap()
             .is_pinned(spec, self.cache.clone())
     }
@@ -220,7 +211,7 @@ pub trait ModProvider: Send + Sync + std::fmt::Debug {
     ) -> Result<ModResponse>;
     async fn fetch_mod(
         &self,
-        url: &str,
+        url: &ModResolution,
         update: bool,
         cache: ProviderCache,
         blob_cache: &BlobCache,
@@ -234,7 +225,7 @@ pub struct ProviderFactory {
     pub id: &'static str,
     #[allow(clippy::type_complexity)]
     new: fn(&HashMap<String, String>) -> Result<Arc<dyn ModProvider>>,
-    can_provide: fn(&ModSpecification) -> bool,
+    can_provide: fn(&str) -> bool,
     pub parameters: &'static [ProviderParameter<'static>],
 }
 

@@ -13,9 +13,9 @@ inventory::submit! {
     super::ProviderFactory {
         id: "http",
         new: HttpProvider::new_provider,
-        can_provide: |spec| -> bool {
+        can_provide: |url| -> bool {
             RE_MOD
-                .captures(&spec.url)
+                .captures(url)
                 .and_then(|c| c.name("hostname"))
                 .map_or(false, |h| {
                     !["mod.io", "drg.mod.io", "drg.old.mod.io"].contains(&h.as_str())
@@ -94,11 +94,12 @@ impl ModProvider for HttpProvider {
 
     async fn fetch_mod(
         &self,
-        url: &str,
+        res: &ModResolution,
         update: bool,
         cache: ProviderCache,
         blob_cache: &BlobCache,
     ) -> Result<PathBuf> {
+        let url = &res.url;
         Ok(
             if let Some(path) = if update {
                 None
