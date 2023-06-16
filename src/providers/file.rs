@@ -95,4 +95,7 @@ impl ModProvider for FileProvider {
     fn is_pinned(&self, _spec: &ModSpecification, _cache: ProviderCache) -> bool {
         true
     }
+    fn get_version_name(&self, _spec: &ModSpecification, _cache: ProviderCache) -> Option<String> {
+        Some("latest".to_string())
+    }
 }

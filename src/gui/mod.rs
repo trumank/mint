@@ -120,19 +120,30 @@ impl App {
 
                     let info = self.state.store.get_mod_info(&item.item.spec);
                     if let Some(info) = &info {
-                        egui::ComboBox::new(item.index, "version")
-                            .selected_text(&item.item.spec.url)
+                        egui::ComboBox::from_id_source(item.index)
+                            .selected_text(
+                                self.state
+                                    .store
+                                    .get_version_name(&item.item.spec)
+                                    .unwrap_or_default(),
+                            )
                             .show_ui(ui, |ui| {
                                 ui.selectable_value(
                                     &mut item.item.spec.url,
                                     info.spec.url.to_string(),
-                                    "latest",
+                                    self.state
+                                        .store
+                                        .get_version_name(&info.spec)
+                                        .unwrap_or_default(),
                                 );
                                 for version in &info.versions {
                                     ui.selectable_value(
                                         &mut item.item.spec.url,
                                         version.url.to_string(),
-                                        &version.url,
+                                        self.state
+                                            .store
+                                            .get_version_name(version)
+                                            .unwrap_or_default(),
                                     );
                                 }
                             });

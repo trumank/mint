@@ -155,6 +155,11 @@ impl ModStore {
             .unwrap()
             .is_pinned(spec, self.cache.clone())
     }
+    pub fn get_version_name(&self, spec: &ModSpecification) -> Option<String> {
+        self.get_provider(&spec.url)
+            .unwrap()
+            .get_version_name(spec, self.cache.clone())
+    }
 }
 
 pub trait ReadSeek: Read + Seek + Send {}
@@ -218,6 +223,7 @@ pub trait ModProvider: Send + Sync + std::fmt::Debug {
     ) -> Result<PathBuf>;
     fn get_mod_info(&self, spec: &ModSpecification, cache: ProviderCache) -> Option<ModInfo>;
     fn is_pinned(&self, spec: &ModSpecification, cache: ProviderCache) -> bool;
+    fn get_version_name(&self, spec: &ModSpecification, cache: ProviderCache) -> Option<String>;
 }
 
 #[derive(Clone)]

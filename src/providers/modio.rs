@@ -514,4 +514,42 @@ impl ModProvider for ModioProvider {
 
         captures.name("modfile_id").is_some()
     }
+    fn get_version_name(&self, spec: &ModSpecification, cache: ProviderCache) -> Option<String> {
+        let url = &spec.url;
+        let captures = RE_MOD.captures(url).unwrap();
+
+        let cache = cache.read().unwrap();
+        let prov = cache.get::<ModioCache>(MODIO_PROVIDER_ID);
+
+        let mod_id = if let Some(mod_id) = captures.name("mod_id") {
+            mod_id.as_str().parse::<u32>().ok()
+        } else if let Some(name_id) = captures.name("name_id") {
+            prov.and_then(|c| c.mod_id_map.get(name_id.as_str()).cloned())
+        } else {
+            None
+        };
+
+        if let Some(mod_id) = mod_id {
+            if let Some(mod_) = prov.and_then(|c| c.mods.get(&mod_id).cloned()) {
+                if let Some(file_id_str) = captures.name("modfile_id") {
+                    let file_id = file_id_str.as_str().parse::<u32>().unwrap();
+                    if let Some(file) = mod_.modfiles.iter().find(|f| f.id == file_id) {
+                        if let Some(version) = &file.version {
+                            Some(format!("{} - {}", file.id, version))
+                        } else {
+                            Some(file_id_str.as_str().to_string())
+                        }
+                    } else {
+                        Some(file_id_str.as_str().to_string())
+                    }
+                } else {
+                    Some("latest".to_string())
+                }
+            } else {
+                None
+            }
+        } else {
+            None
+        }
+    }
 }
