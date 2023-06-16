@@ -91,7 +91,7 @@ where
     F: Fn(&mut State, ModSpecification, &ProviderFactory) -> Result<()>,
 {
     loop {
-        match resolve_and_integrate(&path_game, &state, &mod_specs, update).await {
+        match resolve_and_integrate(&path_game, state, mod_specs, update).await {
             Ok(()) => return Ok(()),
             Err(e) => match e.downcast::<IntegrationError>() {
                 Ok(IntegrationError::NoProvider { spec, factory }) => init(state, spec, factory)?,

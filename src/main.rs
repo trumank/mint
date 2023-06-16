@@ -6,7 +6,8 @@ use clap::{Parser, Subcommand};
 use drg_mod_integration::{
     find_drg,
     gui::gui,
-    providers::{ModSpecification, ProviderFactory}, resolve_and_integrate_with_provider_init,
+    providers::{ModSpecification, ProviderFactory},
+    resolve_and_integrate_with_provider_init,
     state::State,
 };
 

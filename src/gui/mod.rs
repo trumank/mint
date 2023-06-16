@@ -9,6 +9,7 @@ use std::sync::{
 
 use anyhow::{anyhow, Result};
 use eframe::{egui, epaint::text::LayoutJob};
+use tokio::task::JoinHandle;
 
 use crate::{
     error::IntegrationError,
@@ -41,7 +42,7 @@ struct App {
     log: String,
     resolve_mod: String,
     resolve_mod_rid: Option<RequestID>,
-    integrate_rid: Option<RequestID>,
+    integrate_rid: Option<(RequestID, JoinHandle<()>)>,
     request_counter: RequestCounter,
     dnd: egui_dnd::DragDropUi,
 }
@@ -49,13 +50,14 @@ struct App {
 impl App {
     fn new() -> Result<Self> {
         let (tx, rx) = std::sync::mpsc::channel();
+        let state = State::new()?;
 
         Ok(Self {
             tx,
             rx,
             request_counter: Default::default(),
-            state: State::new()?,
-            profile_dropdown: "default".to_string(),
+            profile_dropdown: state.profiles.active_profile.to_string(),
+            state,
             log: Default::default(),
             resolve_mod: Default::default(),
             resolve_mod_rid: None,
@@ -105,7 +107,7 @@ impl App {
                         ui.label("☰");
                     });
 
-                    if ui.button("remove").clicked() {
+                    if ui.button(" ➖ ").clicked() {
                         btn_remove = Some(item.index);
                     }
 
@@ -117,10 +119,10 @@ impl App {
                     }
 
                     let info = self.state.store.get_mod_info(&item.item.spec);
-                    if let Some(info) = info {
-                        ui.label(&info.name);
+                    if let Some(info) = &info {
+                        ui.hyperlink_to(&info.name, &item.item.spec.url);
                     } else {
-                        ui.label(&item.item.spec.url);
+                        ui.hyperlink(&item.item.spec.url);
                     }
                 });
             });
@@ -225,7 +227,7 @@ impl eframe::App for App {
                     }
                 }
                 message::Message::Integrate(rid, res) => {
-                    if Some(rid) == self.integrate_rid {
+                    if self.integrate_rid.as_ref().map_or(false, |r| rid == r.0) {
                         match res {
                             Ok(()) => {
                                 self.log.push_str("Integration complete\n");
@@ -252,73 +254,32 @@ impl eframe::App for App {
             );
         });
         egui::TopBottomPanel::bottom("bottom_panel").show(ctx, |ui| {
-            ui.with_layout(
-                egui::Layout::top_down_justified(egui::Align::Center),
-                |ui| {
-                    ui.add(egui::widgets::ProgressBar::new(0.5));
-                    ui.add_enabled_ui(self.integrate_rid.is_none(), |ui| {
-                        if ui.button("integrate").clicked() {
-                            self.integrate_rid = integrate(
-                                &mut self.request_counter,
-                                self.state.store.clone(),
-                                self.state
-                                    .profiles
-                                    .get_active_profile()
-                                    .mods
-                                    .iter()
-                                    .map(|m| m.spec.clone())
-                                    .collect(),
-                                self.tx.clone(),
-                                ctx.clone(),
-                            );
-                        }
-                    });
-                },
-            );
-        });
-        egui::CentralPanel::default().show(ctx, |ui| {
-            ui.horizontal(|ui| {
-                let resolve = ui.add_enabled(
-                    self.resolve_mod_rid.is_none(),
-                    egui::TextEdit::singleline(&mut self.resolve_mod).hint_text("Resolve mod..."),
-                );
-                if is_committed(&resolve) {
-                    self.add_mod(ctx);
-                }
-                if self.resolve_mod_rid.is_some() {
-                    ui.spinner();
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::TOP), |ui| {
+                ui.add_enabled_ui(self.integrate_rid.is_none(), |ui| {
+                    if ui.button("integrate").clicked() {
+                        self.integrate_rid = integrate(
+                            &mut self.request_counter,
+                            self.state.store.clone(),
+                            self.state
+                                .profiles
+                                .get_active_profile()
+                                .mods
+                                .iter()
+                                .map(|m| m.spec.clone())
+                                .collect(),
+                            self.tx.clone(),
+                            ctx.clone(),
+                        );
+                    }
+                });
+                if self.integrate_rid.is_some() && ui.button("cancel").clicked() {
+                    self.integrate_rid.take().unwrap().1.abort();
                 }
             });
-
+        });
+        egui::CentralPanel::default().show(ctx, |ui| {
             // profile selection
             ui.horizontal(|ui| {
-                let res = ui.add(egui_dropdown::DropDownBox::from_iter(
-                    self.state.profiles.profiles.keys(),
-                    "profile_dropdown",
-                    &mut self.profile_dropdown,
-                    |ui, text| {
-                        let mut job = LayoutJob {
-                            halign: egui::Align::LEFT,
-                            ..Default::default()
-                        };
-                        job.append(text, 0.0, Default::default());
-                        ui.selectable_label(text == self.state.profiles.active_profile, job)
-                    },
-                ));
-                if res.gained_focus() {
-                    self.profile_dropdown.clear();
-                }
-
-                if self
-                    .state
-                    .profiles
-                    .profiles
-                    .contains_key(&self.profile_dropdown)
-                {
-                    self.state.profiles.active_profile = self.profile_dropdown.to_string();
-                    self.state.profiles.save().unwrap();
-                }
-
                 ui.add_enabled_ui(
                     self.state
                         .profiles
@@ -326,7 +287,7 @@ impl eframe::App for App {
                         .contains_key(&self.profile_dropdown)
                         && self.state.profiles.profiles.len() > 1,
                     |ui| {
-                        if ui.button("-").clicked() {
+                        if ui.button(" ➖ ").clicked() {
                             self.state.profiles.remove_active();
                             self.profile_dropdown = self.state.profiles.active_profile.to_string();
                             self.state.profiles.save().unwrap();
@@ -336,7 +297,7 @@ impl eframe::App for App {
                 ui.add_enabled_ui(
                     self.profile_dropdown != self.state.profiles.active_profile,
                     |ui| {
-                        if ui.button("+").clicked() {
+                        if ui.button(" ➕ ").clicked() {
                             self.state
                                 .profiles
                                 .profiles
@@ -347,9 +308,63 @@ impl eframe::App for App {
                         }
                     },
                 );
+
+                ui.with_layout(ui.layout().with_main_justify(true), |ui| {
+                    let res = ui.add(egui_dropdown::DropDownBox::from_iter(
+                        self.state.profiles.profiles.keys(),
+                        "profile_dropdown",
+                        &mut self.profile_dropdown,
+                        |ui, text| {
+                            let mut job = LayoutJob {
+                                halign: egui::Align::LEFT,
+                                ..Default::default()
+                            };
+                            job.append(text, 0.0, Default::default());
+                            ui.selectable_label(text == self.state.profiles.active_profile, job)
+                        },
+                    ));
+                    if res.gained_focus() {
+                        self.profile_dropdown.clear();
+                    }
+                    if is_committed(&res) {
+                        self.state
+                            .profiles
+                            .profiles
+                            .entry(self.profile_dropdown.to_string())
+                            .or_default();
+                        self.state.profiles.active_profile = self.profile_dropdown.to_string();
+                        self.state.profiles.save().unwrap();
+                        ui.memory_mut(|m| m.close_popup());
+                    }
+
+                    if self
+                        .state
+                        .profiles
+                        .profiles
+                        .contains_key(&self.profile_dropdown)
+                    {
+                        self.state.profiles.active_profile = self.profile_dropdown.to_string();
+                        self.state.profiles.save().unwrap();
+                    }
+                });
             });
 
             ui.separator();
+
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::TOP), |ui| {
+                if self.resolve_mod_rid.is_some() {
+                    ui.spinner();
+                }
+                ui.with_layout(ui.layout().with_main_justify(true), |ui| {
+                    let resolve = ui.add_enabled(
+                        self.resolve_mod_rid.is_none(),
+                        egui::TextEdit::singleline(&mut self.resolve_mod).hint_text("Add mod..."),
+                    );
+                    if is_committed(&resolve) {
+                        self.add_mod(ctx);
+                    }
+                });
+            });
 
             self.ui_profile(ui);
 
@@ -377,7 +392,7 @@ fn integrate(
     mods: Vec<ModSpecification>,
     tx: Sender<message::Message>,
     ctx: egui::Context,
-) -> Option<RequestID> {
+) -> Option<(RequestID, JoinHandle<()>)> {
     let rid = rc.next();
 
     async fn integrate(store: Arc<ModStore>, mod_specs: Vec<ModSpecification>) -> Result<()> {
@@ -420,10 +435,12 @@ fn integrate(
         Ok(())
     }
 
-    tokio::task::spawn(async move {
-        let res = integrate(store, mods).await;
-        tx.send(message::Message::Integrate(rid, res)).unwrap();
-        ctx.request_repaint();
-    });
-    Some(rid)
+    Some((
+        rid,
+        tokio::task::spawn(async move {
+            let res = integrate(store, mods).await;
+            tx.send(message::Message::Integrate(rid, res)).unwrap();
+            ctx.request_repaint();
+        }),
+    ))
 }
