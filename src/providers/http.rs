@@ -83,7 +83,7 @@ impl ModProvider for HttpProvider {
             provider: HTTP_PROVIDER_ID,
             name,
             spec: spec.clone(),
-            versions: vec![spec.clone()],
+            versions: vec![],
             status: ResolvableStatus::Resolvable(ModResolution {
                 url: spec.url.to_owned(),
             }),

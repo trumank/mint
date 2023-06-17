@@ -50,7 +50,7 @@ impl ModProvider for FileProvider {
             provider: FILE_PROVIDER_ID,
             name,
             spec: spec.clone(),
-            versions: vec![spec.clone()],
+            versions: vec![],
             status: ResolvableStatus::Unresolvable {
                 name: path
                     .file_name()
