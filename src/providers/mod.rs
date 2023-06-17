@@ -28,16 +28,13 @@ impl ModStore {
         cache_path: P,
         parameters: &HashMap<String, HashMap<String, String>>,
     ) -> Result<Self> {
-        let factories = inventory::iter::<ProviderFactory>()
-            .map(|f| (f.id, f))
-            .collect::<HashMap<_, _>>();
-        let providers = parameters
-            .iter()
-            .flat_map(|(id, params)| {
-                factories
-                    .get(id.as_str())
-                    .with_context(|| format!("unknown provider: {id}"))
-                    .map(|f| (f.new)(params).map(|p| (f.id, p)))
+        let providers = inventory::iter::<ProviderFactory>()
+            .flat_map(|f| {
+                let params = parameters.get(f.id).cloned().unwrap_or_default();
+                f.parameters
+                    .iter()
+                    .all(|p| params.contains_key(p.id))
+                    .then(|| ((f.new)(&params).map(|p| (f.id, p))))
             })
             .collect::<Result<HashMap<_, _>>>()?;
 
