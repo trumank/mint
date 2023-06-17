@@ -153,12 +153,7 @@ impl App {
                                 }
                             });
 
-                        let text = format!(
-                            "{}\n{}\n{}",
-                            info.spec.url, info.provider, info.suggested_require
-                        );
-                        ui.hyperlink_to(&info.name, &item.item.spec.url)
-                            .on_hover_text_at_pointer(text);
+                        ui.hyperlink_to(&info.name, &item.item.spec.url);
                     } else {
                         ui.hyperlink(&item.item.spec.url);
                     }
