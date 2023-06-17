@@ -3,10 +3,11 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
+use tokio::sync::mpsc::Sender;
 
 use super::{
-    BlobCache, ModInfo, ModProvider, ModResolution, ModResponse, ModSpecification, ProviderCache,
-    ResolvableStatus,
+    BlobCache, FetchProgress, ModInfo, ModProvider, ModResolution, ModResponse, ModSpecification,
+    ProviderCache, ResolvableStatus,
 };
 
 inventory::submit! {
@@ -69,7 +70,15 @@ impl ModProvider for FileProvider {
         _update: bool,
         _cache: ProviderCache,
         _blob_cache: &BlobCache,
+        tx: Option<Sender<FetchProgress>>,
     ) -> Result<PathBuf> {
+        if let Some(tx) = tx {
+            tx.send(FetchProgress::Complete {
+                resolution: res.clone(),
+            })
+            .await
+            .unwrap();
+        }
         Ok(PathBuf::from(&res.url))
     }
 

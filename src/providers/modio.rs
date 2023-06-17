@@ -7,10 +7,11 @@ use reqwest::{Request, Response};
 use reqwest_middleware::{Middleware, Next};
 use serde::{Deserialize, Serialize};
 use task_local_extensions::Extensions;
+use tokio::sync::mpsc::Sender;
 
 use super::{
-    BlobCache, BlobRef, ModInfo, ModProvider, ModProviderCache, ModResolution, ModResponse,
-    ModSpecification, ProviderCache, ResolvableStatus,
+    BlobCache, BlobRef, FetchProgress, ModInfo, ModProvider, ModProviderCache, ModResolution,
+    ModResponse, ModSpecification, ProviderCache, ResolvableStatus,
 };
 
 lazy_static::lazy_static! {
@@ -193,7 +194,7 @@ impl ModProvider for ModioProvider {
         _blob_cache: &BlobCache,
     ) -> Result<ModResponse> {
         use modio::filter::{Eq, In};
-        use modio::mods::filters::{NameId, Visible};
+        use modio::mods::filters::{Id, NameId, Visible};
 
         let url = &spec.url;
         let captures = RE_MOD.captures(url).context("invalid modio URL {url}")?;
@@ -226,7 +227,7 @@ impl ModProvider for ModioProvider {
                 mod_
             };
 
-            let deps = match (!update)
+            let dep_ids = match (!update)
                 .then(|| {
                     cache
                         .read()
@@ -255,17 +256,60 @@ impl ModProvider for ModioProvider {
                         .get_mut::<ModioCache>(MODIO_PROVIDER_ID)
                         .dependencies
                         .insert(mod_id, deps.clone());
-
                     deps
                 }
-            }
-            .into_iter()
-            .map(|d| ModSpecification {
-                url: format!("https://mod.io/g/drg/m/FIXME#{d}"),
-            }) // since we found mod based on
-            // ID, we haven't verified mod
-            // name is actually correct
-            .collect();
+            };
+
+            let deps = {
+                // build map of (id -> name) for deps
+                let mut name_map = cache
+                    .read()
+                    .unwrap()
+                    .get::<ModioCache>(MODIO_PROVIDER_ID)
+                    .map(|c| {
+                        dep_ids
+                            .iter()
+                            .flat_map(|id| c.mods.get(id).map(|m| (*id, m.name_id.to_string())))
+                            .collect::<HashMap<_, _>>()
+                    })
+                    .unwrap_or_default();
+
+                let filter_ids = dep_ids
+                    .iter()
+                    .filter(|id| !name_map.contains_key(id))
+                    .collect::<Vec<_>>();
+                if !filter_ids.is_empty() {
+                    let filter = Id::_in(filter_ids);
+
+                    let mods = self
+                        .modio
+                        .game(MODIO_DRG_ID)
+                        .mods()
+                        .search(filter)
+                        .collect()
+                        .await?;
+
+                    for m in &mods {
+                        name_map.insert(m.id, m.name_id.to_string());
+                    }
+
+                    let mut lock = cache.write().unwrap();
+                    let c = lock.get_mut::<ModioCache>(MODIO_PROVIDER_ID);
+                    for m in mods {
+                        c.mod_id_map.insert(m.name_id.to_owned(), m.id);
+                        c.mods.insert(m.id, ModioMod::new(m, vec![])); // TODO move files out of mod struct
+                    }
+                }
+
+                let deps = dep_ids
+                    .iter()
+                    .map(|id| {
+                        format_spec(name_map.get(id).expect("dependency ID missing"), *id, None)
+                    })
+                    .collect();
+
+                deps
+            };
 
             Ok(ModResponse::Resolve(ModInfo {
                 provider: MODIO_PROVIDER_ID,
@@ -403,6 +447,7 @@ impl ModProvider for ModioProvider {
         _update: bool,
         cache: ProviderCache,
         blob_cache: &BlobCache,
+        tx: Option<Sender<FetchProgress>>,
     ) -> Result<PathBuf> {
         let url = &res.url;
         let captures = RE_MOD
@@ -427,6 +472,13 @@ impl ModProvider for ModioProvider {
                         .and_then(|r| blob_cache.get_path(r));
                     path
                 } {
+                    if let Some(tx) = tx {
+                        tx.send(FetchProgress::Complete {
+                            resolution: res.clone(),
+                        })
+                        .await
+                        .unwrap();
+                    }
                     path
                 } else {
                     let file = self
@@ -437,12 +489,30 @@ impl ModProvider for ModioProvider {
                         .get()
                         .await?;
 
+                    let size = file.filesize;
                     let download: modio::download::DownloadAction = file.into();
 
                     println!("downloading mod {url}...");
 
-                    let data = self.modio.download(download).bytes().await?.to_vec();
-                    let blob = blob_cache.write(&data)?;
+                    use futures::stream::TryStreamExt;
+                    use tokio::io::AsyncWriteExt;
+
+                    let mut cursor = std::io::Cursor::new(vec![]);
+                    let mut stream = Box::pin(self.modio.download(download).stream());
+                    while let Some(bytes) = stream.try_next().await? {
+                        cursor.write_all(&bytes).await?;
+                        if let Some(tx) = &tx {
+                            tx.send(FetchProgress::Progress {
+                                resolution: res.clone(),
+                                progress: cursor.get_ref().len() as u64,
+                                size,
+                            })
+                            .await
+                            .unwrap();
+                        }
+                    }
+
+                    let blob = blob_cache.write(&cursor.into_inner())?;
                     let path = blob_cache.get_path(&blob).unwrap();
 
                     cache
@@ -451,6 +521,14 @@ impl ModProvider for ModioProvider {
                         .get_mut::<ModioCache>(MODIO_PROVIDER_ID)
                         .modfile_blobs
                         .insert(modfile_id, blob);
+
+                    if let Some(tx) = tx {
+                        tx.send(FetchProgress::Complete {
+                            resolution: res.clone(),
+                        })
+                        .await
+                        .unwrap();
+                    }
 
                     path
                 },

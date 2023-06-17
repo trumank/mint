@@ -1,12 +1,13 @@
 use std::path::PathBuf;
 use std::{collections::HashMap, sync::Arc};
 
-use anyhow::{anyhow, Result};
+use anyhow::{bail, Result};
 use serde::{Deserialize, Serialize};
+use tokio::sync::mpsc::Sender;
 
 use super::{
-    BlobCache, BlobRef, ModInfo, ModProvider, ModProviderCache, ModResolution, ModResponse,
-    ModSpecification, ProviderCache, ResolvableStatus,
+    BlobCache, BlobRef, FetchProgress, ModInfo, ModProvider, ModProviderCache, ModResolution,
+    ModResponse, ModSpecification, ProviderCache, ResolvableStatus,
 };
 
 inventory::submit! {
@@ -98,6 +99,7 @@ impl ModProvider for HttpProvider {
         update: bool,
         cache: ProviderCache,
         blob_cache: &BlobCache,
+        tx: Option<Sender<FetchProgress>>,
     ) -> Result<PathBuf> {
         let url = &res.url;
         Ok(
@@ -111,22 +113,49 @@ impl ModProvider for HttpProvider {
                     .and_then(|c| c.url_blobs.get(url))
                     .and_then(|r| blob_cache.get_path(r))
             } {
+                if let Some(tx) = tx {
+                    tx.send(FetchProgress::Complete {
+                        resolution: res.clone(),
+                    })
+                    .await
+                    .unwrap();
+                }
                 path
             } else {
                 println!("downloading mod {url}...");
-                let res = self.client.get(url).send().await?.error_for_status()?;
-                if let Some(mime) = res
+                let response = self.client.get(url).send().await?.error_for_status()?;
+                let size = response.content_length(); // TODO will be incorrect if compressed
+                if let Some(mime) = response
                     .headers()
                     .get(reqwest::header::HeaderName::from_static("content-type"))
                 {
                     let content_type = &mime.to_str()?;
                     if !["application/zip", "application/octet-stream"].contains(content_type) {
-                        return Err(anyhow!("unexpected content-type: {content_type}"));
+                        bail!("unexpected content-type: {content_type}");
                     }
                 }
 
-                let data = res.bytes().await?.to_vec();
-                let blob = blob_cache.write(&data)?;
+                use futures::stream::TryStreamExt;
+                use tokio::io::AsyncWriteExt;
+
+                let mut cursor = std::io::Cursor::new(vec![]);
+                let mut stream = response.bytes_stream();
+                while let Some(bytes) = stream.try_next().await? {
+                    cursor.write_all(&bytes).await?;
+                    if let Some(size) = size {
+                        if let Some(tx) = &tx {
+                            tx.send(FetchProgress::Progress {
+                                resolution: res.clone(),
+                                progress: cursor.get_ref().len() as u64,
+                                size,
+                            })
+                            .await
+                            .unwrap();
+                        }
+                    }
+                }
+
+                let blob = blob_cache.write(&cursor.into_inner())?;
                 let path = blob_cache.get_path(&blob).unwrap();
                 cache
                     .write()
@@ -135,6 +164,13 @@ impl ModProvider for HttpProvider {
                     .url_blobs
                     .insert(url.to_owned(), blob);
 
+                if let Some(tx) = tx {
+                    tx.send(FetchProgress::Complete {
+                        resolution: res.clone(),
+                    })
+                    .await
+                    .unwrap();
+                }
                 path
             },
         )

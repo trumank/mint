@@ -80,7 +80,7 @@ pub async fn resolve_and_integrate<P: AsRef<Path>>(
         .collect::<Vec<&ModResolution>>();
 
     println!("fetching mods...");
-    let paths = state.store.fetch_mods(&urls, update).await?;
+    let paths = state.store.fetch_mods(&urls, update, None).await?;
 
     integrate::integrate(path_game, to_integrate.into_iter().zip(paths).collect())
 }

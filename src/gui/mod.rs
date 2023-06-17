@@ -2,22 +2,21 @@ mod message;
 
 //#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")] // hide console window on Windows in release
 
-use std::{
-    collections::HashMap,
-    sync::{
-        mpsc::{Receiver, Sender},
-        Arc,
-    },
-};
+use std::{collections::HashMap, sync::Arc};
 
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, Context, Result};
 use eframe::{egui, epaint::text::LayoutJob};
-use tokio::task::JoinHandle;
+use tokio::{
+    sync::mpsc::{self, Receiver, Sender},
+    task::JoinHandle,
+};
 
 use crate::{
     error::IntegrationError,
     find_drg,
-    providers::{ModResolution, ModSpecification, ModStore, ProviderFactory, ResolvableStatus},
+    providers::{
+        FetchProgress, ModResolution, ModSpecification, ModStore, ProviderFactory, ResolvableStatus,
+    },
     state::{ModConfig, State},
 };
 
@@ -45,7 +44,11 @@ struct App {
     log: String,
     resolve_mod: String,
     resolve_mod_rid: Option<RequestID>,
-    integrate_rid: Option<(RequestID, JoinHandle<()>)>,
+    integrate_rid: Option<(
+        RequestID,
+        JoinHandle<()>,
+        HashMap<ModSpecification, SpecFetchProgress>,
+    )>,
     request_counter: RequestCounter,
     dnd: egui_dnd::DragDropUi,
     window_provider_parameters: Option<WindowProviderParameters>,
@@ -53,7 +56,7 @@ struct App {
 
 impl App {
     fn new() -> Result<Self> {
-        let (tx, rx) = std::sync::mpsc::channel();
+        let (tx, rx) = mpsc::channel(10);
         let state = State::new()?;
 
         Ok(Self {
@@ -124,6 +127,29 @@ impl App {
                     }
 
                     let info = self.state.store.get_mod_info(&item.item.spec);
+
+                    if let Some((_, _, progress)) = &self.integrate_rid {
+                        match progress.get(&item.item.spec) {
+                            Some(SpecFetchProgress::Progress { progress, size }) => {
+                                ui.add(
+                                    egui::ProgressBar::new(*progress as f32 / *size as f32)
+                                        .show_percentage()
+                                        .desired_width(100.0),
+                                );
+                            }
+                            Some(SpecFetchProgress::Complete) => {
+                                ui.add(
+                                    egui::ProgressBar::new(1.0)
+                                        .show_percentage()
+                                        .desired_width(100.0),
+                                );
+                            }
+                            None => {
+                                ui.spinner();
+                            }
+                        }
+                    }
+
                     if let Some(info) = &info {
                         egui::ComboBox::from_id_source(item.index)
                             .selected_text(
@@ -183,7 +209,9 @@ impl App {
         let ctx = ctx.clone();
         tokio::spawn(async move {
             let res = store.resolve_mod(spec, false).await;
-            tx.send(message::Message::ResolveMod(rid, res)).unwrap();
+            tx.send(message::Message::ResolveMod(rid, res))
+                .await
+                .unwrap();
             ctx.request_repaint();
         });
         self.resolve_mod_rid = Some(rid);
@@ -192,7 +220,7 @@ impl App {
     fn show_provider_parameters(&mut self, ctx: &egui::Context) {
         let Some(window) = &mut self.window_provider_parameters else { return };
 
-        if let Ok((rid, res)) = window.rx.try_recv() {
+        while let Ok((rid, res)) = window.rx.try_recv() {
             if window.check_rid.as_ref().map_or(false, |r| rid == r.0) {
                 match res {
                     Ok(()) => {
@@ -261,7 +289,7 @@ impl App {
             let factory = window.factory;
             let handle = tokio::task::spawn(async move {
                 let res = store.add_provider_checked(factory, &params).await;
-                tx.send((rid, res)).unwrap();
+                tx.send((rid, res)).await.unwrap();
                 ctx.request_repaint();
             });
             window.check_rid = Some((rid, handle));
@@ -299,7 +327,7 @@ struct WindowProviderParameters {
 }
 impl WindowProviderParameters {
     fn new(factory: &'static ProviderFactory, state: &mut State) -> Self {
-        let (tx, rx) = std::sync::mpsc::channel();
+        let (tx, rx) = mpsc::channel(10);
         Self {
             tx,
             rx,
@@ -319,7 +347,7 @@ impl WindowProviderParameters {
 impl eframe::App for App {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         // message handling
-        if let Ok(msg) = self.rx.try_recv() {
+        while let Ok(msg) = self.rx.try_recv() {
             match msg {
                 message::Message::ResolveMod(rid, res) => {
                     if Some(rid) == self.resolve_mod_rid {
@@ -347,6 +375,13 @@ impl eframe::App for App {
                             },
                         }
                         self.resolve_mod_rid = None;
+                    }
+                }
+                message::Message::FetchModProgress(rid, spec, progress) => {
+                    if let Some((r, _, progress_map)) = &mut self.integrate_rid {
+                        if rid == *r {
+                            progress_map.insert(spec, progress);
+                        }
                     }
                 }
                 message::Message::Integrate(rid, res) => {
@@ -411,6 +446,7 @@ impl eframe::App for App {
             });
         });
         egui::CentralPanel::default().show(ctx, |ui| {
+            ui.set_enabled(self.integrate_rid.is_none());
             // profile selection
             ui.horizontal(|ui| {
                 ui.add_enabled_ui(
@@ -519,18 +555,40 @@ fn is_committed(res: &egui::Response) -> bool {
     res.lost_focus() && res.ctx.input(|i| i.key_pressed(egui::Key::Enter))
 }
 
+#[derive(Debug)]
+pub enum SpecFetchProgress {
+    Progress { progress: u64, size: u64 },
+    Complete,
+}
+impl From<FetchProgress> for SpecFetchProgress {
+    fn from(value: FetchProgress) -> Self {
+        match value {
+            FetchProgress::Progress { progress, size, .. } => Self::Progress { progress, size },
+            FetchProgress::Complete { .. } => Self::Complete,
+        }
+    }
+}
+
 fn integrate(
     rc: &mut RequestCounter,
     store: Arc<ModStore>,
     mods: Vec<ModSpecification>,
     tx: Sender<message::Message>,
     ctx: egui::Context,
-) -> Option<(RequestID, JoinHandle<()>)> {
+) -> Option<(
+    RequestID,
+    JoinHandle<()>,
+    HashMap<ModSpecification, SpecFetchProgress>,
+)> {
     let rid = rc.next();
 
-    async fn integrate(store: Arc<ModStore>, mod_specs: Vec<ModSpecification>) -> Result<()> {
-        use anyhow::Context;
-
+    async fn integrate(
+        store: Arc<ModStore>,
+        ctx: egui::Context,
+        mod_specs: Vec<ModSpecification>,
+        rid: RequestID,
+        message_tx: Sender<message::Message>,
+    ) -> Result<()> {
         let path_game = find_drg().context("Could not find DRG install directory")?;
 
         let update = false;
@@ -541,6 +599,16 @@ fn integrate(
             .iter()
             .map(|u| mods[u].clone())
             .collect::<Vec<_>>();
+        let res_map: HashMap<ModResolution, ModSpecification> = mods
+            .iter()
+            .flat_map(|(spec, info)| {
+                if let ResolvableStatus::Resolvable(res) = &info.status {
+                    Some((res.clone(), spec.clone()))
+                } else {
+                    None
+                }
+            })
+            .collect();
         let urls = to_integrate
             .iter()
             .filter_map(|m| {
@@ -552,8 +620,25 @@ fn integrate(
             })
             .collect::<Vec<&ModResolution>>();
 
-        println!("fetching mods...");
-        let paths = store.fetch_mods(&urls, update).await?;
+        let (tx, mut rx) = mpsc::channel::<FetchProgress>(10);
+
+        tokio::spawn(async move {
+            while let Some(progress) = rx.recv().await {
+                if let Some(spec) = res_map.get(progress.resolution()) {
+                    message_tx
+                        .send(message::Message::FetchModProgress(
+                            rid,
+                            spec.clone(),
+                            progress.into(),
+                        ))
+                        .await
+                        .unwrap();
+                    ctx.request_repaint();
+                }
+            }
+        });
+
+        let paths = store.fetch_mods(&urls, update, Some(tx)).await?;
 
         crate::integrate::integrate(path_game, to_integrate.into_iter().zip(paths).collect())?;
 
@@ -563,9 +648,12 @@ fn integrate(
     Some((
         rid,
         tokio::task::spawn(async move {
-            let res = integrate(store, mods).await;
-            tx.send(message::Message::Integrate(rid, res)).unwrap();
+            let res = integrate(store, ctx.clone(), mods, rid, tx.clone()).await;
+            tx.send(message::Message::Integrate(rid, res))
+                .await
+                .unwrap();
             ctx.request_repaint();
         }),
+        Default::default(),
     ))
 }

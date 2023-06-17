@@ -8,6 +8,7 @@ use crate::state::config::ConfigWrapper;
 use anyhow::{Context, Result};
 
 use serde::{Deserialize, Serialize};
+use tokio::sync::mpsc::Sender;
 
 use std::collections::{HashMap, HashSet};
 
@@ -141,18 +142,37 @@ impl ModStore {
             };
         }
     }
-    pub async fn fetch_mods(&self, mods: &[&ModResolution], update: bool) -> Result<Vec<PathBuf>> {
+    pub async fn fetch_mods(
+        &self,
+        mods: &[&ModResolution],
+        update: bool,
+        tx: Option<Sender<FetchProgress>>,
+    ) -> Result<Vec<PathBuf>> {
         use futures::stream::{self, StreamExt, TryStreamExt};
 
-        stream::iter(mods.iter().map(|res| self.fetch_mod(res, update)))
-            .boxed() // without this the future becomes !Send https://github.com/rust-lang/rust/issues/104382
-            .buffered(5)
-            .try_collect::<Vec<_>>()
-            .await
+        stream::iter(
+            mods.iter()
+                .map(|res| self.fetch_mod(res, update, tx.clone())),
+        )
+        .boxed() // without this the future becomes !Send https://github.com/rust-lang/rust/issues/104382
+        .buffered(5)
+        .try_collect::<Vec<_>>()
+        .await
     }
-    pub async fn fetch_mod(&self, res: &ModResolution, update: bool) -> Result<PathBuf> {
+    pub async fn fetch_mod(
+        &self,
+        res: &ModResolution,
+        update: bool,
+        tx: Option<Sender<FetchProgress>>,
+    ) -> Result<PathBuf> {
         self.get_provider(&res.url)?
-            .fetch_mod(res, update, self.cache.clone(), &self.blob_cache.clone())
+            .fetch_mod(
+                res,
+                update,
+                self.cache.clone(),
+                &self.blob_cache.clone(),
+                tx,
+            )
             .await
     }
     pub fn get_mod_info(&self, spec: &ModSpecification) -> Option<ModInfo> {
@@ -174,6 +194,26 @@ impl ModStore {
 
 pub trait ReadSeek: Read + Seek + Send {}
 impl<T: Seek + Read + Send> ReadSeek for T {}
+
+#[derive(Debug)]
+pub enum FetchProgress {
+    Progress {
+        resolution: ModResolution,
+        progress: u64,
+        size: u64,
+    },
+    Complete {
+        resolution: ModResolution,
+    },
+}
+impl FetchProgress {
+    pub fn resolution(&self) -> &ModResolution {
+        match self {
+            FetchProgress::Progress { resolution, .. } => resolution,
+            FetchProgress::Complete { resolution, .. } => resolution,
+        }
+    }
+}
 
 /// Whether a mod can be resolved by clients or not
 #[derive(Debug, Clone)]
@@ -210,7 +250,7 @@ pub struct ModSpecification {
 }
 
 /// Points to a specific version of a specific mod
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Eq, Ord, PartialEq, PartialOrd, Hash)]
 pub struct ModResolution {
     pub url: String,
 }
@@ -230,6 +270,7 @@ pub trait ModProvider: Send + Sync + std::fmt::Debug {
         update: bool,
         cache: ProviderCache,
         blob_cache: &BlobCache,
+        tx: Option<Sender<FetchProgress>>,
     ) -> Result<PathBuf>;
     /// Check if provider is configured correctly
     async fn check(&self) -> Result<()>;
