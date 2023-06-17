@@ -640,7 +640,10 @@ fn integrate(
 
         let paths = store.fetch_mods(&urls, update, Some(tx)).await?;
 
-        crate::integrate::integrate(path_game, to_integrate.into_iter().zip(paths).collect())?;
+        tokio::task::spawn_blocking(|| {
+            crate::integrate::integrate(path_game, to_integrate.into_iter().zip(paths).collect())
+        })
+        .await??;
 
         Ok(())
     }
