@@ -138,11 +138,7 @@ impl App {
                                 );
                             }
                             Some(SpecFetchProgress::Complete) => {
-                                ui.add(
-                                    egui::ProgressBar::new(1.0)
-                                        .show_percentage()
-                                        .desired_width(100.0),
-                                );
+                                ui.add(egui::ProgressBar::new(1.0).desired_width(100.0));
                             }
                             None => {
                                 ui.spinner();
@@ -440,8 +436,11 @@ impl eframe::App for App {
                         );
                     }
                 });
-                if self.integrate_rid.is_some() && ui.button("cancel").clicked() {
-                    self.integrate_rid.take().unwrap().1.abort();
+                if self.integrate_rid.is_some() {
+                    if ui.button("cancel").clicked() {
+                        self.integrate_rid.take().unwrap().1.abort();
+                    }
+                    ui.spinner();
                 }
             });
         });
@@ -540,7 +539,7 @@ impl eframe::App for App {
             ctx.input(|i| {
                 for e in &i.events {
                     if let egui::Event::Paste(s) = e {
-                        if ctx.memory(|m| m.focus().is_none()) {
+                        if self.integrate_rid.is_none() && ctx.memory(|m| m.focus().is_none()) {
                             self.resolve_mod = s.to_string();
                             self.add_mod(ctx);
                         }
