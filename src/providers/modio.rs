@@ -128,6 +128,21 @@ impl ModioMod {
 
         Ok(ModioMod::new(mod_, files))
     }
+    async fn fetch_files(modio: &modio::Modio, mod_: modio::mods::Mod) -> Result<Self> {
+        use modio::filter::NotEq;
+        use modio::mods::filters::Id;
+
+        let files = modio
+            .game(MODIO_DRG_ID)
+            .mod_(mod_.id)
+            .files()
+            .search(Id::ne(0))
+            .collect()
+            .await?;
+        let mod_ = modio.game(MODIO_DRG_ID).mod_(mod_.id).get().await?;
+
+        Ok(ModioMod::new(mod_, files))
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -293,11 +308,13 @@ impl ModProvider for ModioProvider {
                         name_map.insert(m.id, m.name_id.to_string());
                     }
 
-                    let mut lock = cache.write().unwrap();
-                    let c = lock.get_mut::<ModioCache>(MODIO_PROVIDER_ID);
                     for m in mods {
-                        c.mod_id_map.insert(m.name_id.to_owned(), m.id);
-                        c.mods.insert(m.id, ModioMod::new(m, vec![])); // TODO move files out of mod struct
+                        let id = m.id;
+                        let m = ModioMod::fetch_files(&self.modio, m).await?;
+                        let mut lock = cache.write().unwrap();
+                        let c = lock.get_mut::<ModioCache>(MODIO_PROVIDER_ID);
+                        c.mod_id_map.insert(m.name_id.to_owned(), id);
+                        c.mods.insert(id, m);
                     }
                 }
 
