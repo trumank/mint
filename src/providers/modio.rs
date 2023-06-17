@@ -459,6 +459,20 @@ impl ModProvider for ModioProvider {
             Err(anyhow!("download URL must be fully specified"))
         }
     }
+
+    async fn check(&self) -> Result<()> {
+        use modio::filter::Eq;
+        use modio::mods::filters::Id;
+
+        self.modio
+            .game(MODIO_DRG_ID)
+            .mods()
+            .search(Id::eq(0))
+            .collect()
+            .await?;
+        Ok(())
+    }
+
     fn get_mod_info(&self, spec: &ModSpecification, cache: ProviderCache) -> Option<ModInfo> {
         let url = &spec.url;
         let captures = RE_MOD.captures(url)?;

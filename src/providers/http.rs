@@ -139,6 +139,9 @@ impl ModProvider for HttpProvider {
             },
         )
     }
+    async fn check(&self) -> Result<()> {
+        Ok(())
+    }
     fn get_mod_info(&self, spec: &ModSpecification, _cache: ProviderCache) -> Option<ModInfo> {
         let url = url::Url::parse(&spec.url).ok()?;
         let name = url

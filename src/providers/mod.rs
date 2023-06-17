@@ -61,6 +61,19 @@ impl ModStore {
             .insert(provider_factory.id, provider);
         Ok(())
     }
+    pub async fn add_provider_checked(
+        &self,
+        provider_factory: &ProviderFactory,
+        parameters: &HashMap<String, String>,
+    ) -> Result<()> {
+        let provider = (provider_factory.new)(parameters)?;
+        provider.check().await?;
+        self.providers
+            .write()
+            .unwrap()
+            .insert(provider_factory.id, provider);
+        Ok(())
+    }
     pub fn get_provider(&self, url: &str) -> Result<Arc<dyn ModProvider>> {
         let factory = inventory::iter::<ProviderFactory>()
             .find(|f| (f.can_provide)(url))
@@ -221,6 +234,8 @@ pub trait ModProvider: Send + Sync + std::fmt::Debug {
         cache: ProviderCache,
         blob_cache: &BlobCache,
     ) -> Result<PathBuf>;
+    /// Check if provider is configured correctly
+    async fn check(&self) -> Result<()>;
     fn get_mod_info(&self, spec: &ModSpecification, cache: ProviderCache) -> Option<ModInfo>;
     fn is_pinned(&self, spec: &ModSpecification, cache: ProviderCache) -> bool;
     fn get_version_name(&self, spec: &ModSpecification, cache: ProviderCache) -> Option<String>;

@@ -2,9 +2,12 @@ mod message;
 
 //#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")] // hide console window on Windows in release
 
-use std::sync::{
-    mpsc::{Receiver, Sender},
-    Arc,
+use std::{
+    collections::HashMap,
+    sync::{
+        mpsc::{Receiver, Sender},
+        Arc,
+    },
 };
 
 use anyhow::{anyhow, Result};
@@ -14,7 +17,7 @@ use tokio::task::JoinHandle;
 use crate::{
     error::IntegrationError,
     find_drg,
-    providers::{ModResolution, ModSpecification, ModStore, ResolvableStatus},
+    providers::{ModResolution, ModSpecification, ModStore, ProviderFactory, ResolvableStatus},
     state::{ModConfig, State},
 };
 
@@ -45,6 +48,7 @@ struct App {
     integrate_rid: Option<(RequestID, JoinHandle<()>)>,
     request_counter: RequestCounter,
     dnd: egui_dnd::DragDropUi,
+    window_provider_parameters: Option<WindowProviderParameters>,
 }
 
 impl App {
@@ -63,6 +67,7 @@ impl App {
             resolve_mod_rid: None,
             integrate_rid: None,
             dnd: Default::default(),
+            window_provider_parameters: None,
         })
     }
 
@@ -188,6 +193,85 @@ impl App {
         });
         self.resolve_mod_rid = Some(rid);
     }
+
+    fn show_provider_parameters(&mut self, ctx: &egui::Context) {
+        let Some(window) = &mut self.window_provider_parameters else { return };
+
+        if let Ok((rid, res)) = window.rx.try_recv() {
+            if window.check_rid.as_ref().map_or(false, |r| rid == r.0) {
+                match res {
+                    Ok(()) => {
+                        let window = self.window_provider_parameters.take().unwrap();
+                        self.state
+                            .config
+                            .provider_parameters
+                            .insert(window.factory.id.to_string(), window.parameters);
+                        self.state.config.save().unwrap();
+                        return;
+                    }
+                    Err(e) => {
+                        window.check_error = Some(e.to_string());
+                    }
+                }
+                window.check_rid = None;
+            }
+        }
+
+        let mut open = true;
+        let mut check = false;
+        egui::Window::new(format!("configure {} provider", window.factory.id))
+            .open(&mut open)
+            .resizable(false)
+            .show(ctx, |ui| {
+                ui.add_enabled_ui(window.check_rid.is_none(), |ui| {
+                    egui::Grid::new("grid").num_columns(2).show(ui, |ui| {
+                        for p in window.factory.parameters {
+                            ui.label(p.name).on_hover_text(p.description);
+                            let res = ui.add(
+                                egui::TextEdit::singleline(
+                                    window.parameters.entry(p.id.to_string()).or_default(),
+                                )
+                                .password(true)
+                                .desired_width(200.0),
+                            );
+                            if is_committed(&res) {
+                                check = true;
+                            }
+                            ui.end_row();
+                        }
+                    });
+
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::TOP), |ui| {
+                        if ui.button("check").clicked() {
+                            check = true;
+                        }
+                        if window.check_rid.is_some() {
+                            ui.spinner();
+                        }
+                        if let Some(error) = &window.check_error {
+                            ui.colored_label(ui.visuals().error_fg_color, error);
+                        }
+                    });
+                });
+            });
+        if !open {
+            self.window_provider_parameters = None;
+        } else if check {
+            window.check_error = None;
+            let tx = window.tx.clone();
+            let ctx = ctx.clone();
+            let rid = self.request_counter.next();
+            let store = self.state.store.clone();
+            let params = window.parameters.clone();
+            let factory = window.factory;
+            let handle = tokio::task::spawn(async move {
+                let res = store.add_provider_checked(factory, &params).await;
+                tx.send((rid, res)).unwrap();
+                ctx.request_repaint();
+            });
+            window.check_rid = Some((rid, handle));
+        }
+    }
 }
 
 mod request_counter {
@@ -207,6 +291,33 @@ mod request_counter {
     #[derive(Debug, Clone, Copy, Eq, PartialEq)]
     pub struct RequestID {
         id: u32,
+    }
+}
+
+struct WindowProviderParameters {
+    tx: Sender<(RequestID, Result<()>)>,
+    rx: Receiver<(RequestID, Result<()>)>,
+    check_rid: Option<(RequestID, JoinHandle<()>)>,
+    check_error: Option<String>,
+    factory: &'static ProviderFactory,
+    parameters: HashMap<String, String>,
+}
+impl WindowProviderParameters {
+    fn new(factory: &'static ProviderFactory, state: &mut State) -> Self {
+        let (tx, rx) = std::sync::mpsc::channel();
+        Self {
+            tx,
+            rx,
+            check_rid: None,
+            check_error: None,
+            parameters: state
+                .config
+                .provider_parameters
+                .get(factory.id)
+                .cloned()
+                .unwrap_or_default(),
+            factory,
+        }
     }
 }
 
@@ -230,26 +341,10 @@ impl eframe::App for App {
                                 self.state.profiles.save().unwrap();
                             }
                             Err(e) => match e.downcast::<IntegrationError>() {
-                                Ok(IntegrationError::NoProvider { url, factory }) => {
-                                    println!("Initializing provider for {:?}", url);
-                                    let params = self
-                                        .state
-                                        .config
-                                        .provider_parameters
-                                        .entry(factory.id.to_owned())
-                                        .or_default();
-                                    for p in factory.parameters {
-                                        if !params.contains_key(p.name) {
-                                            let value = dialoguer::Password::with_theme(
-                                                &dialoguer::theme::ColorfulTheme::default(),
-                                            )
-                                            .with_prompt(p.description)
-                                            .interact()
-                                            .unwrap();
-                                            params.insert(p.id.to_owned(), value);
-                                        }
-                                    }
-                                    //self.store.add_provider(factory, params).unwrap();
+                                Ok(IntegrationError::NoProvider { url: _, factory }) => {
+                                    self.window_provider_parameters = Some(
+                                        WindowProviderParameters::new(factory, &mut self.state),
+                                    );
                                 }
                                 Err(e) => {
                                     self.log.push_str(&format!("{:#?}\n", e));
@@ -265,9 +360,16 @@ impl eframe::App for App {
                             Ok(()) => {
                                 self.log.push_str("Integration complete\n");
                             }
-                            Err(e) => {
-                                self.log.push_str(&format!("{:#?}\n", e));
-                            }
+                            Err(e) => match e.downcast::<IntegrationError>() {
+                                Ok(IntegrationError::NoProvider { url: _, factory }) => {
+                                    self.window_provider_parameters = Some(
+                                        WindowProviderParameters::new(factory, &mut self.state),
+                                    );
+                                }
+                                Err(e) => {
+                                    self.log.push_str(&format!("{:#?}\n", e));
+                                }
+                            },
                         }
                         self.integrate_rid = None;
                     }
@@ -276,6 +378,9 @@ impl eframe::App for App {
         }
 
         // begin draw
+
+        self.show_provider_parameters(ctx);
+
         egui::SidePanel::left("left_panel").show(ctx, |ui| {
             ui.with_layout(
                 egui::Layout::top_down_justified(egui::Align::Center),
@@ -435,18 +540,7 @@ fn integrate(
 
         let update = false;
 
-        let mods = loop {
-            match store.resolve_mods(&mod_specs, update).await {
-                Ok(mods) => break mods,
-                Err(e) => match e.downcast::<IntegrationError>() {
-                    Ok(IntegrationError::NoProvider { url: _, factory: _ }) => {
-                        // TODO providers should already be initialized by now?
-                        unimplemented!();
-                    }
-                    Err(e) => return Err(e),
-                },
-            }
-        };
+        let mods = store.resolve_mods(&mod_specs, update).await?;
 
         let to_integrate = mod_specs
             .iter()

@@ -73,6 +73,10 @@ impl ModProvider for FileProvider {
         Ok(PathBuf::from(&res.url))
     }
 
+    async fn check(&self) -> Result<()> {
+        Ok(())
+    }
+
     fn get_mod_info(&self, spec: &ModSpecification, _cache: ProviderCache) -> Option<ModInfo> {
         let path = Path::new(&spec.url);
         let name = path
