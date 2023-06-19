@@ -5,7 +5,10 @@ mod message;
 use std::{collections::HashMap, sync::Arc};
 
 use anyhow::{anyhow, Context, Result};
-use eframe::{egui, epaint::text::LayoutJob};
+use eframe::{
+    egui::{self, TextFormat},
+    epaint::{text::LayoutJob, Color32},
+};
 use tokio::{
     sync::mpsc::{self, Receiver, Sender},
     task::JoinHandle,
@@ -52,6 +55,7 @@ struct App {
     request_counter: RequestCounter,
     dnd: egui_dnd::DragDropUi,
     window_provider_parameters: Option<WindowProviderParameters>,
+    search_string: Option<String>,
 }
 
 impl App {
@@ -71,6 +75,7 @@ impl App {
             integrate_rid: None,
             dnd: Default::default(),
             window_provider_parameters: None,
+            search_string: Default::default(),
         })
     }
 
@@ -175,7 +180,24 @@ impl App {
                                 }
                             });
 
-                        ui.hyperlink_to(&info.name, &item.item.spec.url);
+                        let mut job = LayoutJob::default();
+                        if let Some(search_string) = &self.search_string {
+                            for (is_match, chunk) in FindString::new(&info.name, search_string) {
+                                let background = if is_match {
+                                    TextFormat {
+                                        background: Color32::from_rgb(128, 32, 32),
+                                        ..Default::default()
+                                    }
+                                } else {
+                                    Default::default()
+                                };
+                                job.append(chunk, 0.0, background);
+                            }
+                        } else {
+                            job.append(&info.name, 0.0, Default::default());
+                        }
+
+                        ui.hyperlink_to(job, &item.item.spec.url);
                     } else {
                         ui.hyperlink(&item.item.spec.url);
                     }
@@ -536,13 +558,32 @@ impl eframe::App for App {
 
             self.ui_profile(ui);
 
+            if let Some(search_string) = &mut self.search_string {
+                let res = ui
+                    .child_ui(ui.max_rect(), egui::Layout::bottom_up(egui::Align::RIGHT))
+                    .add(egui::TextEdit::singleline(search_string));
+                if res.lost_focus() {
+                    self.search_string = None;
+                } else if !res.has_focus() {
+                    res.request_focus();
+                }
+            }
+
             ctx.input(|i| {
                 for e in &i.events {
-                    if let egui::Event::Paste(s) = e {
-                        if self.integrate_rid.is_none() && ctx.memory(|m| m.focus().is_none()) {
-                            self.resolve_mod = s.to_string();
-                            self.add_mod(ctx);
+                    match e {
+                        egui::Event::Paste(s) => {
+                            if self.integrate_rid.is_none() && ctx.memory(|m| m.focus().is_none()) {
+                                self.resolve_mod = s.to_string();
+                                self.add_mod(ctx);
+                            }
                         }
+                        egui::Event::Text(text) => {
+                            if ctx.memory(|m| m.focus().is_none()) {
+                                self.search_string = Some(text.to_string());
+                            }
+                        }
+                        _ => {}
                     }
                 }
             });
@@ -658,4 +699,63 @@ fn integrate(
         }),
         Default::default(),
     ))
+}
+struct FindString<'data> {
+    string: &'data str,
+    string_lower: String,
+    needle: &'data str,
+    needle_lower: String,
+    curr: usize,
+    curr_match: bool,
+    finished: bool,
+}
+impl<'data> FindString<'data> {
+    fn new(string: &'data str, needle: &'data str) -> Self {
+        Self {
+            string,
+            string_lower: string.to_lowercase(),
+            needle,
+            needle_lower: needle.to_lowercase(),
+            curr: 0,
+            curr_match: false,
+            finished: false,
+        }
+    }
+    fn next_internal(&mut self) -> Option<(bool, &'data str)> {
+        if self.finished {
+            None
+        } else if self.needle.is_empty() {
+            self.finished = true;
+            Some((false, self.string))
+        } else if self.curr_match {
+            self.curr_match = false;
+            Some((true, &self.string[self.curr - self.needle.len()..self.curr]))
+        } else if let Some(index) = self.string_lower[self.curr..].find(&self.needle_lower) {
+            let next = self.curr + index;
+            let chunk = &self.string[self.curr..next];
+            self.curr = next + self.needle.len();
+            self.curr_match = true;
+            Some((false, chunk))
+        } else {
+            self.finished = true;
+            Some((false, &self.string[self.curr..]))
+        }
+    }
+}
+
+impl<'data> Iterator for FindString<'data> {
+    type Item = (bool, &'data str);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.string.is_empty() {
+            return None;
+        }
+        // skip empty chunks
+        while let Some(chunk) = self.next_internal() {
+            if !chunk.1.is_empty() {
+                return Some(chunk);
+            }
+        }
+        None
+    }
 }
