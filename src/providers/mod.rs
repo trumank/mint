@@ -105,7 +105,7 @@ impl ModStore {
                     .map(|u| self.resolve_mod(u.to_owned(), update)),
             )
             .boxed()
-            .buffered(5)
+            .buffer_unordered(5)
             .try_collect::<Vec<_>>()
             .await?
             {
@@ -155,7 +155,7 @@ impl ModStore {
                 .map(|res| self.fetch_mod(res, update, tx.clone())),
         )
         .boxed() // without this the future becomes !Send https://github.com/rust-lang/rust/issues/104382
-        .buffered(5)
+        .buffer_unordered(5)
         .try_collect::<Vec<_>>()
         .await
     }
