@@ -429,16 +429,6 @@ impl eframe::App for App {
 
         self.show_provider_parameters(ctx);
 
-        egui::SidePanel::left("left_panel").show(ctx, |ui| {
-            ui.with_layout(
-                egui::Layout::top_down_justified(egui::Align::Center),
-                |ui| {
-                    egui::ScrollArea::both().show(ui, |ui| {
-                        ui.add(egui::TextEdit::multiline(&mut self.log.as_str()));
-                    });
-                },
-            );
-        });
         egui::TopBottomPanel::bottom("bottom_panel").show(ctx, |ui| {
             ui.with_layout(egui::Layout::right_to_left(egui::Align::TOP), |ui| {
                 ui.add_enabled_ui(self.integrate_rid.is_none(), |ui| {
