@@ -2,7 +2,7 @@ mod message;
 
 //#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")] // hide console window on Windows in release
 
-use std::{collections::HashMap, sync::Arc};
+use std::{collections::HashMap, path::PathBuf, sync::Arc};
 
 use anyhow::{anyhow, Context, Result};
 use eframe::{
@@ -16,7 +16,7 @@ use tokio::{
 
 use crate::{
     error::IntegrationError,
-    find_drg,
+    is_drg_pak,
     providers::{
         FetchProgress, ModResolution, ModSpecification, ModStore, ProviderFactory, ResolvableStatus,
     },
@@ -56,6 +56,7 @@ struct App {
     dnd: egui_dnd::DragDropUi,
     window_provider_parameters: Option<WindowProviderParameters>,
     search_string: Option<String>,
+    settings_window: Option<WindowSettings>,
 }
 
 impl App {
@@ -76,6 +77,7 @@ impl App {
             dnd: Default::default(),
             window_provider_parameters: None,
             search_string: Default::default(),
+            settings_window: None,
         })
     }
 
@@ -313,6 +315,67 @@ impl App {
             window.check_rid = Some((rid, handle));
         }
     }
+
+    fn show_settings(&mut self, ctx: &egui::Context) {
+        if let Some(window) = &mut self.settings_window {
+            let mut open = true;
+            let mut try_save = false;
+            egui::Window::new("Settings")
+                .open(&mut open)
+                .resizable(false)
+                .show(ctx, |ui| {
+                    egui::Grid::new("grid").num_columns(2).show(ui, |ui| {
+                        ui.label("DRG pak").on_hover_text("Path to FSD-WindowsNoEditor.pak (FSD-WinGDK.pak for Microsoft Store version)\nLocated inside the \"Deep Rock Galactic\" installation directory under FSD/Content/Paks.");
+                        ui.horizontal(|ui| {
+                            let res = ui.add(
+                                egui::TextEdit::singleline(
+                                    &mut window.drg_pak_path
+                                )
+                                .desired_width(200.0),
+                            );
+                            if res.changed() {
+                                window.drg_pak_path_err = None;
+                            }
+                            if is_committed(&res) {
+                                try_save = true;
+                            }
+                            if ui.button("browse").clicked() {
+                                if let Some(fsd_pak) = rfd::FileDialog::new()
+                                    .add_filter("DRG Pak", &["pak"])
+                                    .pick_file()
+                                {
+                                    window.drg_pak_path = fsd_pak.to_string_lossy().to_string();
+                                    window.drg_pak_path_err = None;
+                                }
+                            }
+                        });
+                        ui.end_row();
+                    });
+
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::TOP), |ui| {
+                        if ui.add_enabled(window.drg_pak_path_err.is_none(), egui::Button::new("save")).clicked() {
+                            try_save = true;
+                        }
+                        if let Some(error) = &window.drg_pak_path_err {
+                            ui.colored_label(ui.visuals().error_fg_color, error);
+                        }
+                    });
+
+                });
+            if try_save {
+                if let Err(e) = is_drg_pak(&window.drg_pak_path).context("Is not valid DRG pak") {
+                    window.drg_pak_path_err = Some(e.to_string());
+                } else {
+                    self.state.config.drg_pak_path = Some(PathBuf::from(
+                        self.settings_window.take().unwrap().drg_pak_path,
+                    ));
+                    self.state.config.save().unwrap();
+                }
+            } else if !open {
+                self.settings_window = None;
+            }
+        }
+    }
 }
 
 mod request_counter {
@@ -358,6 +421,25 @@ impl WindowProviderParameters {
                 .cloned()
                 .unwrap_or_default(),
             factory,
+        }
+    }
+}
+
+struct WindowSettings {
+    drg_pak_path: String,
+    drg_pak_path_err: Option<String>,
+}
+impl WindowSettings {
+    fn new(state: &mut State) -> Self {
+        let path = state
+            .config
+            .drg_pak_path
+            .as_ref()
+            .map(|p| p.to_string_lossy().to_string())
+            .unwrap_or_default();
+        Self {
+            drg_pak_path: path,
+            drg_pak_path_err: None,
         }
     }
 }
@@ -428,31 +510,45 @@ impl eframe::App for App {
         // begin draw
 
         self.show_provider_parameters(ctx);
+        self.show_settings(ctx);
 
         egui::TopBottomPanel::bottom("bottom_panel").show(ctx, |ui| {
             ui.with_layout(egui::Layout::right_to_left(egui::Align::TOP), |ui| {
-                ui.add_enabled_ui(self.integrate_rid.is_none(), |ui| {
-                    if ui.button("integrate").clicked() {
-                        self.integrate_rid = integrate(
-                            &mut self.request_counter,
-                            self.state.store.clone(),
-                            self.state
-                                .profiles
-                                .get_active_profile()
-                                .mods
-                                .iter()
-                                .map(|m| m.spec.clone())
-                                .collect(),
-                            self.tx.clone(),
-                            ctx.clone(),
-                        );
-                    }
-                });
+                ui.add_enabled_ui(
+                    self.integrate_rid.is_none() && self.state.config.drg_pak_path.is_some(),
+                    |ui| {
+                        let mut button = ui.button("install");
+                        if self.state.config.drg_pak_path.is_none() {
+                            button = button.on_disabled_hover_text(
+                                "DRG install not found. Configure it in via the settings menu",
+                            );
+                        }
+                        if button.clicked() {
+                            self.integrate_rid = integrate(
+                                &mut self.request_counter,
+                                self.state.store.clone(),
+                                self.state
+                                    .profiles
+                                    .get_active_profile()
+                                    .mods
+                                    .iter()
+                                    .map(|m| m.spec.clone())
+                                    .collect(),
+                                self.state.config.drg_pak_path.as_ref().unwrap().clone(),
+                                self.tx.clone(),
+                                ctx.clone(),
+                            );
+                        }
+                    },
+                );
                 if self.integrate_rid.is_some() {
                     if ui.button("cancel").clicked() {
                         self.integrate_rid.take().unwrap().1.abort();
                     }
                     ui.spinner();
+                }
+                if ui.button("⚙").on_hover_text("Open settings").clicked() {
+                    self.settings_window = Some(WindowSettings::new(&mut self.state));
                 }
             });
         });
@@ -603,6 +699,7 @@ fn integrate(
     rc: &mut RequestCounter,
     store: Arc<ModStore>,
     mods: Vec<ModSpecification>,
+    fsd_pak: PathBuf,
     tx: Sender<message::Message>,
     ctx: egui::Context,
 ) -> Option<(
@@ -616,11 +713,10 @@ fn integrate(
         store: Arc<ModStore>,
         ctx: egui::Context,
         mod_specs: Vec<ModSpecification>,
+        fsd_pak: PathBuf,
         rid: RequestID,
         message_tx: Sender<message::Message>,
     ) -> Result<()> {
-        let path_game = find_drg().context("Could not find DRG install directory")?;
-
         let update = false;
 
         let mods = store.resolve_mods(&mod_specs, update).await?;
@@ -683,7 +779,7 @@ fn integrate(
             })
             .collect();
 
-        tokio::task::spawn_blocking(|| crate::integrate::integrate(path_game, mods)).await??;
+        tokio::task::spawn_blocking(|| crate::integrate::integrate(fsd_pak, mods)).await??;
 
         Ok(())
     }
@@ -691,7 +787,7 @@ fn integrate(
     Some((
         rid,
         tokio::task::spawn(async move {
-            let res = integrate(store, ctx.clone(), mods, rid, tx.clone()).await;
+            let res = integrate(store, ctx.clone(), mods, fsd_pak, rid, tx.clone()).await;
             tx.send(message::Message::Integrate(rid, res))
                 .await
                 .unwrap();

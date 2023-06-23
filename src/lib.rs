@@ -15,9 +15,19 @@ use error::IntegrationError;
 use providers::{ModResolution, ModSpecification, ProviderFactory, ResolvableStatus};
 use state::State;
 
-pub fn find_drg() -> Option<PathBuf> {
-    steamlocate::SteamDir::locate()
-        .and_then(|mut steamdir| steamdir.app(&548430).map(|a| a.path.to_path_buf()))
+pub fn find_drg_pak() -> Option<PathBuf> {
+    steamlocate::SteamDir::locate().and_then(|mut steamdir| {
+        steamdir
+            .app(&548430)
+            .map(|a| a.path.join("FSD/Content/Paks/FSD-WindowsNoEditor.pak"))
+    })
+}
+
+pub fn is_drg_pak<P: AsRef<Path>>(path: P) -> Result<()> {
+    let mut reader = std::io::BufReader::new(std::fs::File::open(path)?);
+    let pak = repak::PakReader::new_any(&mut reader, None)?;
+    pak.get("FSD/FSD.uproject", &mut reader)?;
+    Ok(())
 }
 
 pub async fn resolve_and_integrate<P: AsRef<Path>>(

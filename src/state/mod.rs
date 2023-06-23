@@ -8,7 +8,10 @@ use std::{
 
 use anyhow::Result;
 
-use crate::providers::{ModSpecification, ModStore};
+use crate::{
+    find_drg_pak,
+    providers::{ModSpecification, ModStore},
+};
 
 use self::config::ConfigWrapper;
 
@@ -53,9 +56,18 @@ impl ModProfiles {
     }
 }
 
-#[derive(Debug, Default, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
 pub struct Config {
     pub provider_parameters: HashMap<String, HashMap<String, String>>,
+    pub drg_pak_path: Option<PathBuf>,
+}
+impl Default for Config {
+    fn default() -> Self {
+        Self {
+            provider_parameters: Default::default(),
+            drg_pak_path: find_drg_pak(),
+        }
+    }
 }
 
 pub struct State {

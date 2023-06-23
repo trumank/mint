@@ -28,10 +28,15 @@ use unreal_asset::{
     Asset,
 };
 
-pub fn integrate<P: AsRef<Path>>(path_game: P, mods: Vec<(ModInfo, PathBuf)>) -> Result<()> {
-    let path_paks = Path::join(path_game.as_ref(), "FSD/Content/Paks/");
-    let path_pak = Path::join(&path_paks, "FSD-WindowsNoEditor.pak");
-    let path_mod_pak = Path::join(&path_paks, "mods_P.pak");
+pub fn integrate<P: AsRef<Path>>(path_pak: P, mods: Vec<(ModInfo, PathBuf)>) -> Result<()> {
+    let path_paks = path_pak.as_ref().parent().with_context(|| {
+        format!(
+            "Could not derive Paks directory from {}",
+            path_pak.as_ref().display()
+        )
+    })?;
+    let path_pak = Path::join(path_paks, "FSD-WindowsNoEditor.pak");
+    let path_mod_pak = Path::join(path_paks, "mods_P.pak");
 
     let mut fsd_pak_reader = BufReader::new(File::open(path_pak)?);
     let fsd_pak = repak::PakReader::new_any(&mut fsd_pak_reader, None)?;

@@ -4,7 +4,7 @@ use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 
 use drg_mod_integration::{
-    find_drg,
+    find_drg_pak,
     gui::gui,
     providers::{ModSpecification, ProviderFactory},
     resolve_and_integrate_with_provider_init,
@@ -14,9 +14,11 @@ use drg_mod_integration::{
 /// Command line integration tool.
 #[derive(Parser, Debug)]
 struct ActionIntegrate {
-    /// Path to the "Deep Rock Galactic" installation directory. Only necessary if it cannot be found automatically.
+    /// Path to FSD-WindowsNoEditor.pak (FSD-WinGDK.pak for Microsoft Store version) located
+    /// inside the "Deep Rock Galactic" installation directory under FSD/Content/Paks. Only
+    /// necessary if it cannot be found automatically.
     #[arg(short, long)]
-    drg: Option<PathBuf>,
+    fsd_pak: Option<PathBuf>,
 
     /// Update mods. By default all mods and metadata are cached offline so this is necessary to check for updates.
     #[arg(short, long)]
@@ -36,9 +38,11 @@ struct ActionIntegrate {
 /// Integrate a profile
 #[derive(Parser, Debug)]
 struct ActionIntegrateProfile {
-    /// Path to the "Deep Rock Galactic" installation directory. Only necessary if it cannot be found automatically.
+    /// Path to FSD-WindowsNoEditor.pak (FSD-WinGDK.pak for Microsoft Store version) located
+    /// inside the "Deep Rock Galactic" installation directory under FSD/Content/Paks. Only
+    /// necessary if it cannot be found automatically.
     #[arg(short, long)]
-    drg: Option<PathBuf>,
+    fsd_pak: Option<PathBuf>,
 
     /// Update mods. By default all mods and metadata are cached offline so this is necessary to check for updates.
     #[arg(short, long)]
@@ -108,9 +112,10 @@ fn init_provider(state: &mut State, url: String, factory: &ProviderFactory) -> R
 }
 
 async fn action_integrate(action: ActionIntegrate) -> Result<()> {
-    let path_game = action.drg.or_else(find_drg).context(
-        "Could not find DRG install directory, please specify manually with the --drg flag",
-    )?;
+    let path_game_pak = action
+        .fsd_pak
+        .or_else(find_drg_pak)
+        .context("Could not find DRG pak file, please specify manually with the --fsd_pak flag")?;
 
     let mut state = State::new()?;
 
@@ -121,7 +126,7 @@ async fn action_integrate(action: ActionIntegrate) -> Result<()> {
         .collect::<Vec<_>>();
 
     resolve_and_integrate_with_provider_init(
-        path_game,
+        path_game_pak,
         &mut state,
         &mod_specs,
         action.update,
@@ -131,9 +136,10 @@ async fn action_integrate(action: ActionIntegrate) -> Result<()> {
 }
 
 async fn action_integrate_profile(action: ActionIntegrateProfile) -> Result<()> {
-    let path_game = action.drg.or_else(find_drg).context(
-        "Could not find DRG install directory, please specify manually with the --drg flag",
-    )?;
+    let path_game_pak = action
+        .fsd_pak
+        .or_else(find_drg_pak)
+        .context("Could not find DRG pak file, please specify manually with the --fsd_pak flag")?;
 
     let mut state = State::new()?;
     let profile = &state.profiles.profiles[&action.profile];
@@ -145,7 +151,7 @@ async fn action_integrate_profile(action: ActionIntegrateProfile) -> Result<()> 
         .collect::<Vec<_>>();
 
     resolve_and_integrate_with_provider_init(
-        path_game,
+        path_game_pak,
         &mut state,
         &mod_specs,
         action.update,
