@@ -17,9 +17,7 @@ use tokio::{
 use crate::{
     error::IntegrationError,
     is_drg_pak,
-    providers::{
-        FetchProgress, ModResolution, ModSpecification, ModStore, ProviderFactory, ResolvableStatus,
-    },
+    providers::{FetchProgress, ModResolution, ModSpecification, ModStore, ProviderFactory},
     state::{ModConfig, State},
 };
 
@@ -729,23 +727,11 @@ fn integrate(
             .collect::<Vec<_>>();
         let res_map: HashMap<ModResolution, ModSpecification> = mods
             .iter()
-            .flat_map(|(spec, info)| {
-                if let ResolvableStatus::Resolvable(res) = &info.status {
-                    Some((res.clone(), spec.clone()))
-                } else {
-                    None
-                }
-            })
+            .map(|(spec, info)| (info.resolution.clone(), spec.clone()))
             .collect();
         let urls = to_integrate
             .iter()
-            .filter_map(|m| {
-                if let ResolvableStatus::Resolvable(res) = &m.status {
-                    Some(res)
-                } else {
-                    None
-                }
-            })
+            .map(|m| &m.resolution)
             .collect::<Vec<&ModResolution>>();
 
         let (tx, mut rx) = mpsc::channel::<FetchProgress>(10);
@@ -767,21 +753,11 @@ fn integrate(
         });
 
         let paths = store.fetch_mods(&urls, update, Some(tx)).await?;
-        let mut paths_iter = paths.into_iter();
 
-        let mods = to_integrate
-            .into_iter()
-            .map(|m| {
-                let path = match m.status {
-                    // TODO this is a hack, ModResolution should be able to hold the full path
-                    ResolvableStatus::Resolvable(_) => paths_iter.next().unwrap(),
-                    ResolvableStatus::Unresolvable { .. } => std::path::PathBuf::from(&m.spec.url),
-                };
-                (m, path)
-            })
-            .collect();
-
-        tokio::task::spawn_blocking(|| crate::integrate::integrate(fsd_pak, mods)).await??;
+        tokio::task::spawn_blocking(|| {
+            crate::integrate::integrate(fsd_pak, to_integrate.into_iter().zip(paths).collect())
+        })
+        .await??;
 
         Ok(())
     }

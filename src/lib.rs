@@ -12,7 +12,7 @@ use std::{
 use anyhow::Result;
 
 use error::IntegrationError;
-use providers::{ModResolution, ModSpecification, ProviderFactory, ResolvableStatus};
+use providers::{ModSpecification, ProviderFactory};
 use state::State;
 
 pub fn find_drg_pak() -> Option<PathBuf> {
@@ -38,33 +38,19 @@ pub async fn resolve_and_integrate<P: AsRef<Path>>(
 ) -> Result<()> {
     let mods = state.store.resolve_mods(mod_specs, update).await?;
 
-    println!("resolvable mods:");
-    for m in mod_specs {
-        if let ResolvableStatus::Resolvable(resolution) = &mods[m].status {
-            println!("{:?}", resolution);
-        }
-    }
-
     let mods_set = mod_specs
         .iter()
-        .flat_map(|m| match &mods[m].status {
-            ResolvableStatus::Resolvable(ModResolution { url }) => Some(url),
-            _ => None,
-        })
+        .flat_map(|m| [&mods[m].spec.url, &mods[m].resolution.url])
         .collect::<HashSet<_>>();
 
+    // TODO need more rebust way of detecting whether dependencies are missing
     let missing_deps = mod_specs
         .iter()
         .flat_map(|m| {
             mods[m]
                 .suggested_dependencies
                 .iter()
-                .filter_map(|m| match &mods[m].status {
-                    ResolvableStatus::Resolvable(ModResolution { url }) => {
-                        (!mods_set.contains(url)).then_some(url)
-                    }
-                    _ => Some(&m.url),
-                })
+                .filter_map(|m| (!mods_set.contains(&m.url)).then_some(&m.url))
         })
         .collect::<HashSet<_>>();
     if !missing_deps.is_empty() {
@@ -80,14 +66,8 @@ pub async fn resolve_and_integrate<P: AsRef<Path>>(
         .collect::<Vec<_>>();
     let urls = to_integrate
         .iter()
-        .filter_map(|m| {
-            if let ResolvableStatus::Resolvable(res) = &m.status {
-                Some(res)
-            } else {
-                None
-            }
-        })
-        .collect::<Vec<&ModResolution>>();
+        .map(|m| &m.resolution)
+        .collect::<Vec<_>>();
 
     println!("fetching mods...");
     let paths = state.store.fetch_mods(&urls, update, None).await?;

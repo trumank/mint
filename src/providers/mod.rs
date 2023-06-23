@@ -216,12 +216,12 @@ impl FetchProgress {
 }
 
 /// Whether a mod can be resolved by clients or not
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Eq, Ord, PartialEq, PartialOrd, Hash)]
 pub enum ResolvableStatus {
     /// If a mod can not be resolved, specify just a name
-    Unresolvable { name: String },
+    Unresolvable,
     /// If a mod can be resolved, specify the URL
-    Resolvable(ModResolution),
+    Resolvable,
 }
 
 /// Returned from ModStore
@@ -231,7 +231,7 @@ pub struct ModInfo {
     pub name: String,
     pub spec: ModSpecification,          // unpinned version
     pub versions: Vec<ModSpecification>, // pinned versions TODO make this a different type
-    pub status: ResolvableStatus,
+    pub resolution: ModResolution,
     pub suggested_require: bool,
     pub suggested_dependencies: Vec<ModSpecification>, // ModResponse
 }
@@ -253,6 +253,21 @@ pub struct ModSpecification {
 #[derive(Debug, Clone, Eq, Ord, PartialEq, PartialOrd, Hash)]
 pub struct ModResolution {
     pub url: String,
+    pub status: ResolvableStatus,
+}
+impl ModResolution {
+    fn resolvable(url: String) -> Self {
+        Self {
+            url,
+            status: ResolvableStatus::Resolvable,
+        }
+    }
+    fn unresolvable(url: String) -> Self {
+        Self {
+            url,
+            status: ResolvableStatus::Unresolvable,
+        }
+    }
 }
 
 #[async_trait::async_trait]

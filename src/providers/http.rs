@@ -7,7 +7,7 @@ use tokio::sync::mpsc::Sender;
 
 use super::{
     BlobCache, BlobRef, FetchProgress, ModInfo, ModProvider, ModProviderCache, ModResolution,
-    ModResponse, ModSpecification, ProviderCache, ResolvableStatus,
+    ModResponse, ModSpecification, ProviderCache,
 };
 
 inventory::submit! {
@@ -85,9 +85,7 @@ impl ModProvider for HttpProvider {
             name,
             spec: spec.clone(),
             versions: vec![],
-            status: ResolvableStatus::Resolvable(ModResolution {
-                url: spec.url.to_owned(),
-            }),
+            resolution: ModResolution::resolvable(spec.url.to_owned()),
             suggested_require: false,
             suggested_dependencies: vec![],
         }))
@@ -190,9 +188,7 @@ impl ModProvider for HttpProvider {
             name,
             spec: spec.clone(),
             versions: vec![],
-            status: ResolvableStatus::Resolvable(ModResolution {
-                url: spec.url.to_owned(),
-            }),
+            resolution: ModResolution::resolvable(spec.url.to_owned()),
             suggested_require: false,
             suggested_dependencies: vec![],
         })

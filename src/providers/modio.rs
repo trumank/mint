@@ -11,7 +11,7 @@ use tokio::sync::mpsc::Sender;
 
 use super::{
     BlobCache, BlobRef, FetchProgress, ModInfo, ModProvider, ModProviderCache, ModResolution,
-    ModResponse, ModSpecification, ProviderCache, ResolvableStatus,
+    ModResponse, ModSpecification, ProviderCache,
 };
 
 lazy_static::lazy_static! {
@@ -337,9 +337,7 @@ impl ModProvider for ModioProvider {
                     .into_iter()
                     .map(|f| format_spec(&mod_.name_id, mod_id, Some(f.id)))
                     .collect(),
-                status: ResolvableStatus::Resolvable(ModResolution {
-                    url: url.to_owned(),
-                }),
+                resolution: ModResolution::resolvable(url.to_owned()),
                 suggested_require: mod_.tags.contains("RequiredByAll"),
                 suggested_dependencies: deps,
             }))
@@ -605,9 +603,7 @@ impl ModProvider for ModioProvider {
                             .into_iter()
                             .map(|f| format_spec(&mod_.name_id, mod_id, Some(f.id)))
                             .collect(),
-                        status: ResolvableStatus::Resolvable(ModResolution {
-                            url: url.to_owned(),
-                        }),
+                        resolution: ModResolution::resolvable(url.to_owned()),
                         suggested_require: mod_.tags.contains("RequiredByAll"),
                         suggested_dependencies: deps,
                     });

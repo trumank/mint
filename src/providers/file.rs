@@ -2,12 +2,12 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use tokio::sync::mpsc::Sender;
 
 use super::{
     BlobCache, FetchProgress, ModInfo, ModProvider, ModResolution, ModResponse, ModSpecification,
-    ProviderCache, ResolvableStatus,
+    ProviderCache,
 };
 
 inventory::submit! {
@@ -52,13 +52,7 @@ impl ModProvider for FileProvider {
             name,
             spec: spec.clone(),
             versions: vec![],
-            status: ResolvableStatus::Unresolvable {
-                name: path
-                    .file_name()
-                    .with_context(|| format!("could not determine file name of {:?}", spec))?
-                    .to_string_lossy()
-                    .to_string(),
-            },
+            resolution: ModResolution::unresolvable(path.to_string_lossy().to_string()),
             suggested_require: false,
             suggested_dependencies: vec![],
         }))
@@ -97,9 +91,7 @@ impl ModProvider for FileProvider {
             name,
             spec: spec.clone(),
             versions: vec![],
-            status: ResolvableStatus::Unresolvable {
-                name: path.file_name()?.to_string_lossy().to_string(),
-            },
+            resolution: ModResolution::unresolvable(path.to_string_lossy().to_string()),
             suggested_require: false,
             suggested_dependencies: vec![],
         })

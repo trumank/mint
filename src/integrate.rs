@@ -8,7 +8,7 @@ use unreal_asset::properties::object_property::TopLevelAssetPath;
 use unreal_asset::types::vector::Vector;
 use unreal_asset::unversioned::ancestry::Ancestry;
 
-use crate::providers::{ModInfo, ModResolution, ReadSeek, ResolvableStatus};
+use crate::providers::{ModInfo, ReadSeek};
 
 use unreal_asset::{
     exports::ExportBaseTrait,
@@ -122,10 +122,7 @@ pub fn integrate<P: AsRef<Path>>(path_pak: P, mods: Vec<(ModInfo, PathBuf)>) -> 
                     &mut Cursor::new(pak.get(&p, &mut buf)?),
                 )?;
             }
-            Ok(match m.status {
-                ResolvableStatus::Unresolvable { name } => name,
-                ResolvableStatus::Resolvable(ModResolution { url }) => url,
-            })
+            Ok(m.resolution.url) // TODO don't leak paths of local mods to clients
         })
         .collect::<Result<Vec<String>>>()?;
 
@@ -174,7 +171,7 @@ pub fn integrate<P: AsRef<Path>>(path_pak: P, mods: Vec<(ModInfo, PathBuf)>) -> 
         &mut int_asset,
         init_spacerig_assets,
         init_cave_assets,
-        &mods,
+        &[], //&mods,
     );
 
     let mut int_out = (Cursor::new(vec![]), Cursor::new(vec![]));
