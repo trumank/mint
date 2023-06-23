@@ -126,12 +126,14 @@ impl App {
                         btn_remove = Some(item.index);
                     }
 
+                    /*
                     if ui
                         .add(egui::Checkbox::without_text(&mut item.item.required))
                         .changed()
                     {
                         needs_save = true;
                     }
+                    */
 
                     let info = self.state.store.get_mod_info(&item.item.spec);
 
