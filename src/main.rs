@@ -48,22 +48,17 @@ struct ActionIntegrateProfile {
     profile: String,
 }
 
-/// Work in progress GUI. Not usable yet.
-#[derive(Parser, Debug)]
-struct ActionGui {}
-
 #[derive(Subcommand, Debug)]
 enum Action {
     Integrate(ActionIntegrate),
     Profile(ActionIntegrateProfile),
-    Gui(ActionGui),
 }
 
 #[derive(Parser, Debug)]
 #[command(author, version)]
 struct Args {
     #[command(subcommand)]
-    action: Action,
+    action: Option<Action>,
 }
 
 fn main() -> Result<()> {
@@ -73,19 +68,19 @@ fn main() -> Result<()> {
     let args = Args::parse();
 
     match args.action {
-        Action::Integrate(action) => rt.block_on(async {
+        Some(Action::Integrate(action)) => rt.block_on(async {
             action_integrate(action).await?;
             Ok(())
         }),
-        Action::Profile(action) => rt.block_on(async {
+        Some(Action::Profile(action)) => rt.block_on(async {
             action_integrate_profile(action).await?;
             Ok(())
         }),
-        Action::Gui(action) => {
+        None => {
             std::thread::spawn(move || {
                 rt.block_on(std::future::pending::<()>());
             });
-            action_gui(action)?;
+            gui()?;
             Ok(())
         }
     }
@@ -157,8 +152,4 @@ async fn action_integrate_profile(action: ActionIntegrateProfile) -> Result<()> 
         init_provider,
     )
     .await
-}
-
-fn action_gui(_action: ActionGui) -> Result<()> {
-    gui()
 }
