@@ -669,11 +669,21 @@ fn integrate(
         });
 
         let paths = store.fetch_mods(&urls, update, Some(tx)).await?;
+        let mut paths_iter = paths.into_iter();
 
-        tokio::task::spawn_blocking(|| {
-            crate::integrate::integrate(path_game, to_integrate.into_iter().zip(paths).collect())
-        })
-        .await??;
+        let mods = to_integrate
+            .into_iter()
+            .map(|m| {
+                let path = match m.status {
+                    // TODO this is a hack, ModResolution should be able to hold the full path
+                    ResolvableStatus::Resolvable(_) => paths_iter.next().unwrap(),
+                    ResolvableStatus::Unresolvable { .. } => std::path::PathBuf::from(&m.spec.url),
+                };
+                (m, path)
+            })
+            .collect();
+
+        tokio::task::spawn_blocking(|| crate::integrate::integrate(path_game, mods)).await??;
 
         Ok(())
     }
