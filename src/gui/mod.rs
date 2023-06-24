@@ -54,6 +54,7 @@ struct App {
     dnd: egui_dnd::DragDropUi,
     window_provider_parameters: Option<WindowProviderParameters>,
     search_string: Option<String>,
+    scroll_to_match: bool,
     settings_window: Option<WindowSettings>,
 }
 
@@ -75,6 +76,7 @@ impl App {
             dnd: Default::default(),
             window_provider_parameters: None,
             search_string: Default::default(),
+            scroll_to_match: false,
             settings_window: None,
         })
     }
@@ -193,11 +195,13 @@ impl App {
                             });
 
                         let mut job = LayoutJob::default();
+                        let mut is_match = false;
                         if let Some(search_string) = &self.search_string {
-                            for (is_match, chunk) in FindString::new(&info.name, search_string) {
-                                let background = if is_match {
+                            for (m, chunk) in FindString::new(&info.name, search_string) {
+                                let background = if m {
+                                    is_match = true;
                                     TextFormat {
-                                        background: Color32::from_rgb(128, 32, 32),
+                                        background: Color32::YELLOW,
                                         ..Default::default()
                                     }
                                 } else {
@@ -209,7 +213,11 @@ impl App {
                             job.append(&info.name, 0.0, Default::default());
                         }
 
-                        ui.hyperlink_to(job, &item.item.spec.url);
+                        let res = ui.hyperlink_to(job, &item.item.spec.url);
+                        if is_match && self.scroll_to_match {
+                            res.scroll_to_me(None);
+                            self.scroll_to_match = false;
+                        }
                     } else {
                         ui.hyperlink(&item.item.spec.url);
                     }
@@ -656,11 +664,28 @@ impl eframe::App for App {
             self.ui_profile(ui);
 
             if let Some(search_string) = &mut self.search_string {
+                let lower = search_string.to_lowercase();
+                let profile = self.state.profiles.get_active_profile();
+                let any_matches = profile.mods.iter().any(|m| {
+                    self.state
+                        .store
+                        .get_mod_info(&m.spec)
+                        .map(|i| i.name.to_lowercase().contains(&lower))
+                        .unwrap_or(false)
+                });
+                let mut text_edit = egui::TextEdit::singleline(search_string);
+                if !any_matches {
+                    text_edit = text_edit.text_color(ui.visuals().error_fg_color);
+                }
                 let res = ui
                     .child_ui(ui.max_rect(), egui::Layout::bottom_up(egui::Align::RIGHT))
-                    .add(egui::TextEdit::singleline(search_string));
+                    .add(text_edit);
+                if res.changed() {
+                    self.scroll_to_match = true;
+                }
                 if res.lost_focus() {
                     self.search_string = None;
+                    self.scroll_to_match = false;
                 } else if !res.has_focus() {
                     res.request_focus();
                 }
@@ -678,6 +703,7 @@ impl eframe::App for App {
                         egui::Event::Text(text) => {
                             if ctx.memory(|m| m.focus().is_none()) {
                                 self.search_string = Some(text.to_string());
+                                self.scroll_to_match = true;
                             }
                         }
                         _ => {}
