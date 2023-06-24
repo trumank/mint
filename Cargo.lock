@@ -2713,7 +2713,7 @@ checksum = "436b050e76ed2903236f032a59761c1eb99e1b0aead2c257922771dab1fc8c78"
 [[package]]
 name = "repak"
 version = "0.1.6"
-source = "git+https://github.com/trumank/repak.git#9974d035b17b7c67efe869b366ca22067483a44f"
+source = "git+https://github.com/trumank/repak.git#d75ecd7631ca734b5e66ead9d5fd78ff986ff2f8"
 dependencies = [
  "aes",
  "byteorder",
@@ -2726,6 +2726,7 @@ dependencies = [
  "strum",
  "thiserror",
  "ureq",
+ "zstd",
 ]
 
 [[package]]
