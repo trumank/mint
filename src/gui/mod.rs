@@ -124,6 +124,14 @@ impl App {
                         btn_remove = Some(item.index);
                     }
 
+                    if ui
+                        .add(egui::Checkbox::without_text(&mut item.item.enabled))
+                        .on_hover_text_at_pointer("enabled?")
+                        .changed()
+                    {
+                        needs_save = true;
+                    }
+
                     /*
                     if ui
                         .add(egui::Checkbox::without_text(&mut item.item.required))
@@ -135,20 +143,22 @@ impl App {
 
                     let info = self.state.store.get_mod_info(&item.item.spec);
 
-                    if let Some((_, _, progress)) = &self.integrate_rid {
-                        match progress.get(&item.item.spec) {
-                            Some(SpecFetchProgress::Progress { progress, size }) => {
-                                ui.add(
-                                    egui::ProgressBar::new(*progress as f32 / *size as f32)
-                                        .show_percentage()
-                                        .desired_width(100.0),
-                                );
-                            }
-                            Some(SpecFetchProgress::Complete) => {
-                                ui.add(egui::ProgressBar::new(1.0).desired_width(100.0));
-                            }
-                            None => {
-                                ui.spinner();
+                    if item.item.enabled {
+                        if let Some((_, _, progress)) = &self.integrate_rid {
+                            match progress.get(&item.item.spec) {
+                                Some(SpecFetchProgress::Progress { progress, size }) => {
+                                    ui.add(
+                                        egui::ProgressBar::new(*progress as f32 / *size as f32)
+                                            .show_percentage()
+                                            .desired_width(100.0),
+                                    );
+                                }
+                                Some(SpecFetchProgress::Complete) => {
+                                    ui.add(egui::ProgressBar::new(1.0).desired_width(100.0));
+                                }
+                                None => {
+                                    ui.spinner();
+                                }
                             }
                         }
                     }
@@ -460,6 +470,7 @@ impl eframe::App for App {
                                     .push(ModConfig {
                                         spec: mod_.spec,
                                         required: mod_.suggested_require,
+                                        enabled: true,
                                     });
                                 self.state.profiles.save().unwrap();
                             }
@@ -532,7 +543,7 @@ impl eframe::App for App {
                                     .get_active_profile()
                                     .mods
                                     .iter()
-                                    .map(|m| m.spec.clone())
+                                    .filter_map(|m| m.enabled.then(|| m.spec.clone()))
                                     .collect(),
                                 self.state.config.drg_pak_path.as_ref().unwrap().clone(),
                                 self.tx.clone(),

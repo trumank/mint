@@ -31,6 +31,12 @@ pub struct ModProfile {
 pub struct ModConfig {
     pub spec: ModSpecification,
     pub required: bool,
+
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+}
+fn default_true() -> bool {
+    true
 }
 
 impl Default for ModProfiles {
