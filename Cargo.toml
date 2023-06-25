@@ -1,6 +1,6 @@
 [package]
 name = "drg_mod_integration"
-version = "0.2.1"
+version = "0.2.2"
 edition = "2021"
 repository = "https://github.com/trumank/drg-mod-integration"
 
@@ -44,6 +44,10 @@ modio = { git = "https://github.com/trumank/modio-rs.git", branch = "dev" }
 inherits = "release"
 debug = true
 split-debuginfo = "packed"
+
+[profile.release]
+incremental = true
+debug = 1
 
 # Config for 'cargo dist'
 [workspace.metadata.dist]
