@@ -571,46 +571,38 @@ impl ModProvider for ModioProvider {
         let captures = RE_MOD.captures(url)?;
 
         let cache = cache.read().unwrap();
-        let prov = cache.get::<ModioCache>(MODIO_PROVIDER_ID);
+        let prov = cache.get::<ModioCache>(MODIO_PROVIDER_ID)?;
 
         let mod_id = if let Some(mod_id) = captures.name("mod_id") {
             mod_id.as_str().parse::<u32>().ok()
         } else if let Some(name_id) = captures.name("name_id") {
-            prov.and_then(|c| c.mod_id_map.get(name_id.as_str()).cloned())
+            prov.mod_id_map.get(name_id.as_str()).cloned()
         } else {
             None
-        };
+        }?;
 
-        if let Some(mod_id) = mod_id {
-            if let Some(mod_) = prov.and_then(|c| c.mods.get(&mod_id).cloned()) {
-                let deps = prov
-                    .and_then(|c| c.dependencies.get(&mod_id).cloned())
-                    .map(|d| {
-                        d.into_iter()
-                            .map(|d| ModSpecification {
-                                url: format!("https://mod.io/g/drg/m/FIXME#{d}"),
-                            }) // since we found mod based on ID, we haven't verified mod name is actually correct
-                            .collect()
-                    });
+        let mod_ = prov.mods.get(&mod_id)?;
 
-                if let Some(deps) = deps {
-                    return Some(ModInfo {
-                        provider: MODIO_PROVIDER_ID,
-                        spec: format_spec(&mod_.name_id, mod_id, None),
-                        name: mod_.name,
-                        versions: mod_
-                            .modfiles
-                            .into_iter()
-                            .map(|f| format_spec(&mod_.name_id, mod_id, Some(f.id)))
-                            .collect(),
-                        resolution: ModResolution::resolvable(url.to_owned()),
-                        suggested_require: mod_.tags.contains("RequiredByAll"),
-                        suggested_dependencies: deps,
-                    });
-                }
-            }
-        }
-        None
+        let deps = prov
+            .dependencies
+            .get(&mod_id)?
+            .iter()
+            .map(|id| prov.mods.get(id).map(|m| format_spec(&m.name_id, *id, None)))
+            .collect::<Option<Vec<_>>>()?;
+
+        Some(ModInfo {
+            provider: MODIO_PROVIDER_ID,
+            spec: format_spec(&mod_.name_id, mod_id, None),
+            name: mod_.name.clone(),
+            versions: mod_
+                .modfiles
+                .iter()
+                .map(|f| format_spec(&mod_.name_id, mod_id, Some(f.id)))
+                .collect(),
+            resolution: ModResolution::resolvable(url.to_owned()),
+            suggested_require: mod_.tags.contains("RequiredByAll"),
+            suggested_dependencies: deps,
+        })
     }
 
     fn is_pinned(&self, spec: &ModSpecification, _cache: ProviderCache) -> bool {
