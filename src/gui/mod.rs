@@ -95,6 +95,7 @@ impl App {
         let mods = &mut self.state.profiles.get_active_profile_mut().mods;
         let mut needs_save = false;
         let mut btn_remove = None;
+        let mut add_deps = None;
 
         use egui_dnd::utils::shift_vec;
         use egui_dnd::DragDropItem;
@@ -109,6 +110,12 @@ impl App {
                 egui::Id::new(self.index)
             }
         }
+
+        let enabled_specs = mods
+            .iter()
+            .filter_map(|m| m.enabled.then_some(&m.spec))
+            .cloned()
+            .collect::<Vec<_>>();
 
         let mut items = mods
             .iter_mut()
@@ -196,6 +203,31 @@ impl App {
                                 }
                             });
 
+                        // TODO starts_with is a great hack but it's still a hack
+                        let missing_deps = info
+                            .suggested_dependencies
+                            .iter()
+                            .filter(|d| !enabled_specs.iter().any(|s| d.url.starts_with(&s.url)))
+                            .collect::<Vec<_>>();
+
+                        if !missing_deps.is_empty() {
+                            let mut msg = "Add missing dependencies:".to_string();
+                            for dep in &missing_deps {
+                                msg.push('\n');
+                                msg.push_str(&dep.url);
+                            }
+                            if ui
+                                .button(
+                                    egui::RichText::new("\u{26A0}")
+                                        .color(ui.visuals().warn_fg_color),
+                                )
+                                .on_hover_text(msg)
+                                .clicked()
+                            {
+                                add_deps = Some(missing_deps.into_iter().cloned().collect());
+                            }
+                        }
+
                         let mut job = LayoutJob::default();
                         let mut is_match = false;
                         if let Some(search_string) = &self.search_string {
@@ -234,22 +266,22 @@ impl App {
             mods.remove(remove);
             needs_save = true;
         }
+        if let Some(add_deps) = add_deps {
+            self.add_mods(ui.ctx(), add_deps);
+        }
         if needs_save {
             self.state.profiles.save().unwrap();
         }
     }
 
-    fn add_mod(&mut self, ctx: &egui::Context) {
+    fn add_mods(&mut self, ctx: &egui::Context, specs: Vec<ModSpecification>) {
         let rid = self.request_counter.next();
-        let spec = ModSpecification {
-            url: self.resolve_mod.to_string(),
-        };
         let store = self.state.store.clone();
         let tx = self.tx.clone();
         let ctx = ctx.clone();
         tokio::spawn(async move {
-            let res = store.resolve_mod(spec, false).await;
-            tx.send(message::Message::ResolveMod(rid, res))
+            let res = store.resolve_mods(&specs, false).await;
+            tx.send(message::Message::ResolveMods(rid, res))
                 .await
                 .unwrap();
             ctx.request_repaint();
@@ -469,19 +501,19 @@ impl eframe::App for App {
         // message handling
         while let Ok(msg) = self.rx.try_recv() {
             match msg {
-                message::Message::ResolveMod(rid, res) => {
+                message::Message::ResolveMods(rid, res) => {
                     if Some(rid) == self.resolve_mod_rid {
                         match res {
-                            Ok((_spec, mod_)) => {
-                                self.state
-                                    .profiles
-                                    .get_active_profile_mut()
-                                    .mods
-                                    .push(ModConfig {
-                                        spec: mod_.spec,
-                                        required: mod_.suggested_require,
-                                        enabled: true,
-                                    });
+                            Ok(mods) => {
+                                for (_, mod_) in mods.into_iter() {
+                                    self.state.profiles.get_active_profile_mut().mods.push(
+                                        ModConfig {
+                                            spec: mod_.spec,
+                                            required: mod_.suggested_require,
+                                            enabled: true,
+                                        },
+                                    );
+                                }
                                 self.state.profiles.save().unwrap();
                             }
                             Err(e) => match e.downcast::<IntegrationError>() {
@@ -717,7 +749,12 @@ impl eframe::App for App {
                         egui::TextEdit::singleline(&mut self.resolve_mod).hint_text("Add mod..."),
                     );
                     if is_committed(&resolve) {
-                        self.add_mod(ctx);
+                        self.add_mods(
+                            ctx,
+                            vec![ModSpecification {
+                                url: self.resolve_mod.to_string(),
+                            }],
+                        );
                     }
                 });
             });
@@ -761,7 +798,12 @@ impl eframe::App for App {
                                 && ctx.memory(|m| m.focus().is_none())
                             {
                                 self.resolve_mod = s.to_string();
-                                self.add_mod(ctx);
+                                self.add_mods(
+                                    ctx,
+                                    vec![ModSpecification {
+                                        url: self.resolve_mod.to_string(),
+                                    }],
+                                );
                             }
                         }
                         egui::Event::Text(text) => {
