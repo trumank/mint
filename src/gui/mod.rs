@@ -2,7 +2,7 @@ mod message;
 
 //#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")] // hide console window on Windows in release
 
-use std::{collections::HashMap, path::PathBuf, sync::Arc};
+use std::{collections::HashMap, fmt::Display, path::PathBuf, sync::Arc};
 
 use anyhow::{anyhow, Context, Result};
 use eframe::{
@@ -42,7 +42,7 @@ struct App {
     rx: Receiver<message::Message>,
     state: State,
     profile_dropdown: String,
-    log: String,
+    log: Log,
     resolve_mod: String,
     resolve_mod_rid: Option<RequestID>,
     integrate_rid: Option<(
@@ -50,6 +50,7 @@ struct App {
         JoinHandle<()>,
         HashMap<ModSpecification, SpecFetchProgress>,
     )>,
+    update_rid: Option<(RequestID, JoinHandle<()>)>,
     request_counter: RequestCounter,
     dnd: egui_dnd::DragDropUi,
     window_provider_parameters: Option<WindowProviderParameters>,
@@ -73,6 +74,7 @@ impl App {
             resolve_mod: Default::default(),
             resolve_mod_rid: None,
             integrate_rid: None,
+            update_rid: None,
             dnd: Default::default(),
             window_provider_parameters: None,
             search_string: Default::default(),
@@ -489,7 +491,7 @@ impl eframe::App for App {
                                     );
                                 }
                                 Err(e) => {
-                                    self.log.push_str(&format!("{:#?}\n", e));
+                                    self.log.println(format!("{:#?}", e));
                                 }
                             },
                         }
@@ -507,7 +509,7 @@ impl eframe::App for App {
                     if self.integrate_rid.as_ref().map_or(false, |r| rid == r.0) {
                         match res {
                             Ok(()) => {
-                                self.log.push_str("Integration complete\n");
+                                self.log.println("Integration complete");
                             }
                             Err(e) => match e.downcast::<IntegrationError>() {
                                 Ok(IntegrationError::NoProvider { url: _, factory }) => {
@@ -516,11 +518,32 @@ impl eframe::App for App {
                                     );
                                 }
                                 Err(e) => {
-                                    self.log.push_str(&format!("{:#?}\n", e));
+                                    self.log.println(format!("{:#?}", e));
                                 }
                             },
                         }
                         self.integrate_rid = None;
+                    }
+                }
+                message::Message::UpdateCache(rid, res) => {
+                    if self.update_rid.as_ref().map_or(false, |r| rid == r.0) {
+                        match res {
+                            Ok(()) => {
+                                self.log.println("Cache update complete");
+                            }
+                            Err(e) => match e.downcast::<IntegrationError>() {
+                                // TODO make provider initializing more generic
+                                Ok(IntegrationError::NoProvider { url: _, factory }) => {
+                                    self.window_provider_parameters = Some(
+                                        WindowProviderParameters::new(factory, &mut self.state),
+                                    );
+                                }
+                                Err(e) => {
+                                    self.log.println(format!("{:#?}", e));
+                                }
+                            },
+                        }
+                        self.update_rid = None;
                     }
                 }
             }
@@ -534,29 +557,61 @@ impl eframe::App for App {
         egui::TopBottomPanel::bottom("bottom_panel").show(ctx, |ui| {
             ui.with_layout(egui::Layout::right_to_left(egui::Align::TOP), |ui| {
                 ui.add_enabled_ui(
-                    self.integrate_rid.is_none() && self.state.config.drg_pak_path.is_some(),
+                    self.integrate_rid.is_none()
+                        && self.update_rid.is_none()
+                        && self.state.config.drg_pak_path.is_some(),
                     |ui| {
-                        let mut button = ui.button("install");
-                        if self.state.config.drg_pak_path.is_none() {
-                            button = button.on_disabled_hover_text(
-                                "DRG install not found. Configure it in via the settings menu",
-                            );
-                        }
-                        if button.clicked() {
-                            self.integrate_rid = integrate(
-                                &mut self.request_counter,
-                                self.state.store.clone(),
-                                self.state
-                                    .profiles
-                                    .get_active_profile()
-                                    .mods
-                                    .iter()
-                                    .filter_map(|m| m.enabled.then(|| m.spec.clone()))
-                                    .collect(),
-                                self.state.config.drg_pak_path.as_ref().unwrap().clone(),
-                                self.tx.clone(),
-                                ctx.clone(),
-                            );
+                        ui.add_enabled_ui(self.state.config.drg_pak_path.is_some(), |ui| {
+                            let mut button = ui.button("install mods");
+                            if self.state.config.drg_pak_path.is_none() {
+                                button = button.on_disabled_hover_text(
+                                    "DRG install not found. Configure it in via the settings menu",
+                                );
+                            }
+                            if button.clicked() {
+                                self.integrate_rid = integrate(
+                                    &mut self.request_counter,
+                                    self.state.store.clone(),
+                                    self.state
+                                        .profiles
+                                        .get_active_profile()
+                                        .mods
+                                        .iter()
+                                        .filter_map(|m| m.enabled.then(|| m.spec.clone()))
+                                        .collect(),
+                                    self.state.config.drg_pak_path.as_ref().unwrap().clone(),
+                                    self.tx.clone(),
+                                    ctx.clone(),
+                                );
+                            }
+                        });
+                        if ui
+                            .button("update cache")
+                            .on_hover_text(
+                                "checks for updates for all mods and updates local cache\n\
+                                due to strict mod.io rate-limiting, can take a long time for large mod lists",
+                            )
+                            .clicked()
+                        {
+                            let mod_specs = self
+                                .state
+                                .profiles
+                                .get_active_profile()
+                                .mods
+                                .iter()
+                                .map(|m| m.spec.clone())
+                                .collect::<Vec<_>>();
+                            let store = self.state.store.clone();
+
+                            let rid = self.request_counter.next();
+                            let tx = self.tx.clone();
+                            let handle = tokio::spawn(async move {
+                                let res = store.resolve_mods(&mod_specs, true).await.map(|_| ());
+                                tx.send(message::Message::UpdateCache(rid, res))
+                                    .await
+                                    .unwrap();
+                            });
+                            self.update_rid = Some((rid, handle));
                         }
                     },
                 );
@@ -566,13 +621,19 @@ impl eframe::App for App {
                     }
                     ui.spinner();
                 }
+                if self.update_rid.is_some() {
+                    if ui.button("cancel").clicked() {
+                        self.update_rid.take().unwrap().1.abort();
+                    }
+                    ui.spinner();
+                }
                 if ui.button("⚙").on_hover_text("Open settings").clicked() {
                     self.settings_window = Some(WindowSettings::new(&mut self.state));
                 }
             });
         });
         egui::CentralPanel::default().show(ctx, |ui| {
-            ui.set_enabled(self.integrate_rid.is_none());
+            ui.set_enabled(self.integrate_rid.is_none() && self.update_rid.is_none());
             // profile selection
             ui.horizontal(|ui| {
                 ui.add_enabled_ui(
@@ -695,7 +756,10 @@ impl eframe::App for App {
                 for e in &i.events {
                     match e {
                         egui::Event::Paste(s) => {
-                            if self.integrate_rid.is_none() && ctx.memory(|m| m.focus().is_none()) {
+                            if self.integrate_rid.is_none()
+                                && self.update_rid.is_none()
+                                && ctx.memory(|m| m.focus().is_none())
+                            {
                                 self.resolve_mod = s.to_string();
                                 self.add_mod(ctx);
                             }
@@ -810,6 +874,18 @@ fn integrate(
         }),
         Default::default(),
     ))
+}
+#[derive(Default)]
+struct Log {
+    buffer: String,
+}
+impl Log {
+    fn println(&mut self, msg: impl Display) {
+        println!("{}", msg);
+        let msg = msg.to_string();
+        self.buffer.push_str(&msg);
+        self.buffer.push('\n');
+    }
 }
 struct FindString<'data> {
     string: &'data str,

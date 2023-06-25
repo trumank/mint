@@ -587,7 +587,11 @@ impl ModProvider for ModioProvider {
             .dependencies
             .get(&mod_id)?
             .iter()
-            .map(|id| prov.mods.get(id).map(|m| format_spec(&m.name_id, *id, None)))
+            .map(|id| {
+                prov.mods
+                    .get(id)
+                    .map(|m| format_spec(&m.name_id, *id, None))
+            })
             .collect::<Option<Vec<_>>>()?;
 
         Some(ModInfo {
