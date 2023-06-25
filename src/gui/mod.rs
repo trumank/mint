@@ -113,8 +113,8 @@ impl App {
 
         let enabled_specs = mods
             .iter()
-            .filter_map(|m| m.enabled.then_some(&m.spec))
-            .cloned()
+            .enumerate()
+            .filter_map(|(i, m)| m.enabled.then_some((i, m.spec.clone())))
             .collect::<Vec<_>>();
 
         let mut items = mods
@@ -203,11 +203,30 @@ impl App {
                                 }
                             });
 
+                        let url = &info.spec.url;
+                        let is_duplicate = enabled_specs.iter().any(|(i, spec)| {
+                            item.index != *i
+                                && (spec.url.starts_with(url) || url.starts_with(&spec.url))
+                        }); // TODO hack
+                        if is_duplicate
+                            && ui
+                                .button(
+                                    egui::RichText::new("\u{26A0}")
+                                        .color(ui.visuals().warn_fg_color),
+                                )
+                                .on_hover_text("remove duplicate")
+                                .clicked()
+                        {
+                            btn_remove = Some(item.index);
+                        }
+
                         // TODO starts_with is a great hack but it's still a hack
                         let missing_deps = info
                             .suggested_dependencies
                             .iter()
-                            .filter(|d| !enabled_specs.iter().any(|s| d.url.starts_with(&s.url)))
+                            .filter(|d| {
+                                !enabled_specs.iter().any(|(_, s)| d.url.starts_with(&s.url))
+                            })
                             .collect::<Vec<_>>();
 
                         if !missing_deps.is_empty() {
