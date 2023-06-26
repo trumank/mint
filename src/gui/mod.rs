@@ -556,11 +556,14 @@ impl eframe::App for App {
                                             .any(|m| m.spec.satisfies_dependency(&resolved_spec))
                                     };
                                     if add {
-                                        profile.mods.push(ModConfig {
-                                            spec: info.spec,
-                                            required: info.suggested_require,
-                                            enabled: true,
-                                        });
+                                        profile.mods.insert(
+                                            0,
+                                            ModConfig {
+                                                spec: info.spec,
+                                                required: info.suggested_require,
+                                                enabled: true,
+                                            },
+                                        );
                                     }
                                 }
                                 self.state.profiles.save().unwrap();
