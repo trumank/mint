@@ -208,6 +208,14 @@ impl App {
                                 }
                             });
 
+                        if ui
+                            .button("📋")
+                            .on_hover_text_at_pointer("copy URL")
+                            .clicked()
+                        {
+                            ui.output_mut(|o| o.copied_text = item.item.spec.url.to_owned());
+                        }
+
                         let is_duplicate = enabled_specs.iter().any(|(i, spec)| {
                             item.index != *i && info.spec.satisfies_dependency(spec)
                         });
@@ -217,7 +225,7 @@ impl App {
                                     egui::RichText::new("\u{26A0}")
                                         .color(ui.visuals().warn_fg_color),
                                 )
-                                .on_hover_text("remove duplicate")
+                                .on_hover_text_at_pointer("remove duplicate")
                                 .clicked()
                         {
                             btn_remove = Some(item.index);
@@ -274,6 +282,13 @@ impl App {
                             self.scroll_to_match = false;
                         }
                     } else {
+                        if ui
+                            .button("📋")
+                            .on_hover_text_at_pointer("copy URL")
+                            .clicked()
+                        {
+                            ui.output_mut(|o| o.copied_text = item.item.spec.url.to_owned());
+                        }
                         ui.hyperlink(&item.item.spec.url);
                     }
                 });
