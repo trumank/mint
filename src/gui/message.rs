@@ -8,7 +8,11 @@ use super::{request_counter::RequestID, SpecFetchProgress};
 
 #[derive(Debug)]
 pub enum Message {
-    ResolveMods(RequestID, Result<HashMap<ModSpecification, ModInfo>>),
+    ResolveMods(
+        RequestID,
+        Vec<ModSpecification>,
+        Result<HashMap<ModSpecification, ModInfo>>,
+    ),
     FetchModProgress(RequestID, ModSpecification, SpecFetchProgress),
     Integrate(RequestID, Result<()>),
     UpdateCache(RequestID, Result<()>),

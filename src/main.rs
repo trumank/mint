@@ -122,7 +122,7 @@ async fn action_integrate(action: ActionIntegrate) -> Result<()> {
     let mod_specs = action
         .mods
         .into_iter()
-        .map(|url| ModSpecification { url })
+        .map(ModSpecification::new)
         .collect::<Vec<_>>();
 
     resolve_and_integrate_with_provider_init(

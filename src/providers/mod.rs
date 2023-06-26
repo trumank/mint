@@ -218,9 +218,7 @@ impl FetchProgress {
 /// Whether a mod can be resolved by clients or not
 #[derive(Debug, Clone, Eq, Ord, PartialEq, PartialOrd, Hash)]
 pub enum ResolvableStatus {
-    /// If a mod can not be resolved, specify just a name
     Unresolvable,
-    /// If a mod can be resolved, specify the URL
     Resolvable,
 }
 
@@ -247,6 +245,15 @@ pub enum ModResponse {
 #[derive(Debug, Clone, Hash, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ModSpecification {
     pub url: String,
+}
+impl ModSpecification {
+    pub fn new(url: String) -> Self {
+        Self { url }
+    }
+    pub fn satisfies_dependency(&self, other: &ModSpecification) -> bool {
+        // TODO this hack works surprisingly well but is still a complete hack and should be replaced
+        self.url.starts_with(&other.url) || other.url.starts_with(&self.url)
+    }
 }
 
 /// Points to a specific version of a specific mod

@@ -2,7 +2,12 @@ mod message;
 
 //#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")] // hide console window on Windows in release
 
-use std::{collections::HashMap, fmt::Display, path::PathBuf, sync::Arc};
+use std::{
+    collections::{HashMap, HashSet},
+    fmt::Display,
+    path::PathBuf,
+    sync::Arc,
+};
 
 use anyhow::{anyhow, Context, Result};
 use eframe::{
@@ -203,11 +208,9 @@ impl App {
                                 }
                             });
 
-                        let url = &info.spec.url;
                         let is_duplicate = enabled_specs.iter().any(|(i, spec)| {
-                            item.index != *i
-                                && (spec.url.starts_with(url) || url.starts_with(&spec.url))
-                        }); // TODO hack
+                            item.index != *i && info.spec.satisfies_dependency(spec)
+                        });
                         if is_duplicate
                             && ui
                                 .button(
@@ -220,12 +223,11 @@ impl App {
                             btn_remove = Some(item.index);
                         }
 
-                        // TODO starts_with is a great hack but it's still a hack
                         let missing_deps = info
                             .suggested_dependencies
                             .iter()
                             .filter(|d| {
-                                !enabled_specs.iter().any(|(_, s)| d.url.starts_with(&s.url))
+                                !enabled_specs.iter().any(|(_, s)| s.satisfies_dependency(d))
                             })
                             .collect::<Vec<_>>();
 
@@ -300,7 +302,7 @@ impl App {
         let ctx = ctx.clone();
         tokio::spawn(async move {
             let res = store.resolve_mods(&specs, false).await;
-            tx.send(message::Message::ResolveMods(rid, res))
+            tx.send(message::Message::ResolveMods(rid, specs, res))
                 .await
                 .unwrap();
             ctx.request_repaint();
@@ -520,18 +522,31 @@ impl eframe::App for App {
         // message handling
         while let Ok(msg) = self.rx.try_recv() {
             match msg {
-                message::Message::ResolveMods(rid, res) => {
+                message::Message::ResolveMods(rid, specs, res) => {
                     if Some(rid) == self.resolve_mod_rid {
                         match res {
-                            Ok(mods) => {
-                                for (_, mod_) in mods.into_iter() {
-                                    self.state.profiles.get_active_profile_mut().mods.push(
-                                        ModConfig {
-                                            spec: mod_.spec,
-                                            required: mod_.suggested_require,
+                            Ok(resolved_mods) => {
+                                let profile = self.state.profiles.get_active_profile_mut();
+                                let primary_mods =
+                                    specs.into_iter().collect::<HashSet<ModSpecification>>();
+                                for (resolved_spec, info) in resolved_mods {
+                                    let add = if primary_mods.contains(&resolved_spec) {
+                                        true
+                                    } else {
+                                        // not primary mod so must be a dependency
+                                        // check if there isn't already a matching dependency in the mod list
+                                        !profile
+                                            .mods
+                                            .iter()
+                                            .any(|m| m.spec.satisfies_dependency(&resolved_spec))
+                                    };
+                                    if add {
+                                        profile.mods.push(ModConfig {
+                                            spec: info.spec,
+                                            required: info.suggested_require,
                                             enabled: true,
-                                        },
-                                    );
+                                        });
+                                    }
                                 }
                                 self.state.profiles.save().unwrap();
                             }
@@ -770,9 +785,7 @@ impl eframe::App for App {
                     if is_committed(&resolve) {
                         self.add_mods(
                             ctx,
-                            vec![ModSpecification {
-                                url: self.resolve_mod.to_string(),
-                            }],
+                            vec![ModSpecification::new(self.resolve_mod.to_string())],
                         );
                     }
                 });
@@ -819,9 +832,7 @@ impl eframe::App for App {
                                 self.resolve_mod = s.to_string();
                                 self.add_mods(
                                     ctx,
-                                    vec![ModSpecification {
-                                        url: self.resolve_mod.to_string(),
-                                    }],
+                                    vec![ModSpecification::new(self.resolve_mod.to_string())],
                                 );
                             }
                         }

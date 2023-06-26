@@ -37,13 +37,11 @@ inventory::submit! {
 }
 
 fn format_spec(name_id: &str, mod_id: u32, file_id: Option<u32>) -> ModSpecification {
-    ModSpecification {
-        url: if let Some(file_id) = file_id {
-            format!("https://mod.io/g/drg/m/{}#{}/{}", name_id, mod_id, file_id)
-        } else {
-            format!("https://mod.io/g/drg/m/{}#{}", name_id, mod_id)
-        },
-    }
+    ModSpecification::new(if let Some(file_id) = file_id {
+        format!("https://mod.io/g/drg/m/{}#{}/{}", name_id, mod_id, file_id)
+    } else {
+        format!("https://mod.io/g/drg/m/{}#{}", name_id, mod_id)
+    })
 }
 
 #[derive(Debug)]
@@ -417,9 +415,10 @@ impl ModProvider for ModioProvider {
                     })?
                 };
 
-                Ok(ModResponse::Redirect(ModSpecification {
-                    url: format!("https://mod.io/g/drg/m/{}#{}/{}", &name_id, id, modfile_id),
-                }))
+                Ok(ModResponse::Redirect(ModSpecification::new(format!(
+                    "https://mod.io/g/drg/m/{}#{}/{}",
+                    &name_id, id, modfile_id
+                ))))
             } else {
                 let filter = NameId::eq(name_id).and(Visible::_in(vec![0, 1]));
                 let mut mods = self
@@ -447,9 +446,10 @@ impl ModProvider for ModioProvider {
                         format!("mod {} does not have an associated modfile", url)
                     })?;
 
-                    Ok(ModResponse::Redirect(ModSpecification {
-                        url: format!("https://mod.io/g/drg/m/{}#{}/{}", &name_id, mod_id, file),
-                    }))
+                    Ok(ModResponse::Redirect(ModSpecification::new(format!(
+                        "https://mod.io/g/drg/m/{}#{}/{}",
+                        &name_id, mod_id, file
+                    ))))
                 } else {
                     Err(anyhow!("no mods returned for mod name_id {}", &name_id))
                 }
