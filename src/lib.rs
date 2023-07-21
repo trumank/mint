@@ -9,7 +9,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 
 use error::IntegrationError;
 use providers::{ModSpecification, ProviderFactory};
@@ -23,8 +23,25 @@ pub fn find_drg_pak() -> Option<PathBuf> {
     })
 }
 
+/// File::open with the file path included in any error messages
+pub fn open_file<P: AsRef<Path>>(path: P) -> Result<std::fs::File> {
+    std::fs::File::open(&path)
+        .with_context(|| format!("Could not open file {}", path.as_ref().display()))
+}
+
+/// fs::read with the file path included in any error messages
+pub fn read_file<P: AsRef<Path>>(path: P) -> Result<Vec<u8>> {
+    std::fs::read(&path).with_context(|| format!("Could not read file {}", path.as_ref().display()))
+}
+
+/// fs::write with the file path included in any error messages
+pub fn write_file<P: AsRef<Path>, C: AsRef<[u8]>>(path: P, data: C) -> Result<()> {
+    std::fs::write(&path, data)
+        .with_context(|| format!("Could not write to file {}", path.as_ref().display()))
+}
+
 pub fn is_drg_pak<P: AsRef<Path>>(path: P) -> Result<()> {
-    let mut reader = std::io::BufReader::new(std::fs::File::open(path)?);
+    let mut reader = std::io::BufReader::new(open_file(path)?);
     let pak = repak::PakReader::new_any(&mut reader, None)?;
     pak.get("FSD/FSD.uproject", &mut reader)?;
     Ok(())

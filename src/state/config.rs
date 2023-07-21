@@ -4,6 +4,8 @@ use anyhow::Result;
 
 use serde::{de::DeserializeOwned, Serialize};
 
+use crate::write_file;
+
 /// Wrapper around an object that is read from a file on init and written on drop
 pub struct ConfigWrapper<C: Default + Serialize + DeserializeOwned> {
     path: PathBuf,
@@ -20,7 +22,7 @@ impl<C: Default + Serialize + DeserializeOwned> ConfigWrapper<C> {
         }
     }
     pub fn save(&self) -> Result<()> {
-        std::fs::write(&self.path, serde_json::to_vec_pretty(&self.config)?)?;
+        write_file(&self.path, serde_json::to_vec_pretty(&self.config)?)?;
         Ok(())
     }
 }

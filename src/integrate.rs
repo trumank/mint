@@ -1,5 +1,5 @@
 use std::collections::{HashMap, HashSet};
-use std::fs::{File, OpenOptions};
+use std::fs::OpenOptions;
 use std::io::{self, BufReader, BufWriter, Cursor, Read, Seek};
 use std::path::{Path, PathBuf};
 
@@ -8,6 +8,7 @@ use unreal_asset::properties::object_property::TopLevelAssetPath;
 use unreal_asset::types::vector::Vector;
 use unreal_asset::unversioned::ancestry::Ancestry;
 
+use crate::open_file;
 use crate::providers::{ModInfo, ReadSeek};
 
 use unreal_asset::{
@@ -38,7 +39,7 @@ pub fn integrate<P: AsRef<Path>>(path_pak: P, mods: Vec<(ModInfo, PathBuf)>) -> 
     let path_pak = Path::join(path_paks, "FSD-WindowsNoEditor.pak");
     let path_mod_pak = Path::join(path_paks, "mods_P.pak");
 
-    let mut fsd_pak_reader = BufReader::new(File::open(path_pak)?);
+    let mut fsd_pak_reader = BufReader::new(open_file(path_pak)?);
     let fsd_pak = repak::PakReader::new_any(&mut fsd_pak_reader, None)?;
 
     let pcb_path = (
@@ -83,7 +84,7 @@ pub fn integrate<P: AsRef<Path>>(path_pak: P, mods: Vec<(ModInfo, PathBuf)>) -> 
     let mods = mods
         .into_iter()
         .map(|(m, path)| {
-            let mut buf = get_pak_from_data(Box::new(BufReader::new(File::open(path)?)))?;
+            let mut buf = get_pak_from_data(Box::new(BufReader::new(open_file(path)?)))?;
             let pak = repak::PakReader::new_any(&mut buf, None)?;
 
             let mount = Path::new(pak.mount_point());

@@ -52,10 +52,17 @@ struct ActionIntegrateProfile {
     profile: String,
 }
 
+/// Launch via steam
+#[derive(Parser, Debug)]
+struct ActionLaunch {
+    args: Vec<String>,
+}
+
 #[derive(Subcommand, Debug)]
 enum Action {
     Integrate(ActionIntegrate),
     Profile(ActionIntegrateProfile),
+    Launch(ActionLaunch),
 }
 
 #[derive(Parser, Debug)]
@@ -66,6 +73,7 @@ struct Args {
 }
 
 fn main() -> Result<()> {
+    std::env::set_var("RUST_BACKTRACE", "1");
     let rt = tokio::runtime::Runtime::new().expect("Unable to create Runtime");
     let _enter = rt.enter();
 
@@ -80,11 +88,18 @@ fn main() -> Result<()> {
             action_integrate_profile(action).await?;
             Ok(())
         }),
+        Some(Action::Launch(action)) => {
+            std::thread::spawn(move || {
+                rt.block_on(std::future::pending::<()>());
+            });
+            gui(Some(action.args))?;
+            Ok(())
+        }
         None => {
             std::thread::spawn(move || {
                 rt.block_on(std::future::pending::<()>());
             });
-            gui()?;
+            gui(None)?;
             Ok(())
         }
     }

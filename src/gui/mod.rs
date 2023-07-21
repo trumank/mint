@@ -28,7 +28,7 @@ use crate::{
 
 use request_counter::{RequestCounter, RequestID};
 
-pub fn gui() -> Result<()> {
+pub fn gui(args: Option<Vec<String>>) -> Result<()> {
     let options = eframe::NativeOptions {
         initial_window_size: Some(egui::vec2(320.0, 240.0)),
         ..Default::default()
@@ -36,13 +36,14 @@ pub fn gui() -> Result<()> {
     eframe::run_native(
         "DRG Mod Integration",
         options,
-        Box::new(|_cc| Box::new(App::new().unwrap())),
+        Box::new(|_cc| Box::new(App::new(args).unwrap())),
     )
     .map_err(|e| anyhow!("{e}"))?;
     Ok(())
 }
 
 struct App {
+    args: Option<Vec<String>>,
     tx: Sender<message::Message>,
     rx: Receiver<message::Message>,
     state: State,
@@ -65,11 +66,12 @@ struct App {
 }
 
 impl App {
-    fn new() -> Result<Self> {
+    fn new(args: Option<Vec<String>>) -> Result<Self> {
         let (tx, rx) = mpsc::channel(10);
         let state = State::new()?;
 
         Ok(Self {
+            args,
             tx,
             rx,
             request_counter: Default::default(),
@@ -575,7 +577,7 @@ impl eframe::App for App {
                                     );
                                 }
                                 Err(e) => {
-                                    self.log.println(format!("{:#?}", e));
+                                    self.log.println(format!("{:#?}\n{}", e, e.backtrace()));
                                 }
                             },
                         }
@@ -602,7 +604,7 @@ impl eframe::App for App {
                                     );
                                 }
                                 Err(e) => {
-                                    self.log.println(format!("{:#?}", e));
+                                    self.log.println(format!("{:#?}\n{}", e, e.backtrace()));
                                 }
                             },
                         }
@@ -645,6 +647,19 @@ impl eframe::App for App {
                         && self.update_rid.is_none()
                         && self.state.config.drg_pak_path.is_some(),
                     |ui| {
+                        if let Some(args) = &self.args {
+                            if ui.button("launch game").on_hover_ui(|ui| for arg in args {
+                                ui.label(arg);
+                            }).clicked() {
+                                let args = args.clone();
+                                tokio::task::spawn_blocking(move || {
+                                    let mut iter = args.iter();
+                                    std::process::Command::new(
+                                        iter.next().unwrap(),
+                                        ).args(iter).spawn().unwrap();
+                                });
+                            }
+                        }
                         ui.add_enabled_ui(self.state.config.drg_pak_path.is_some(), |ui| {
                             let mut button = ui.button("install mods");
                             if self.state.config.drg_pak_path.is_none() {

@@ -4,6 +4,7 @@ pub mod modio;
 
 use crate::error::IntegrationError;
 use crate::state::config::ConfigWrapper;
+use crate::write_file;
 
 use anyhow::{Context, Result};
 
@@ -380,7 +381,7 @@ impl BlobCache {
         let hash = hex::encode(hasher.finalize());
 
         let tmp = self.path.join(format!(".{hash}"));
-        std::fs::write(&tmp, blob)?;
+        write_file(&tmp, blob)?;
         std::fs::rename(tmp, self.path.join(&hash))?;
 
         Ok(BlobRef(hash))
