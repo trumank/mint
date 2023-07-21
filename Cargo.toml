@@ -1,6 +1,6 @@
 [package]
 name = "drg_mod_integration"
-version = "0.2.3"
+version = "0.2.4"
 edition = "2021"
 repository = "https://github.com/trumank/drg-mod-integration"
 
