@@ -12,7 +12,7 @@ use std::{
 use anyhow::{anyhow, Context, Result};
 use eframe::{
     egui::{self, TextFormat},
-    epaint::{text::LayoutJob, Color32},
+    epaint::{text::LayoutJob, Color32, Stroke},
 };
 use tokio::{
     sync::mpsc::{self, Receiver, Sender},
@@ -415,7 +415,17 @@ impl App {
                 .resizable(false)
                 .show(ctx, |ui| {
                     egui::Grid::new("grid").num_columns(2).show(ui, |ui| {
-                        ui.label("DRG pak").on_hover_text("Path to FSD-WindowsNoEditor.pak (FSD-WinGDK.pak for Microsoft Store version)\nLocated inside the \"Deep Rock Galactic\" installation directory under FSD/Content/Paks.");
+                        let mut job = LayoutJob::default();
+                        job.append(
+                            "DRG pak",
+                            0.0,
+                            TextFormat {
+                                color: ui.visuals().text_color(),
+                                underline: Stroke::new(1.0, ui.visuals().text_color()),
+                                ..Default::default()
+                            },
+                        );
+                        ui.label(job).on_hover_cursor(egui::CursorIcon::Help).on_hover_text("Path to FSD-WindowsNoEditor.pak (FSD-WinGDK.pak for Microsoft Store version)\nLocated inside the \"Deep Rock Galactic\" installation directory under FSD/Content/Paks.");
                         ui.horizontal(|ui| {
                             let res = ui.add(
                                 egui::TextEdit::singleline(
