@@ -36,7 +36,6 @@ pub fn integrate<P: AsRef<Path>>(path_pak: P, mods: Vec<(ModInfo, PathBuf)>) -> 
             path_pak.as_ref().display()
         )
     })?;
-    let path_pak = Path::join(path_paks, "FSD-WindowsNoEditor.pak");
     let path_mod_pak = Path::join(path_paks, "mods_P.pak");
 
     let mut fsd_pak_reader = BufReader::new(open_file(path_pak)?);
