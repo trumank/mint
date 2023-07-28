@@ -297,39 +297,68 @@ impl App {
                             .. // version ignored
                         }) = &info.modio_tags
                         {
+                            let mut mk_searchable_modio_tag = |tag_str: &str, ui: &mut egui::Ui| {
+                                let mut job = LayoutJob::default();
+                                let mut is_match = false;
+                                if let Some(search_string) = &self.search_string {
+                                    for (m, chunk) in FindString::new(tag_str, search_string) {
+                                        let background = if m {
+                                            is_match = true;
+                                            TextFormat {
+                                                background: Color32::YELLOW,
+                                                ..Default::default()
+                                            }
+                                        } else {
+                                            Default::default()
+                                        };
+                                        job.append(chunk, 0.0, background);
+                                    }
+                                } else {
+                                    job.append(tag_str, 0.0, Default::default());
+                                }
+                                let res = ui.add_enabled(
+                                    false,
+                                    egui::Button::new(job).small().stroke(egui::Stroke::NONE),
+                                );
+                                if is_match && self.scroll_to_match {
+                                    res.scroll_to_me(None);
+                                    self.scroll_to_match = false;
+                                }
+                            };
+
                             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                                 if *qol {
-                                    mk_modio_tag_pill(ui, "QoL");
+                                    mk_searchable_modio_tag("QoL", ui);
                                 }
                                 if *gameplay {
-                                    mk_modio_tag_pill(ui, "Gameplay");
+                                    mk_searchable_modio_tag("Gameplay", ui);
                                 }
                                 if *audio {
-                                    mk_modio_tag_pill(ui, "Audio");
+                                    mk_searchable_modio_tag("Audio", ui);
                                 }
                                 if *visual {
-                                    mk_modio_tag_pill(ui, "Visual");
+                                    mk_searchable_modio_tag("Visual", ui);
                                 }
                                 if *framework {
-                                    mk_modio_tag_pill(ui, "Framework");
+                                    mk_searchable_modio_tag("Framework", ui);
                                 }
                                 match required_status {
                                     crate::providers::RequiredStatus::RequiredByAll => {
-                                        mk_modio_tag_pill(ui, "RequiredByAll")
+                                        mk_searchable_modio_tag("RequiredByAll", ui);
                                     }
                                     crate::providers::RequiredStatus::Optional => {
-                                        mk_modio_tag_pill(ui, "Optional")
+                                        mk_searchable_modio_tag("Optional", ui);
                                     }
                                 }
                                 match approval_status {
                                     crate::providers::ApprovalStatus::Verified => {
-                                        mk_modio_tag_pill(ui, "Verified")
+                                        mk_searchable_modio_tag("Verified", ui);
                                     }
                                     crate::providers::ApprovalStatus::Approved => {
-                                        mk_modio_tag_pill(ui, "Approved")
+                                        mk_searchable_modio_tag("Approved", ui);
                                     }
                                     crate::providers::ApprovalStatus::Sandbox => {
-                                        mk_modio_tag_pill(ui, "Sandbox")
+                                        mk_searchable_modio_tag("Sandbox", ui);
                                     }
                                 }
                             });
@@ -547,18 +576,6 @@ impl App {
                 self.settings_window = None;
             }
         }
-    }
-}
-
-fn mk_modio_tag_pill(ui: &mut egui::Ui, text: &str) {
-    if ui
-        .add_enabled(
-            false,
-            egui::Button::new(text).small().stroke(egui::Stroke::NONE),
-        )
-        .clicked()
-    {
-        unreachable!()
     }
 }
 
