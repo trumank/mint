@@ -55,6 +55,7 @@ impl ModProvider for FileProvider {
             resolution: ModResolution::unresolvable(path.to_string_lossy().to_string()),
             suggested_require: false,
             suggested_dependencies: vec![],
+            modio_tags: None,
         }))
     }
 
@@ -94,6 +95,7 @@ impl ModProvider for FileProvider {
             resolution: ModResolution::unresolvable(path.to_string_lossy().to_string()),
             suggested_require: false,
             suggested_dependencies: vec![],
+            modio_tags: None,
         })
     }
 

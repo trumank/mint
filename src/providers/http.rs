@@ -88,6 +88,7 @@ impl ModProvider for HttpProvider {
             resolution: ModResolution::resolvable(spec.url.to_owned()),
             suggested_require: false,
             suggested_dependencies: vec![],
+            modio_tags: None,
         }))
     }
 
@@ -191,6 +192,7 @@ impl ModProvider for HttpProvider {
             resolution: ModResolution::resolvable(spec.url.to_owned()),
             suggested_require: false,
             suggested_dependencies: vec![],
+            modio_tags: None,
         })
     }
 
