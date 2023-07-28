@@ -19,6 +19,7 @@ use tokio::{
     task::JoinHandle,
 };
 
+use crate::providers::ModioTags;
 use crate::{
     error::IntegrationError,
     is_drg_pak,
@@ -285,16 +286,49 @@ impl App {
                             self.scroll_to_match = false;
                         }
 
-                        if let Some(tags) = &info.modio_tags {
-                            for tag in tags {
-                                if ui
-                                    .add_enabled(
-                                        false,
-                                        egui::Button::new(tag).small().stroke(egui::Stroke::NONE),
-                                    )
-                                    .clicked()
-                                {
-                                    unreachable!()
+                        if let Some(ModioTags {
+                            qol,
+                            gameplay,
+                            audio,
+                            visual,
+                            framework,
+                            required_status,
+                            approval_status,
+                            .. // version ignored
+                        }) = &info.modio_tags
+                        {
+                            if *qol {
+                                mk_modio_tag_pill(ui, "QoL");
+                            }
+                            if *gameplay {
+                                mk_modio_tag_pill(ui, "Gameplay");
+                            }
+                            if *audio {
+                                mk_modio_tag_pill(ui, "Audio");
+                            }
+                            if *visual {
+                                mk_modio_tag_pill(ui, "Visual");
+                            }
+                            if *framework {
+                                mk_modio_tag_pill(ui, "Framework");
+                            }
+                            match required_status {
+                                crate::providers::RequiredStatus::RequiredByAll => {
+                                    mk_modio_tag_pill(ui, "RequiredByAll")
+                                }
+                                crate::providers::RequiredStatus::Optional => {
+                                    mk_modio_tag_pill(ui, "Optional")
+                                }
+                            }
+                            match approval_status {
+                                crate::providers::ApprovalStatus::Verified => {
+                                    mk_modio_tag_pill(ui, "Verified")
+                                }
+                                crate::providers::ApprovalStatus::Approved => {
+                                    mk_modio_tag_pill(ui, "Approved")
+                                }
+                                crate::providers::ApprovalStatus::Sandbox => {
+                                    mk_modio_tag_pill(ui, "Sandbox")
                                 }
                             }
                         }
@@ -511,6 +545,18 @@ impl App {
                 self.settings_window = None;
             }
         }
+    }
+}
+
+fn mk_modio_tag_pill(ui: &mut egui::Ui, text: &str) {
+    if ui
+        .add_enabled(
+            false,
+            egui::Button::new(text).small().stroke(egui::Stroke::NONE),
+        )
+        .clicked()
+    {
+        unreachable!()
     }
 }
 

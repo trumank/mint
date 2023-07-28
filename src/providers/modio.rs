@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -10,8 +10,8 @@ use task_local_extensions::Extensions;
 use tokio::sync::mpsc::Sender;
 
 use super::{
-    BlobCache, BlobRef, FetchProgress, ModInfo, ModProvider, ModProviderCache, ModResolution,
-    ModResponse, ModSpecification, ProviderCache,
+    ApprovalStatus, BlobCache, BlobRef, FetchProgress, ModInfo, ModProvider, ModProviderCache,
+    ModResolution, ModResponse, ModSpecification, ModioTags, ProviderCache, RequiredStatus,
 };
 
 lazy_static::lazy_static! {
@@ -338,7 +338,7 @@ impl ModProvider for ModioProvider {
                 resolution: ModResolution::resolvable(url.to_owned()),
                 suggested_require: mod_.tags.contains("RequiredByAll"),
                 suggested_dependencies: deps,
-                modio_tags: Some(mod_.tags.clone()),
+                modio_tags: Some(process_modio_tags(&mod_.tags)),
             }))
         } else if let Some(mod_id) = captures.name("mod_id") {
             // only mod ID specified, use latest version (either cached local or remote depending)
@@ -607,7 +607,7 @@ impl ModProvider for ModioProvider {
             resolution: ModResolution::resolvable(url.to_owned()),
             suggested_require: mod_.tags.contains("RequiredByAll"),
             suggested_dependencies: deps,
-            modio_tags: Some(mod_.tags.clone()),
+            modio_tags: Some(process_modio_tags(&mod_.tags)),
         })
     }
 
@@ -654,5 +654,42 @@ impl ModProvider for ModioProvider {
         } else {
             None
         }
+    }
+}
+
+fn process_modio_tags(set: &HashSet<String>) -> ModioTags {
+    let qol = set.contains("QoL");
+    let gameplay = set.contains("Gameplay");
+    let audio = set.contains("Audio");
+    let visual = set.contains("Visual");
+    let framework = set.contains("Framework");
+    let required_status = if set.contains("RequiredByAll") {
+        RequiredStatus::RequiredByAll
+    } else {
+        RequiredStatus::Optional
+    };
+    let approval_status = if set.contains("Verified") {
+        ApprovalStatus::Verified
+    } else if set.contains("Approved") {
+        ApprovalStatus::Approved
+    } else {
+        ApprovalStatus::Sandbox
+    };
+    // Basic heuristic to collect all the tags which begin with a number, like `1.38`.
+    let versions = set
+        .iter()
+        .filter(|i| i.starts_with(char::is_numeric))
+        .cloned()
+        .collect::<BTreeSet<String>>();
+
+    ModioTags {
+        qol,
+        gameplay,
+        audio,
+        visual,
+        framework,
+        versions,
+        required_status,
+        approval_status,
     }
 }
