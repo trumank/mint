@@ -297,40 +297,42 @@ impl App {
                             .. // version ignored
                         }) = &info.modio_tags
                         {
-                            if *qol {
-                                mk_modio_tag_pill(ui, "QoL");
-                            }
-                            if *gameplay {
-                                mk_modio_tag_pill(ui, "Gameplay");
-                            }
-                            if *audio {
-                                mk_modio_tag_pill(ui, "Audio");
-                            }
-                            if *visual {
-                                mk_modio_tag_pill(ui, "Visual");
-                            }
-                            if *framework {
-                                mk_modio_tag_pill(ui, "Framework");
-                            }
-                            match required_status {
-                                crate::providers::RequiredStatus::RequiredByAll => {
-                                    mk_modio_tag_pill(ui, "RequiredByAll")
+                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                if *qol {
+                                    mk_modio_tag_pill(ui, "QoL");
                                 }
-                                crate::providers::RequiredStatus::Optional => {
-                                    mk_modio_tag_pill(ui, "Optional")
+                                if *gameplay {
+                                    mk_modio_tag_pill(ui, "Gameplay");
                                 }
-                            }
-                            match approval_status {
-                                crate::providers::ApprovalStatus::Verified => {
-                                    mk_modio_tag_pill(ui, "Verified")
+                                if *audio {
+                                    mk_modio_tag_pill(ui, "Audio");
                                 }
-                                crate::providers::ApprovalStatus::Approved => {
-                                    mk_modio_tag_pill(ui, "Approved")
+                                if *visual {
+                                    mk_modio_tag_pill(ui, "Visual");
                                 }
-                                crate::providers::ApprovalStatus::Sandbox => {
-                                    mk_modio_tag_pill(ui, "Sandbox")
+                                if *framework {
+                                    mk_modio_tag_pill(ui, "Framework");
                                 }
-                            }
+                                match required_status {
+                                    crate::providers::RequiredStatus::RequiredByAll => {
+                                        mk_modio_tag_pill(ui, "RequiredByAll")
+                                    }
+                                    crate::providers::RequiredStatus::Optional => {
+                                        mk_modio_tag_pill(ui, "Optional")
+                                    }
+                                }
+                                match approval_status {
+                                    crate::providers::ApprovalStatus::Verified => {
+                                        mk_modio_tag_pill(ui, "Verified")
+                                    }
+                                    crate::providers::ApprovalStatus::Approved => {
+                                        mk_modio_tag_pill(ui, "Approved")
+                                    }
+                                    crate::providers::ApprovalStatus::Sandbox => {
+                                        mk_modio_tag_pill(ui, "Sandbox")
+                                    }
+                                }
+                            });
                         }
                     } else {
                         if ui
