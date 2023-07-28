@@ -44,6 +44,8 @@ pub fn gui(args: Option<Vec<String>>) -> Result<()> {
     Ok(())
 }
 
+const MODIO_LOGO_PNG: &'static [u8] = include_bytes!("../../assets/modio-cog-blue.png");
+
 struct App {
     args: Option<Vec<String>>,
     tx: Sender<message::Message>,
@@ -65,6 +67,7 @@ struct App {
     search_string: Option<String>,
     scroll_to_match: bool,
     settings_window: Option<WindowSettings>,
+    modio_texture_handle: Option<egui::TextureHandle>,
 }
 
 impl App {
@@ -89,6 +92,7 @@ impl App {
             search_string: Default::default(),
             scroll_to_match: false,
             settings_window: None,
+            modio_texture_handle: None,
         })
     }
 
@@ -278,6 +282,37 @@ impl App {
                             }
                         } else {
                             job.append(&info.name, 0.0, Default::default());
+                        }
+
+                        match info.provider {
+                            "modio" => {
+                                let texture: &egui::TextureHandle =
+                                    self.modio_texture_handle.get_or_insert_with(|| {
+                                        let image =
+                                            image::load_from_memory(MODIO_LOGO_PNG).unwrap();
+                                        let size = [image.width() as _, image.height() as _];
+                                        let image_buffer = image.to_rgba8();
+                                        let pixels = image_buffer.as_flat_samples();
+                                        let image = egui::ColorImage::from_rgba_unmultiplied(
+                                            size,
+                                            pixels.as_slice(),
+                                        );
+
+                                        ui.ctx().load_texture(
+                                            "modio-logo",
+                                            image,
+                                            Default::default(),
+                                        )
+                                    });
+                                ui.image(texture, [16.0, 16.0]);
+                            }
+                            "http" => {
+                                ui.label("🌐");
+                            }
+                            "file" => {
+                                ui.label("📁");
+                            }
+                            _ => unimplemented!(),
                         }
 
                         let res = ui.hyperlink_to(job, &item.item.spec.url);
