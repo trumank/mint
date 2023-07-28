@@ -1046,6 +1046,7 @@ dependencies = [
  "egui_extras",
  "futures",
  "hex",
+ "image",
  "inventory",
  "lazy_static",
  "modio",
