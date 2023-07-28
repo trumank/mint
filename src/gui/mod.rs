@@ -348,7 +348,9 @@ impl App {
     }
 
     fn show_provider_parameters(&mut self, ctx: &egui::Context) {
-        let Some(window) = &mut self.window_provider_parameters else { return };
+        let Some(window) = &mut self.window_provider_parameters else {
+            return;
+        };
 
         while let Ok((rid, res)) = window.rx.try_recv() {
             if window.check_rid.as_ref().map_or(false, |r| rid == r.0) {
