@@ -245,9 +245,9 @@ fn get_import<R: Read + Seek>(asset: &mut Asset<R>, import: ImportChain) -> Pack
             .iter()
             .enumerate()
             .find(|(_, ai)| {
-                ai.class_package.get_content() == i.class_package
-                    && ai.class_name.get_content() == i.class_name
-                    && ai.object_name.get_content() == i.object_name
+                ai.class_package.get_content(|n| n == i.class_package)
+                    && ai.class_name.get_content(|n| n == i.class_name)
+                    && ai.object_name.get_content(|n| n == i.object_name)
                     && ai.outer_index == pi
             })
             .map(|(index, _)| PackageIndex::from_import(index as i32).unwrap());
@@ -271,7 +271,7 @@ fn find_export_named<'a, R: io::Read + io::Seek>(
 ) -> Option<&'a mut unreal_asset::exports::normal_export::NormalExport> {
     for export in &mut asset.asset_data.exports {
         if let unreal_asset::exports::Export::NormalExport(export) = export {
-            if export.base_export.object_name.get_content() == name {
+            if export.base_export.object_name.get_content(|n| n == name) {
                 return Some(export);
             }
         }
@@ -287,7 +287,7 @@ fn find_array_property_named<'a>(
 )> {
     for (i, prop) in &mut export.properties.iter_mut().enumerate() {
         if let unreal_asset::properties::Property::ArrayProperty(prop) = prop {
-            if prop.name.get_content() == name {
+            if prop.name.get_content(|n| n == name) {
                 return Some((i, prop));
             }
         }
@@ -430,7 +430,11 @@ fn hook_pcb<R: Read + Seek>(asset: &mut Asset<R>) {
         .enumerate()
         .find_map(|(i, e)| {
             if let unreal_asset::exports::Export::FunctionExport(func) = e {
-                if func.get_base_export().object_name.get_content() == "ReceiveBeginPlay" {
+                if func
+                    .get_base_export()
+                    .object_name
+                    .get_content(|n| n == "ReceiveBeginPlay")
+                {
                     return Some((PackageIndex::from_export(i as i32).unwrap(), func));
                 }
             }
