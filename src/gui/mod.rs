@@ -340,6 +340,27 @@ impl App {
                             };
 
                             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                match approval_status {
+                                    crate::providers::ApprovalStatus::Verified => {
+                                        mk_searchable_modio_tag("Verified", ui, Some(egui::Color32::LIGHT_GREEN));
+                                    }
+                                    crate::providers::ApprovalStatus::Approved => {
+                                        mk_searchable_modio_tag("Approved", ui, Some(egui::Color32::LIGHT_BLUE));
+                                    }
+                                    crate::providers::ApprovalStatus::Sandbox => {
+                                        mk_searchable_modio_tag("Sandbox", ui, Some(egui::Color32::LIGHT_YELLOW));
+                                    }
+                                }
+
+                                match required_status {
+                                    crate::providers::RequiredStatus::RequiredByAll => {
+                                        mk_searchable_modio_tag("RequiredByAll", ui, None);
+                                    }
+                                    crate::providers::RequiredStatus::Optional => {
+                                        mk_searchable_modio_tag("Optional", ui, None);
+                                    }
+                                }
+
                                 if *qol {
                                     mk_searchable_modio_tag("QoL", ui, None);
                                 }
@@ -354,25 +375,6 @@ impl App {
                                 }
                                 if *framework {
                                     mk_searchable_modio_tag("Framework", ui, None);
-                                }
-                                match required_status {
-                                    crate::providers::RequiredStatus::RequiredByAll => {
-                                        mk_searchable_modio_tag("RequiredByAll", ui, None);
-                                    }
-                                    crate::providers::RequiredStatus::Optional => {
-                                        mk_searchable_modio_tag("Optional", ui, None);
-                                    }
-                                }
-                                match approval_status {
-                                    crate::providers::ApprovalStatus::Verified => {
-                                        mk_searchable_modio_tag("Verified", ui, Some(egui::Color32::LIGHT_GREEN));
-                                    }
-                                    crate::providers::ApprovalStatus::Approved => {
-                                        mk_searchable_modio_tag("Approved", ui, Some(egui::Color32::LIGHT_BLUE));
-                                    }
-                                    crate::providers::ApprovalStatus::Sandbox => {
-                                        mk_searchable_modio_tag("Sandbox", ui, Some(egui::Color32::LIGHT_YELLOW));
-                                    }
                                 }
                             });
                         }
