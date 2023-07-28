@@ -284,6 +284,20 @@ impl App {
                             res.scroll_to_me(None);
                             self.scroll_to_match = false;
                         }
+
+                        if let Some(tags) = &info.modio_tags {
+                            for tag in tags {
+                                if ui
+                                    .add_enabled(
+                                        false,
+                                        egui::Button::new(tag).small().stroke(egui::Stroke::NONE),
+                                    )
+                                    .clicked()
+                                {
+                                    unreachable!()
+                                }
+                            }
+                        }
                     } else {
                         if ui
                             .button("📋")

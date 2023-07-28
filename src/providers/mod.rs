@@ -237,6 +237,7 @@ pub struct ModInfo {
     pub resolution: ModResolution,
     pub suggested_require: bool,
     pub suggested_dependencies: Vec<ModSpecification>, // ModResponse
+    pub modio_tags: Option<HashSet<String>>,           // only available for mods from mod.io
 }
 
 /// Returned from ModProvider

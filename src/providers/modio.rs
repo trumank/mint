@@ -338,6 +338,7 @@ impl ModProvider for ModioProvider {
                 resolution: ModResolution::resolvable(url.to_owned()),
                 suggested_require: mod_.tags.contains("RequiredByAll"),
                 suggested_dependencies: deps,
+                modio_tags: Some(mod_.tags.clone()),
             }))
         } else if let Some(mod_id) = captures.name("mod_id") {
             // only mod ID specified, use latest version (either cached local or remote depending)
@@ -606,6 +607,7 @@ impl ModProvider for ModioProvider {
             resolution: ModResolution::resolvable(url.to_owned()),
             suggested_require: mod_.tags.contains("RequiredByAll"),
             suggested_dependencies: deps,
+            modio_tags: Some(mod_.tags.clone()),
         })
     }
 
