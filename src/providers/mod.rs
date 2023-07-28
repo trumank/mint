@@ -11,7 +11,7 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc::Sender;
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 
 use std::io::{Read, Seek};
 use std::path::{Path, PathBuf};
@@ -237,7 +237,33 @@ pub struct ModInfo {
     pub resolution: ModResolution,
     pub suggested_require: bool,
     pub suggested_dependencies: Vec<ModSpecification>, // ModResponse
-    pub modio_tags: Option<HashSet<String>>,           // only available for mods from mod.io
+    pub modio_tags: Option<ModioTags>,                 // only available for mods from mod.io
+}
+
+/// Tags from mod.io.
+#[derive(Debug, Clone)]
+pub struct ModioTags {
+    pub qol: bool,
+    pub gameplay: bool,
+    pub audio: bool,
+    pub visual: bool,
+    pub framework: bool,
+    pub versions: BTreeSet<String>,
+    pub required_status: RequiredStatus,
+    pub approval_status: ApprovalStatus,
+}
+
+#[derive(Debug, Copy, Clone)]
+pub enum RequiredStatus {
+    RequiredByAll,
+    Optional,
+}
+
+#[derive(Debug, Copy, Clone)]
+pub enum ApprovalStatus {
+    Verified,
+    Approved,
+    Sandbox,
 }
 
 /// Returned from ModProvider
