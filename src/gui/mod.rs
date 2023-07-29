@@ -11,7 +11,7 @@ use std::{
 
 use anyhow::{anyhow, Context, Result};
 use eframe::{
-    egui::{self, TextFormat},
+    egui::{self, FontSelection, TextFormat},
     epaint::{text::LayoutJob, Color32, Stroke},
 };
 use tokio::{
@@ -312,6 +312,25 @@ impl App {
         }
     }
 
+    fn parse_mods(&self) -> Vec<ModSpecification> {
+        self.resolve_mod
+            .lines()
+            .map(|l| l.trim())
+            .filter(|l| !l.is_empty())
+            .map(|l| ModSpecification::new(l.to_string()))
+            .collect()
+    }
+    fn build_mod_string(mods: &Vec<ModConfig>) -> String {
+        let mut string = String::new();
+        for m in mods {
+            if m.enabled {
+                string.push_str(&m.spec.url);
+                string.push('\n');
+            }
+        }
+        string
+    }
+
     fn add_mods(&mut self, ctx: &egui::Context, specs: Vec<ModSpecification>) {
         let rid = self.request_counter.next();
         let store = self.state.store.clone();
@@ -578,6 +597,7 @@ impl eframe::App for App {
                                         );
                                     }
                                 }
+                                self.resolve_mod.clear();
                                 self.state.profiles.save().unwrap();
                             }
                             Err(e) => match e.downcast::<IntegrationError>() {
@@ -774,43 +794,54 @@ impl eframe::App for App {
                     },
                 );
 
-                ui.with_layout(ui.layout().with_main_justify(true), |ui| {
-                    let res = ui.add(egui_dropdown::DropDownBox::from_iter(
-                        self.state.profiles.profiles.keys(),
-                        "profile_dropdown",
-                        &mut self.profile_dropdown,
-                        |ui, text| {
-                            let mut job = LayoutJob {
-                                halign: egui::Align::LEFT,
-                                ..Default::default()
-                            };
-                            job.append(text, 0.0, Default::default());
-                            ui.selectable_label(text == self.state.profiles.active_profile, job)
-                        },
-                    ));
-                    if res.gained_focus() {
-                        self.profile_dropdown.clear();
-                    }
-                    if is_committed(&res) {
-                        self.state
-                            .profiles
-                            .profiles
-                            .entry(self.profile_dropdown.to_string())
-                            .or_default();
-                        self.state.profiles.active_profile = self.profile_dropdown.to_string();
-                        self.state.profiles.save().unwrap();
-                        ui.memory_mut(|m| m.close_popup());
-                    }
-
-                    if self
-                        .state
-                        .profiles
-                        .profiles
-                        .contains_key(&self.profile_dropdown)
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::TOP), |ui| {
+                    if ui
+                        .button("📋")
+                        .on_hover_text_at_pointer("copy profile mods")
+                        .clicked()
                     {
-                        self.state.profiles.active_profile = self.profile_dropdown.to_string();
-                        self.state.profiles.save().unwrap();
+                        let mods =
+                            Self::build_mod_string(&self.state.profiles.get_active_profile().mods);
+                        ui.output_mut(|o| o.copied_text = mods);
                     }
+                    ui.with_layout(ui.layout().with_main_justify(true), |ui| {
+                        let res = ui.add(egui_dropdown::DropDownBox::from_iter(
+                            self.state.profiles.profiles.keys(),
+                            "profile_dropdown",
+                            &mut self.profile_dropdown,
+                            |ui, text| {
+                                let mut job = LayoutJob {
+                                    halign: egui::Align::LEFT,
+                                    ..Default::default()
+                                };
+                                job.append(text, 0.0, Default::default());
+                                ui.selectable_label(text == self.state.profiles.active_profile, job)
+                            },
+                        ));
+                        if res.gained_focus() {
+                            self.profile_dropdown.clear();
+                        }
+                        if is_committed(&res) {
+                            self.state
+                                .profiles
+                                .profiles
+                                .entry(self.profile_dropdown.to_string())
+                                .or_default();
+                            self.state.profiles.active_profile = self.profile_dropdown.to_string();
+                            self.state.profiles.save().unwrap();
+                            ui.memory_mut(|m| m.close_popup());
+                        }
+
+                        if self
+                            .state
+                            .profiles
+                            .profiles
+                            .contains_key(&self.profile_dropdown)
+                        {
+                            self.state.profiles.active_profile = self.profile_dropdown.to_string();
+                            self.state.profiles.save().unwrap();
+                        }
+                    });
                 });
             });
 
@@ -821,15 +852,28 @@ impl eframe::App for App {
                     ui.spinner();
                 }
                 ui.with_layout(ui.layout().with_main_justify(true), |ui| {
+                    // define multiline layouter to be able to show multiple lines in a single line widget
+                    let font_id = FontSelection::default().resolve(ui.style());
+                    let text_color = ui.visuals().widgets.inactive.text_color();
+                    let mut multiline_layouter =
+                        move |ui: &egui::Ui, text: &str, wrap_width: f32| {
+                            let layout_job = LayoutJob::simple(
+                                text.to_string(),
+                                font_id.clone(),
+                                text_color,
+                                wrap_width,
+                            );
+                            ui.fonts(|f| f.layout_job(layout_job))
+                        };
+
                     let resolve = ui.add_enabled(
                         self.resolve_mod_rid.is_none(),
-                        egui::TextEdit::singleline(&mut self.resolve_mod).hint_text("Add mod..."),
+                        egui::TextEdit::singleline(&mut self.resolve_mod)
+                            .layouter(&mut multiline_layouter)
+                            .hint_text("Add mod..."),
                     );
                     if is_committed(&resolve) {
-                        self.add_mods(
-                            ctx,
-                            vec![ModSpecification::new(self.resolve_mod.to_string())],
-                        );
+                        self.add_mods(ctx, self.parse_mods());
                     }
                 });
             });
@@ -873,10 +917,7 @@ impl eframe::App for App {
                                 && ctx.memory(|m| m.focus().is_none())
                             {
                                 self.resolve_mod = s.to_string();
-                                self.add_mods(
-                                    ctx,
-                                    vec![ModSpecification::new(self.resolve_mod.to_string())],
-                                );
+                                self.add_mods(ctx, self.parse_mods());
                             }
                         }
                         egui::Event::Text(text) => {

@@ -99,6 +99,9 @@ impl ModStore {
         let mut to_resolve = mods.iter().cloned().collect::<HashSet<ModSpecification>>();
         let mut mods_map = HashMap::new();
 
+        // used to deduplicate dependencies from mods already present in the mod list
+        let mut precise_mod_specs = HashSet::new();
+
         while !to_resolve.is_empty() {
             for (u, m) in stream::iter(
                 to_resolve
@@ -110,11 +113,12 @@ impl ModStore {
             .try_collect::<Vec<_>>()
             .await?
             {
+                precise_mod_specs.insert(m.spec.clone());
                 mods_map.insert(u, m);
                 to_resolve.clear();
                 for m in mods_map.values() {
                     for d in &m.suggested_dependencies {
-                        if !mods_map.contains_key(d) {
+                        if !precise_mod_specs.contains(d) {
                             to_resolve.insert(d.clone());
                         }
                     }
