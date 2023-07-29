@@ -31,6 +31,7 @@ use request_counter::{RequestCounter, RequestID};
 pub fn gui(args: Option<Vec<String>>) -> Result<()> {
     let options = eframe::NativeOptions {
         initial_window_size: Some(egui::vec2(320.0, 240.0)),
+        drag_and_drop_support: true,
         ..Default::default()
     };
     eframe::run_native(
@@ -909,6 +910,24 @@ impl eframe::App for App {
             }
 
             ctx.input(|i| {
+                if !i.raw.dropped_files.is_empty()
+                    && self.integrate_rid.is_none()
+                    && self.update_rid.is_none()
+                {
+                    let mut mods = String::new();
+                    for f in i
+                        .raw
+                        .dropped_files
+                        .iter()
+                        .filter_map(|f| f.path.as_ref().map(|p| p.to_string_lossy()))
+                    {
+                        mods.push_str(&f);
+                        mods.push('\n');
+                    }
+
+                    self.resolve_mod = mods.trim().to_string();
+                    self.add_mods(ctx, self.parse_mods());
+                }
                 for e in &i.events {
                     match e {
                         egui::Event::Paste(s) => {
@@ -916,7 +935,7 @@ impl eframe::App for App {
                                 && self.update_rid.is_none()
                                 && ctx.memory(|m| m.focus().is_none())
                             {
-                                self.resolve_mod = s.to_string();
+                                self.resolve_mod = s.trim().to_string();
                                 self.add_mods(ctx, self.parse_mods());
                             }
                         }
