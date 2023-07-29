@@ -198,7 +198,7 @@ impl App {
                                         .get_version_name(&info.spec)
                                         .unwrap_or_default(),
                                 );
-                                for version in &info.versions {
+                                for version in info.versions.iter().rev() {
                                     ui.selectable_value(
                                         &mut item.item.spec.url,
                                         version.url.to_string(),
