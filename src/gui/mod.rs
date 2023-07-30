@@ -31,7 +31,7 @@ use request_counter::{RequestCounter, RequestID};
 
 pub fn gui(args: Option<Vec<String>>) -> Result<()> {
     let options = eframe::NativeOptions {
-        initial_window_size: Some(egui::vec2(600.0, 400.0)),
+        initial_window_size: Some(egui::vec2(800.0, 400.0)),
         drag_and_drop_support: true,
         ..Default::default()
     };
@@ -297,7 +297,8 @@ impl App {
                             .. // version ignored
                         }) = &info.modio_tags
                         {
-                            let mut mk_searchable_modio_tag = |tag_str: &str, ui: &mut egui::Ui| {
+                            let mut mk_searchable_modio_tag = |tag_str: &str, ui: &mut egui::Ui, color: Option<egui::Color32>| {
+                                let text_color = if color.is_some() { Color32::BLACK } else { Color32::GRAY };
                                 let mut job = LayoutJob::default();
                                 let mut is_match = false;
                                 if let Some(search_string) = &self.search_string {
@@ -306,20 +307,32 @@ impl App {
                                             is_match = true;
                                             TextFormat {
                                                 background: Color32::YELLOW,
+                                                color: text_color,
                                                 ..Default::default()
                                             }
                                         } else {
-                                            Default::default()
+                                            TextFormat {
+                                                color: text_color,
+                                                ..Default::default()
+                                            }
                                         };
                                         job.append(chunk, 0.0, background);
                                     }
                                 } else {
-                                    job.append(tag_str, 0.0, Default::default());
+                                    job.append(tag_str, 0.0, TextFormat {
+                                        color: text_color,
+                                        ..Default::default()
+                                    });
                                 }
-                                let res = ui.add_enabled(
-                                    false,
-                                    egui::Button::new(job).small().stroke(egui::Stroke::NONE),
-                                );
+
+                                let button = if let Some(color) = color {
+                                    egui::Button::new(job).small().fill(color).stroke(egui::Stroke::NONE)
+                                } else {
+                                    egui::Button::new(job).small().stroke(egui::Stroke::NONE)
+                                };
+
+                                let res = ui.add_enabled(false, button);
+
                                 if is_match && self.scroll_to_match {
                                     res.scroll_to_me(None);
                                     self.scroll_to_match = false;
@@ -328,37 +341,37 @@ impl App {
 
                             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                                 if *qol {
-                                    mk_searchable_modio_tag("QoL", ui);
+                                    mk_searchable_modio_tag("QoL", ui, None);
                                 }
                                 if *gameplay {
-                                    mk_searchable_modio_tag("Gameplay", ui);
+                                    mk_searchable_modio_tag("Gameplay", ui, None);
                                 }
                                 if *audio {
-                                    mk_searchable_modio_tag("Audio", ui);
+                                    mk_searchable_modio_tag("Audio", ui, None);
                                 }
                                 if *visual {
-                                    mk_searchable_modio_tag("Visual", ui);
+                                    mk_searchable_modio_tag("Visual", ui, None);
                                 }
                                 if *framework {
-                                    mk_searchable_modio_tag("Framework", ui);
+                                    mk_searchable_modio_tag("Framework", ui, None);
                                 }
                                 match required_status {
                                     crate::providers::RequiredStatus::RequiredByAll => {
-                                        mk_searchable_modio_tag("RequiredByAll", ui);
+                                        mk_searchable_modio_tag("RequiredByAll", ui, None);
                                     }
                                     crate::providers::RequiredStatus::Optional => {
-                                        mk_searchable_modio_tag("Optional", ui);
+                                        mk_searchable_modio_tag("Optional", ui, None);
                                     }
                                 }
                                 match approval_status {
                                     crate::providers::ApprovalStatus::Verified => {
-                                        mk_searchable_modio_tag("Verified", ui);
+                                        mk_searchable_modio_tag("Verified", ui, Some(egui::Color32::LIGHT_GREEN));
                                     }
                                     crate::providers::ApprovalStatus::Approved => {
-                                        mk_searchable_modio_tag("Approved", ui);
+                                        mk_searchable_modio_tag("Approved", ui, Some(egui::Color32::LIGHT_BLUE));
                                     }
                                     crate::providers::ApprovalStatus::Sandbox => {
-                                        mk_searchable_modio_tag("Sandbox", ui);
+                                        mk_searchable_modio_tag("Sandbox", ui, Some(egui::Color32::LIGHT_YELLOW));
                                     }
                                 }
                             });
