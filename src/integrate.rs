@@ -96,6 +96,9 @@ pub fn integrate<P: AsRef<Path>>(path_pak: P, mods: Vec<(ModInfo, PathBuf)>) -> 
                     if filename == "AssetRegistry.bin" {
                         continue;
                     }
+                    if new_path.extension().and_then(std::ffi::OsStr::to_str) == Some("ushaderbytecode") {
+                        continue;
+                    }
                     fn format_soft_class(path: &Path) -> String {
                         let name = path.file_stem().unwrap().to_string_lossy();
                         format!(
