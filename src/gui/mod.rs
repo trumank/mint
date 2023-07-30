@@ -30,7 +30,7 @@ use request_counter::{RequestCounter, RequestID};
 
 pub fn gui(args: Option<Vec<String>>) -> Result<()> {
     let options = eframe::NativeOptions {
-        initial_window_size: Some(egui::vec2(320.0, 240.0)),
+        initial_window_size: Some(egui::vec2(600.0, 400.0)),
         drag_and_drop_support: true,
         ..Default::default()
     };
