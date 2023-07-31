@@ -1,15 +1,14 @@
 use std::collections::{HashMap, HashSet};
 use std::fs::OpenOptions;
-use std::io::{self, BufReader, BufWriter, Cursor, Read, Seek};
+use std::io::{self, BufReader, BufWriter, Cursor, Read, Seek, Write};
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
-use unreal_asset::properties::object_property::TopLevelAssetPath;
-use unreal_asset::types::vector::Vector;
-use unreal_asset::unversioned::ancestry::Ancestry;
+use repak::PakWriter;
 
-use crate::open_file;
 use crate::providers::{ModInfo, ReadSeek};
+use crate::splice::TrackedStatement;
+use crate::{open_file, splice};
 
 use unreal_asset::{
     exports::ExportBaseTrait,
@@ -18,6 +17,8 @@ use unreal_asset::{
         EExprToken, ExByteConst, ExCallMath, ExLet, ExLetObj, ExLocalVariable, ExRotationConst,
         ExSelf, ExSoftObjectConst, ExStringConst, ExVectorConst, FieldPath, KismetPropertyPointer,
     },
+    kismet::{ExFalse, KismetExpression},
+    properties::object_property::TopLevelAssetPath,
     properties::{
         int_property::BoolProperty,
         object_property::{SoftObjectPath, SoftObjectProperty},
@@ -25,7 +26,9 @@ use unreal_asset::{
         struct_property::StructProperty,
         Property,
     },
+    types::vector::Vector,
     types::{fname::FName, PackageIndex},
+    unversioned::ancestry::Ancestry,
     Asset,
 };
 
@@ -41,24 +44,83 @@ pub fn integrate<P: AsRef<Path>>(path_pak: P, mods: Vec<(ModInfo, PathBuf)>) -> 
     let mut fsd_pak_reader = BufReader::new(open_file(path_pak)?);
     let fsd_pak = repak::PakReader::new_any(&mut fsd_pak_reader, None)?;
 
-    let pcb_path = (
-        "FSD/Content/Game/BP_PlayerControllerBase.uasset",
-        "FSD/Content/Game/BP_PlayerControllerBase.uexp",
+    #[derive(Debug, Default)]
+    struct RawAsset {
+        uasset: Option<Vec<u8>>,
+        uexp: Option<Vec<u8>>,
+    }
+    impl RawAsset {
+        fn parse(&self) -> Result<Asset<Cursor<&Vec<u8>>>> {
+            Ok(unreal_asset::Asset::new(
+                Cursor::new(self.uasset.as_ref().unwrap()),
+                Some(Cursor::new(self.uexp.as_ref().unwrap())),
+                unreal_asset::engine_version::EngineVersion::VER_UE4_27,
+                None,
+            )?)
+        }
+    }
+
+    fn write_asset<T: Seek + Write, C: Seek + Read>(
+        pak: &mut PakWriter<T>,
+        asset: Asset<C>,
+        path: &str,
+    ) -> Result<()> {
+        let mut data_out = (Cursor::new(vec![]), Cursor::new(vec![]));
+
+        asset.write_data(&mut data_out.0, Some(&mut data_out.1))?;
+        data_out.0.rewind()?;
+        data_out.1.rewind()?;
+
+        pak.write_file(&format!("{path}.uasset"), &mut data_out.0)?;
+        pak.write_file(&format!("{path}.uexp"), &mut data_out.1)?;
+
+        Ok(())
+    }
+
+    fn format_soft_class(path: &Path) -> String {
+        let name = path.file_stem().unwrap().to_string_lossy();
+        format!(
+            "/Game/{}{}_C",
+            path.strip_prefix("FSD/Content")
+                .unwrap()
+                .to_string_lossy()
+                .strip_suffix("uasset")
+                .unwrap(),
+            name
+        )
+    }
+
+    let pcb_path = "FSD/Content/Game/BP_PlayerControllerBase";
+    let patch_paths = [
+        "FSD/Content/Game/BP_GameInstance",
+        "FSD/Content/Game/SpaceRig/BP_PlayerController_SpaceRig",
+        "FSD/Content/Game/StartMenu/Bp_StartMenu_PlayerController",
+        "FSD/Content/UI/Menu_DeepDives/ITM_DeepDives_Join",
+        "FSD/Content/UI/Menu_ServerList/_MENU_ServerList",
+        "FSD/Content/UI/Menu_ServerList/WND_JoiningModded",
+    ];
+
+    let mut deferred_assets: HashMap<&str, RawAsset> = HashMap::from_iter(
+        [pcb_path]
+            .iter()
+            .chain(patch_paths.iter())
+            .map(|path| (*path, RawAsset::default())),
     );
 
-    let mut pcb_asset = unreal_asset::Asset::new(
-        Cursor::new(fsd_pak.get(pcb_path.0, &mut fsd_pak_reader)?),
-        Some(Cursor::new(fsd_pak.get(pcb_path.1, &mut fsd_pak_reader)?)),
-        unreal_asset::engine_version::EngineVersion::VER_UE4_27,
-    )?;
-
-    hook_pcb(&mut pcb_asset);
-
-    let mut pcb_out = (Cursor::new(vec![]), Cursor::new(vec![]));
-
-    pcb_asset.write_data(&mut pcb_out.0, Some(&mut pcb_out.1))?;
-    pcb_out.0.rewind()?;
-    pcb_out.1.rewind()?;
+    // collect assets from game pak file
+    for (path, asset) in &mut deferred_assets {
+        // TODO repak should return an option...
+        asset.uasset = match fsd_pak.get(&format!("{path}.uasset"), &mut fsd_pak_reader) {
+            Ok(file) => Ok(Some(file)),
+            Err(repak::Error::MissingEntry(_)) => Ok(None),
+            Err(e) => Err(e),
+        }?;
+        asset.uexp = match fsd_pak.get(&format!("{path}.uexp"), &mut fsd_pak_reader) {
+            Ok(file) => Ok(Some(file)),
+            Err(repak::Error::MissingEntry(_)) => Ok(None),
+            Err(e) => Err(e),
+        }?;
+    }
 
     let mut mod_pak = repak::PakWriter::new(
         BufWriter::new(
@@ -74,9 +136,6 @@ pub fn integrate<P: AsRef<Path>>(path_pak: P, mods: Vec<(ModInfo, PathBuf)>) -> 
         None,
     );
 
-    mod_pak.write_file(pcb_path.0, &mut pcb_out.0)?;
-    mod_pak.write_file(pcb_path.1, &mut pcb_out.1)?;
-
     let mut init_spacerig_assets = HashSet::new();
     let mut init_cave_assets = HashSet::new();
 
@@ -90,26 +149,19 @@ pub fn integrate<P: AsRef<Path>>(path_pak: P, mods: Vec<(ModInfo, PathBuf)>) -> 
 
             for p in pak.files() {
                 let j = mount.join(&p);
-                let new_path = j.strip_prefix("../../../").expect("prefix does not match");
+                let new_path = j
+                    .strip_prefix("../../../")
+                    .context("prefix does not match")?;
+                let new_path_str = &new_path.to_string_lossy().replace('\\', "/");
 
                 if let Some(filename) = new_path.file_name() {
                     if filename == "AssetRegistry.bin" {
                         continue;
                     }
-                    if new_path.extension().and_then(std::ffi::OsStr::to_str) == Some("ushaderbytecode") {
+                    if new_path.extension().and_then(std::ffi::OsStr::to_str)
+                        == Some("ushaderbytecode")
+                    {
                         continue;
-                    }
-                    fn format_soft_class(path: &Path) -> String {
-                        let name = path.file_stem().unwrap().to_string_lossy();
-                        format!(
-                            "/Game/{}{}_C",
-                            path.strip_prefix("FSD/Content")
-                                .unwrap()
-                                .to_string_lossy()
-                                .strip_suffix("uasset")
-                                .unwrap(),
-                            name
-                        )
                     }
                     let lower = filename.to_string_lossy().to_lowercase();
                     if lower == "initspacerig.uasset" {
@@ -120,14 +172,35 @@ pub fn integrate<P: AsRef<Path>>(path_pak: P, mods: Vec<(ModInfo, PathBuf)>) -> 
                     }
                 }
 
-                mod_pak.write_file(
-                    &new_path.to_string_lossy().replace('\\', "/"),
-                    &mut Cursor::new(pak.get(&p, &mut buf)?),
-                )?;
+                let file_data = pak.get(&p, &mut buf)?;
+                if let Some(raw) = new_path_str
+                    .strip_suffix(".uasset")
+                    .and_then(|path| deferred_assets.get_mut(path))
+                {
+                    raw.uasset = Some(file_data);
+                } else if let Some(raw) = new_path_str
+                    .strip_suffix(".uexp")
+                    .and_then(|path| deferred_assets.get_mut(path))
+                {
+                    raw.uexp = Some(file_data);
+                } else {
+                    mod_pak.write_file(new_path_str, &mut Cursor::new(file_data))?;
+                }
             }
             Ok(m.resolution.url) // TODO don't leak paths of local mods to clients
         })
         .collect::<Result<Vec<String>>>()?;
+
+    {
+        let mut pcb_asset = deferred_assets[&pcb_path].parse()?;
+        hook_pcb(&mut pcb_asset);
+        write_asset(&mut mod_pak, pcb_asset, pcb_path)?;
+    }
+    for patch_path in patch_paths {
+        let mut asset = deferred_assets[&patch_path].parse()?;
+        patch(&mut asset)?;
+        write_asset(&mut mod_pak, asset, patch_path)?;
+    }
 
     let mut int_pak_reader = Cursor::new(include_bytes!("../integration.pak"));
     let int_pak = repak::PakReader::new_any(&mut int_pak_reader, None)?;
@@ -168,6 +241,7 @@ pub fn integrate<P: AsRef<Path>>(path_pak: P, mods: Vec<(ModInfo, PathBuf)>) -> 
         Cursor::new(int_pak.get(int_path.0, &mut int_pak_reader)?),
         Some(Cursor::new(int_pak.get(int_path.1, &mut int_pak_reader)?)),
         unreal_asset::engine_version::EngineVersion::VER_UE4_27,
+        None,
     )?;
 
     inject_init_actors(
@@ -736,4 +810,49 @@ fn inject_init_actors<R: Read + Seek>(
             }
         }
     }
+}
+
+fn patch<C: Seek + Read>(asset: &mut Asset<C>) -> Result<()> {
+    let ver = splice::AssetVersion::new_from(asset);
+    let mut statements = splice::extract_tracked_statements(asset, ver, &None);
+
+    let find_function = |name| {
+        asset
+            .imports
+            .iter()
+            .enumerate()
+            .find(|(_, i)| {
+                i.class_package.get_content(|s| s == "/Script/CoreUObject")
+                    && i.class_name.get_content(|s| s == "Function")
+                    && i.object_name.get_content(|s| s == name)
+            })
+            .map(|(pi, _)| PackageIndex::from_import(pi as i32).unwrap())
+    };
+
+    fn patch_ismodded(
+        is_modded: Option<PackageIndex>,
+        is_modded_sandbox: Option<PackageIndex>,
+        mut statement: TrackedStatement,
+    ) -> Option<TrackedStatement> {
+        splice::walk(&mut statement.ex, &|ex| {
+            if let KismetExpression::ExCallMath(f) = ex {
+                if Some(f.stack_node) == is_modded || Some(f.stack_node) == is_modded_sandbox {
+                    *ex = ExFalse::default().into()
+                }
+            }
+        });
+        Some(statement)
+    }
+
+    let is_modded = find_function("FSDIsModdedServer");
+    let is_modded_sandbox = find_function("FSDIsModdedSandboxServer");
+
+    for (_pi, statements) in statements.iter_mut() {
+        *statements = std::mem::take(statements)
+            .into_iter()
+            .filter_map(|s| patch_ismodded(is_modded, is_modded_sandbox, s))
+            .collect();
+    }
+    splice::inject_tracked_statements(asset, ver, statements);
+    Ok(())
 }

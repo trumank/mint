@@ -2,6 +2,7 @@ pub mod error;
 pub mod gui;
 pub mod integrate;
 pub mod providers;
+pub mod splice;
 pub mod state;
 
 use std::{

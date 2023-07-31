@@ -3857,7 +3857,7 @@ checksum = "c0edd1e5b14653f783770bce4a4dabb4a5108a5370a5f5d8cfe8710c361f6c8b"
 [[package]]
 name = "unreal_asset"
 version = "0.1.16"
-source = "git+https://github.com/AstroTechies/unrealmodding.git#b1d55533fcd16699d14bac425a8fa7f66f44f216"
+source = "git+https://github.com/trumank/unrealmodding?branch=patches#26af84e4c71df1552dd2ceec00bbc09b24574088"
 dependencies = [
  "bitflags 1.3.2",
  "bitvec",
@@ -3879,7 +3879,7 @@ dependencies = [
 [[package]]
 name = "unreal_asset_proc_macro"
 version = "0.1.16"
-source = "git+https://github.com/AstroTechies/unrealmodding.git#b1d55533fcd16699d14bac425a8fa7f66f44f216"
+source = "git+https://github.com/trumank/unrealmodding?branch=patches#26af84e4c71df1552dd2ceec00bbc09b24574088"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -3889,7 +3889,7 @@ dependencies = [
 [[package]]
 name = "unreal_helpers"
 version = "0.1.16"
-source = "git+https://github.com/AstroTechies/unrealmodding.git#b1d55533fcd16699d14bac425a8fa7f66f44f216"
+source = "git+https://github.com/trumank/unrealmodding?branch=patches#26af84e4c71df1552dd2ceec00bbc09b24574088"
 dependencies = [
  "bitvec",
  "byteorder",
