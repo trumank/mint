@@ -8,7 +8,7 @@ use repak::PakWriter;
 
 use crate::providers::{ModInfo, ReadSeek};
 use crate::splice::TrackedStatement;
-use crate::{open_file, splice};
+use crate::{get_binaries_directory_from_pak, open_file, splice};
 
 use unreal_asset::{
     exports::ExportBaseTrait,
@@ -40,6 +40,7 @@ pub fn integrate<P: AsRef<Path>>(path_pak: P, mods: Vec<(ModInfo, PathBuf)>) -> 
         )
     })?;
     let path_mod_pak = Path::join(path_paks, "mods_P.pak");
+    let path_binaries = get_binaries_directory_from_pak(&path_pak)?;
 
     let mut fsd_pak_reader = BufReader::new(open_file(path_pak)?);
     let fsd_pak = repak::PakReader::new_any(&mut fsd_pak_reader, None)?;
@@ -136,6 +137,17 @@ pub fn integrate<P: AsRef<Path>>(path_pak: P, mods: Vec<(ModInfo, PathBuf)>) -> 
         None,
     );
 
+    let hook_dll = include_bytes!(env!("CARGO_CDYLIB_FILE_HOOK_x3daudio1_7"));
+    let hook_dll_path = path_binaries.join("x3daudio1_7.dll");
+    if hook_dll_path
+        .metadata()
+        .map(|m| m.len() != hook_dll.len() as u64)
+        .unwrap_or(true)
+    {
+        std::fs::write(&hook_dll_path, hook_dll)
+            .with_context(|| format!("failed to write hook to {}", hook_dll_path.display()))?;
+    }
+
     let mut init_spacerig_assets = HashSet::new();
     let mut init_cave_assets = HashSet::new();
 
@@ -156,11 +168,6 @@ pub fn integrate<P: AsRef<Path>>(path_pak: P, mods: Vec<(ModInfo, PathBuf)>) -> 
 
                 if let Some(filename) = new_path.file_name() {
                     if filename == "AssetRegistry.bin" {
-                        continue;
-                    }
-                    if new_path.extension().and_then(std::ffi::OsStr::to_str)
-                        == Some("ushaderbytecode")
-                    {
                         continue;
                     }
                     let lower = filename.to_string_lossy().to_lowercase();

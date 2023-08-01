@@ -20,3 +20,17 @@ Most mods work just as if they were loaded via the official integration, but the
 behavioural differences. If a mod is crashing or otherwise behaving differently than when using the
 official integration, *please* create an
 [issue](https://github.com/trumank/drg-mod-integration/issues/new) so it can be addressed.
+
+## building
+
+The `bindeps` unstable feature is required to build and include the DLL hook which requires both
+nightly and the `bindeps` feature to be specified like so:
+
+    cargo build --release -Z bindeps
+
+Alternatively, the `bindeps` feature can enable in the user's `.cargo/config.toml` file:
+
+```toml
+[unstable]
+bindeps = true
+```

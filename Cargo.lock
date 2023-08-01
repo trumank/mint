@@ -1046,6 +1046,7 @@ dependencies = [
  "egui_extras",
  "futures",
  "hex",
+ "hook",
  "image",
  "inventory",
  "lazy_static",
@@ -1771,6 +1772,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5444c27eef6923071f7ebcc33e3444508466a76f7a2b93da00ed6e19f30c1ddb"
 dependencies = [
  "windows-sys 0.48.0",
+]
+
+[[package]]
+name = "hook"
+version = "0.1.0"
+dependencies = [
+ "memchr",
+ "winapi",
+ "windows 0.48.0",
 ]
 
 [[package]]

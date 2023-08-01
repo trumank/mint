@@ -10,7 +10,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use anyhow::{Context, Result};
+use anyhow::{bail, Context, Result};
 
 use error::IntegrationError;
 use providers::{ModSpecification, ProviderFactory};
@@ -22,6 +22,26 @@ pub fn find_drg_pak() -> Option<PathBuf> {
             .app(&548430)
             .map(|a| a.path.join("FSD/Content/Paks/FSD-WindowsNoEditor.pak"))
     })
+}
+
+pub fn get_binaries_directory_from_pak<P: AsRef<Path>>(pak: P) -> Result<PathBuf> {
+    let pak_name = pak
+        .as_ref()
+        .file_name()
+        .context("failed to get pak file name")?
+        .to_string_lossy()
+        .to_lowercase();
+    let root = pak
+        .as_ref()
+        .parent()
+        .and_then(Path::parent)
+        .and_then(Path::parent)
+        .context("failed to get pak parent directory")?;
+    Ok(root.join("Binaries").join(match pak_name.as_str() {
+        "fsd-wingdk.pak" => "WinGDK",
+        "fsd-windowsnoeditor.pak" => "Win64",
+        _ => bail!("unrecognized pak file name: {pak_name}"),
+    }))
 }
 
 /// File::open with the file path included in any error messages
