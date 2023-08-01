@@ -44,7 +44,7 @@ pub fn gui(args: Option<Vec<String>>) -> Result<()> {
     Ok(())
 }
 
-const MODIO_LOGO_PNG: &'static [u8] = include_bytes!("../../assets/modio-cog-blue.png");
+const MODIO_LOGO_PNG: &[u8] = include_bytes!("../../assets/modio-cog-blue.png");
 
 struct App {
     args: Option<Vec<String>>,
