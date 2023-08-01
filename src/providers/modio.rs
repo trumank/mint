@@ -668,7 +668,7 @@ fn process_modio_tags(set: &HashSet<String>) -> ModioTags {
     } else {
         RequiredStatus::Optional
     };
-    let approval_status = if set.contains("Verified") {
+    let approval_status = if set.contains("Verified") || set.contains("Auto-Verified") {
         ApprovalStatus::Verified
     } else if set.contains("Approved") {
         ApprovalStatus::Approved
