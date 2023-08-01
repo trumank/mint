@@ -69,6 +69,7 @@ struct App {
     settings_window: Option<WindowSettings>,
     modio_texture_handle: Option<egui::TextureHandle>,
     last_action_status: LastActionStatus,
+    profile_rename_buffer: String,
 }
 
 enum LastActionStatus {
@@ -101,6 +102,7 @@ impl App {
             settings_window: None,
             modio_texture_handle: None,
             last_action_status: LastActionStatus::Idle,
+            profile_rename_buffer: String::new(),
         })
     }
 
@@ -637,6 +639,74 @@ impl App {
             }
         }
     }
+
+    fn mk_rename_profile_popup(
+        &mut self,
+        ui: &mut egui::Ui,
+        popup_id: egui::Id,
+        response: egui::Response,
+    ) -> Option<()> {
+        custom_popup_above_or_below_widget(
+            ui,
+            popup_id,
+            &response,
+            egui::AboveOrBelow::Below,
+            |ui| {
+                ui.set_min_width(200.0);
+                ui.vertical(|ui| {
+                    let _response = ui.add_enabled(
+                        true,
+                        egui::TextEdit::singleline(&mut self.profile_rename_buffer)
+                            .hint_text("Enter new profile name"),
+                    );
+                    ui.horizontal(|ui| {
+                        if ui.button("Cancel").clicked() {
+                            ui.memory_mut(|mem| mem.close_popup());
+                        }
+                        if ui.button("OK").clicked() {
+                            ui.memory_mut(|mem| mem.close_popup());
+
+                            if self.profile_rename_buffer.is_empty() {
+                                self.last_action_status = LastActionStatus::Failure(
+                                    "Profile name cannot be empty".to_string(),
+                                );
+                            } else if self
+                                .state
+                                .profiles
+                                .profiles
+                                .contains_key(&self.profile_rename_buffer)
+                            {
+                                self.last_action_status = LastActionStatus::Failure(format!(
+                                    "Profile name \"{}\" already exists!",
+                                    &self.profile_rename_buffer
+                                ));
+                            } else {
+                                let profile_to_remove = self.state.profiles.active_profile.clone();
+                                let profile = self
+                                    .state
+                                    .profiles
+                                    .profiles
+                                    .remove(&profile_to_remove)
+                                    .unwrap();
+                                self.state
+                                    .profiles
+                                    .profiles
+                                    .insert(self.profile_rename_buffer.clone(), profile);
+                                self.state.profiles.active_profile =
+                                    self.profile_rename_buffer.clone();
+                                self.profile_dropdown = self.profile_rename_buffer.clone();
+
+                                self.last_action_status = LastActionStatus::Success(format!(
+                                    "Successfully renamed profile \"{}\" to \"{}\"",
+                                    profile_to_remove, self.state.profiles.active_profile
+                                ));
+                            }
+                        }
+                    });
+                });
+            },
+        )
+    }
 }
 
 mod request_counter {
@@ -979,7 +1049,45 @@ impl eframe::App for App {
                     },
                 );
 
+                ui.add_enabled_ui(true, |ui| {
+                    let response = ui
+                        .button("Rename")
+                        .on_hover_text_at_pointer("edit profile name");
+                    let popup_id = ui.make_persistent_id("edit-profile-name-popup");
+                    if response.clicked() {
+                        ui.memory_mut(|mem| mem.open_popup(popup_id));
+                    }
+                    self.mk_rename_profile_popup(ui, popup_id, response)
+                });
+
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::TOP), |ui| {
+                    if ui
+                        .button("🗐")
+                        .on_hover_text_at_pointer("duplicate profile")
+                        .clicked()
+                    {
+                        let active_profile_mods =
+                            self.state.profiles.get_active_profile().mods.clone();
+                        let new_profile_name = {
+                            let mut candidate_name =
+                                format!("{} - Copy", self.state.profiles.active_profile);
+                            while self.state.profiles.profiles.contains_key(&candidate_name) {
+                                candidate_name = format!("{} - Copy", candidate_name);
+                            }
+                            candidate_name
+                        };
+                        self.state.profiles.profiles.insert(
+                            new_profile_name.clone(),
+                            crate::state::ModProfile {
+                                mods: active_profile_mods,
+                            },
+                        );
+                        self.profile_dropdown = new_profile_name.clone();
+                        self.last_action_status = LastActionStatus::Success(format!(
+                            "Successfully duplicated the active profile to \"{}\"!",
+                            new_profile_name
+                        ));
+                    }
                     if ui
                         .button("📋")
                         .on_hover_text_at_pointer("copy profile mods")
@@ -1139,6 +1247,55 @@ impl eframe::App for App {
 
 fn is_committed(res: &egui::Response) -> bool {
     res.lost_focus() && res.ctx.input(|i| i.key_pressed(egui::Key::Enter))
+}
+
+/// A custom popup which does not automatically close when clicked.
+fn custom_popup_above_or_below_widget<R>(
+    ui: &egui::Ui,
+    popup_id: egui::Id,
+    widget_response: &egui::Response,
+    above_or_below: egui::AboveOrBelow,
+    add_contents: impl FnOnce(&mut egui::Ui) -> R,
+) -> Option<R> {
+    if ui.memory(|mem| mem.is_popup_open(popup_id)) {
+        let (pos, pivot) = match above_or_below {
+            egui::AboveOrBelow::Above => {
+                (widget_response.rect.left_top(), egui::Align2::LEFT_BOTTOM)
+            }
+            egui::AboveOrBelow::Below => {
+                (widget_response.rect.left_bottom(), egui::Align2::LEFT_TOP)
+            }
+        };
+
+        let inner = egui::Area::new(popup_id)
+            .order(egui::Order::Foreground)
+            .constrain(true)
+            .fixed_pos(pos)
+            .pivot(pivot)
+            .show(ui.ctx(), |ui| {
+                // Note: we use a separate clip-rect for this area, so the popup can be outside the parent.
+                // See https://github.com/emilk/egui/issues/825
+                let frame = egui::Frame::popup(ui.style());
+                let frame_margin = frame.total_margin();
+                frame
+                    .show(ui, |ui| {
+                        ui.with_layout(egui::Layout::top_down_justified(egui::Align::LEFT), |ui| {
+                            ui.set_width(widget_response.rect.width() - frame_margin.sum().x);
+                            add_contents(ui)
+                        })
+                        .inner
+                    })
+                    .inner
+            })
+            .inner;
+
+        if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+            ui.memory_mut(|mem| mem.close_popup());
+        }
+        Some(inner)
+    } else {
+        None
+    }
 }
 
 #[derive(Debug)]
