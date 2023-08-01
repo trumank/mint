@@ -68,6 +68,13 @@ struct App {
     scroll_to_match: bool,
     settings_window: Option<WindowSettings>,
     modio_texture_handle: Option<egui::TextureHandle>,
+    last_action_status: LastActionStatus,
+}
+
+enum LastActionStatus {
+    Idle,
+    Success(String),
+    Failure(String),
 }
 
 impl App {
@@ -93,6 +100,7 @@ impl App {
             scroll_to_match: false,
             settings_window: None,
             modio_texture_handle: None,
+            last_action_status: LastActionStatus::Idle,
         })
     }
 
@@ -450,6 +458,7 @@ impl App {
             .map(|l| ModSpecification::new(l.to_string()))
             .collect()
     }
+
     fn build_mod_string(mods: &Vec<ModConfig>) -> String {
         let mut string = String::new();
         for m in mods {
@@ -473,6 +482,7 @@ impl App {
                 .unwrap();
             ctx.request_repaint();
         });
+        self.last_action_status = LastActionStatus::Idle;
         self.resolve_mod_rid = Some(rid);
     }
 
@@ -731,15 +741,22 @@ impl eframe::App for App {
                                 }
                                 self.resolve_mod.clear();
                                 self.state.profiles.save().unwrap();
+                                self.last_action_status = LastActionStatus::Success(
+                                    "mods successfully resolved".to_string(),
+                                );
                             }
                             Err(e) => match e.downcast::<IntegrationError>() {
                                 Ok(IntegrationError::NoProvider { url: _, factory }) => {
                                     self.window_provider_parameters = Some(
                                         WindowProviderParameters::new(factory, &mut self.state),
                                     );
+                                    self.last_action_status =
+                                        LastActionStatus::Failure("no provider".to_string());
                                 }
                                 Err(e) => {
                                     self.log.println(format!("{:#?}\n{}", e, e.backtrace()));
+                                    self.last_action_status =
+                                        LastActionStatus::Failure(e.to_string());
                                 }
                             },
                         }
@@ -758,15 +775,21 @@ impl eframe::App for App {
                         match res {
                             Ok(()) => {
                                 self.log.println("Integration complete");
+                                self.last_action_status =
+                                    LastActionStatus::Success("integration complete".to_string());
                             }
                             Err(e) => match e.downcast::<IntegrationError>() {
                                 Ok(IntegrationError::NoProvider { url: _, factory }) => {
                                     self.window_provider_parameters = Some(
                                         WindowProviderParameters::new(factory, &mut self.state),
                                     );
+                                    self.last_action_status =
+                                        LastActionStatus::Failure("no provider".to_string());
                                 }
                                 Err(e) => {
                                     self.log.println(format!("{:#?}\n{}", e, e.backtrace()));
+                                    self.last_action_status =
+                                        LastActionStatus::Failure(e.to_string());
                                 }
                             },
                         }
@@ -778,6 +801,9 @@ impl eframe::App for App {
                         match res {
                             Ok(()) => {
                                 self.log.println("Cache update complete");
+                                self.last_action_status = LastActionStatus::Success(
+                                    "successfully updated cache".to_string(),
+                                );
                             }
                             Err(e) => match e.downcast::<IntegrationError>() {
                                 // TODO make provider initializing more generic
@@ -785,9 +811,13 @@ impl eframe::App for App {
                                     self.window_provider_parameters = Some(
                                         WindowProviderParameters::new(factory, &mut self.state),
                                     );
+                                    self.last_action_status =
+                                        LastActionStatus::Failure("no provider".to_string());
                                 }
                                 Err(e) => {
                                     self.log.println(format!("{:#?}", e));
+                                    self.last_action_status =
+                                        LastActionStatus::Failure(e.to_string());
                                 }
                             },
                         }
@@ -830,6 +860,7 @@ impl eframe::App for App {
                                 );
                             }
                             if button.clicked() {
+                                self.last_action_status = LastActionStatus::Idle;
                                 self.integrate_rid = integrate(
                                     &mut self.request_counter,
                                     self.state.store.clone(),
@@ -872,6 +903,7 @@ impl eframe::App for App {
                                     .await
                                     .unwrap();
                             });
+                            self.last_action_status = LastActionStatus::Idle;
                             self.update_rid = Some((rid, handle));
                         }
                     },
@@ -891,6 +923,27 @@ impl eframe::App for App {
                 if ui.button("⚙").on_hover_text("Open settings").clicked() {
                     self.settings_window = Some(WindowSettings::new(&mut self.state));
                 }
+                ui.with_layout(egui::Layout::left_to_right(egui::Align::TOP), |ui| {
+                    match &self.last_action_status {
+                        LastActionStatus::Success(msg) => {
+                            ui.label(
+                                egui::RichText::new("STATUS")
+                                    .color(Color32::BLACK)
+                                    .background_color(Color32::LIGHT_GREEN)
+                            );
+                            ui.label(msg);
+                        },
+                        LastActionStatus::Failure(msg) => {
+                            ui.label(
+                                egui::RichText::new("STATUS")
+                                    .color(Color32::BLACK)
+                                    .background_color(Color32::LIGHT_RED)
+                            );
+                            ui.label(msg);
+                        },
+                        _ => {},
+                    }
+                });
             });
         });
         egui::CentralPanel::default().show(ctx, |ui| {
