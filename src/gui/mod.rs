@@ -73,6 +73,8 @@ struct App {
     profile_rename_buffer: String,
     add_profile_buffer_needs_clear: bool,
     add_profile_buffer: String,
+    duplicate_profile_buffer_needs_prefill: bool,
+    duplicate_profile_buffer: String,
 }
 
 enum LastActionStatus {
@@ -109,6 +111,8 @@ impl App {
             profile_rename_buffer_needs_prefill: true,
             add_profile_buffer_needs_clear: true,
             add_profile_buffer: String::new(),
+            duplicate_profile_buffer: String::new(),
+            duplicate_profile_buffer_needs_prefill: true,
         })
     }
 
@@ -759,10 +763,73 @@ impl App {
                                     .entry(self.add_profile_buffer.to_string())
                                     .or_default();
                                 self.state.profiles.active_profile =
-                                    self.add_profile_buffer.to_string();
+                                    self.add_profile_buffer.clone();
                                 self.state.profiles.save().unwrap();
-
+                                self.profile_dropdown = self.add_profile_buffer.clone();
                                 self.add_profile_buffer_needs_clear = true;
+                            }
+                        }
+                    });
+                });
+            },
+        );
+    }
+
+    fn mk_duplicate_profile_popup(
+        &mut self,
+        ui: &mut egui::Ui,
+        popup_id: egui::Id,
+        response: egui::Response,
+    ) {
+        custom_popup_above_or_below_widget(
+            ui,
+            popup_id,
+            &response,
+            egui::AboveOrBelow::Below,
+            |ui| {
+                ui.set_min_width(200.0);
+                ui.vertical(|ui| {
+                    if self.duplicate_profile_buffer_needs_prefill {
+                        self.duplicate_profile_buffer =
+                            format!("{} - Copy", self.state.profiles.active_profile);
+                        self.duplicate_profile_buffer_needs_prefill = false;
+                    }
+
+                    let res = ui.add_enabled(
+                        true,
+                        egui::TextEdit::singleline(&mut self.duplicate_profile_buffer)
+                            .hint_text("Enter new profile name"),
+                    );
+                    ui.memory_mut(|mem| mem.request_focus(res.id));
+                    ui.horizontal(|ui| {
+                        if ui.button("Cancel").clicked() {
+                            ui.memory_mut(|mem| mem.close_popup());
+                        }
+
+                        if self.duplicate_profile_buffer.is_empty()
+                            || self
+                                .state
+                                .profiles
+                                .profiles
+                                .contains_key(&self.duplicate_profile_buffer)
+                        {
+                            ui.add_enabled(false, egui::Button::new("OK"));
+                        } else {
+                            if ui.button("OK").clicked() {
+                                ui.memory_mut(|mem| mem.close_popup());
+
+                                let active_profile_mods =
+                                    self.state.profiles.get_active_profile().mods.clone();
+                                self.state.profiles.profiles.insert(
+                                    self.duplicate_profile_buffer.clone(),
+                                    crate::state::ModProfile {
+                                        mods: active_profile_mods,
+                                    },
+                                );
+                                self.state.profiles.active_profile =
+                                    self.duplicate_profile_buffer.clone();
+                                self.profile_dropdown = self.duplicate_profile_buffer.clone();
+                                self.duplicate_profile_buffer_needs_prefill = true;
                             }
                         }
                     });
@@ -1120,33 +1187,13 @@ impl eframe::App for App {
                 });
 
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::TOP), |ui| {
-                    if ui
-                        .button("🗐")
-                        .on_hover_text_at_pointer("duplicate profile")
-                        .clicked()
-                    {
-                        let active_profile_mods =
-                            self.state.profiles.get_active_profile().mods.clone();
-                        let new_profile_name = {
-                            let mut candidate_name =
-                                format!("{} - Copy", self.state.profiles.active_profile);
-                            while self.state.profiles.profiles.contains_key(&candidate_name) {
-                                candidate_name = format!("{} - Copy", candidate_name);
-                            }
-                            candidate_name
-                        };
-                        self.state.profiles.profiles.insert(
-                            new_profile_name.clone(),
-                            crate::state::ModProfile {
-                                mods: active_profile_mods,
-                            },
-                        );
-                        self.profile_dropdown = new_profile_name.clone();
-                        self.last_action_status = LastActionStatus::Success(format!(
-                            "Successfully duplicated the active profile to \"{}\"!",
-                            new_profile_name
-                        ));
+                    let response = ui.button("🗐").on_hover_text_at_pointer("duplicate profile");
+                    let popup_id = ui.make_persistent_id("duplicate-profile-popup");
+                    if response.clicked() {
+                        ui.memory_mut(|mem| mem.open_popup(popup_id));
                     }
+                    self.mk_duplicate_profile_popup(ui, popup_id, response);
+
                     if ui
                         .button("📋")
                         .on_hover_text_at_pointer("copy profile mods")
