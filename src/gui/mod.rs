@@ -69,6 +69,7 @@ struct App {
     settings_window: Option<WindowSettings>,
     modio_texture_handle: Option<egui::TextureHandle>,
     last_action_status: LastActionStatus,
+    profile_rename_buffer_needs_prefill: bool,
     profile_rename_buffer: String,
 }
 
@@ -103,6 +104,7 @@ impl App {
             modio_texture_handle: None,
             last_action_status: LastActionStatus::Idle,
             profile_rename_buffer: String::new(),
+            profile_rename_buffer_needs_prefill: true,
         })
     }
 
@@ -654,28 +656,34 @@ impl App {
             |ui| {
                 ui.set_min_width(200.0);
                 ui.vertical(|ui| {
-                    let _response = ui.add_enabled(
+                    if self.profile_rename_buffer_needs_prefill {
+                        self.profile_rename_buffer = self.state.profiles.active_profile.clone();
+                        self.profile_rename_buffer_needs_prefill = false;
+                    }
+
+                    let res = ui.add_enabled(
                         true,
                         egui::TextEdit::singleline(&mut self.profile_rename_buffer)
                             .hint_text("Enter new profile name"),
                     );
+                    ui.memory_mut(|mem| mem.request_focus(res.id));
                     ui.horizontal(|ui| {
                         if ui.button("Cancel").clicked() {
                             ui.memory_mut(|mem| mem.close_popup());
                         }
-                        if ui.button("OK").clicked() {
-                            ui.memory_mut(|mem| mem.close_popup());
 
-                            if self.profile_rename_buffer.is_empty() {
-                                // TODO
-                            } else if self
+                        if self.profile_rename_buffer.is_empty()
+                            || self
                                 .state
                                 .profiles
                                 .profiles
                                 .contains_key(&self.profile_rename_buffer)
-                            {
-                                // TODO
-                            } else {
+                        {
+                            ui.add_enabled(false, egui::Button::new("OK"));
+                        } else {
+                            if ui.button("OK").clicked() {
+                                ui.memory_mut(|mem| mem.close_popup());
+
                                 let profile_to_remove = self.state.profiles.active_profile.clone();
                                 let profile = self
                                     .state
@@ -690,6 +698,7 @@ impl App {
                                 self.state.profiles.active_profile =
                                     self.profile_rename_buffer.clone();
                                 self.profile_dropdown = self.profile_rename_buffer.clone();
+                                self.profile_rename_buffer_needs_prefill = true;
                             }
                         }
                     });
