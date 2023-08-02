@@ -69,11 +69,11 @@ struct App {
     settings_window: Option<WindowSettings>,
     modio_texture_handle: Option<egui::TextureHandle>,
     last_action_status: LastActionStatus,
-    profile_rename_buffer_needs_prefill: bool,
+    profile_rename_buffer_needs_prefill_and_focus: bool,
     profile_rename_buffer: String,
-    add_profile_buffer_needs_clear: bool,
+    add_profile_buffer_needs_clear_and_focus: bool,
     add_profile_buffer: String,
-    duplicate_profile_buffer_needs_prefill: bool,
+    duplicate_profile_buffer_needs_prefill_and_focus: bool,
     duplicate_profile_buffer: String,
 }
 
@@ -108,11 +108,11 @@ impl App {
             modio_texture_handle: None,
             last_action_status: LastActionStatus::Idle,
             profile_rename_buffer: String::new(),
-            profile_rename_buffer_needs_prefill: true,
-            add_profile_buffer_needs_clear: true,
+            profile_rename_buffer_needs_prefill_and_focus: true,
+            add_profile_buffer_needs_clear_and_focus: true,
             add_profile_buffer: String::new(),
             duplicate_profile_buffer: String::new(),
-            duplicate_profile_buffer_needs_prefill: true,
+            duplicate_profile_buffer_needs_prefill_and_focus: true,
         })
     }
 
@@ -664,17 +664,19 @@ impl App {
             |ui| {
                 ui.set_min_width(200.0);
                 ui.vertical(|ui| {
-                    if self.profile_rename_buffer_needs_prefill {
+                    if self.profile_rename_buffer_needs_prefill_and_focus {
                         self.profile_rename_buffer = self.state.profiles.active_profile.clone();
-                        self.profile_rename_buffer_needs_prefill = false;
                     }
-
                     let res = ui.add_enabled(
                         true,
                         egui::TextEdit::singleline(&mut self.profile_rename_buffer)
                             .hint_text("Enter new profile name"),
                     );
-                    ui.memory_mut(|mem| mem.request_focus(res.id));
+                    if self.profile_rename_buffer_needs_prefill_and_focus {
+                        ui.memory_mut(|mem| mem.request_focus(res.id));
+                        self.profile_rename_buffer_needs_prefill_and_focus = false;
+                    }
+
                     ui.horizontal(|ui| {
                         if ui.button("Cancel").clicked() {
                             ui.memory_mut(|mem| mem.close_popup());
@@ -689,7 +691,7 @@ impl App {
                         {
                             ui.add_enabled(false, egui::Button::new("OK"));
                         } else {
-                            if ui.button("OK").clicked() {
+                            if ui.button("OK").clicked() || is_committed(&res) {
                                 ui.memory_mut(|mem| mem.close_popup());
 
                                 let profile_to_remove = self.state.profiles.active_profile.clone();
@@ -706,7 +708,7 @@ impl App {
                                 self.state.profiles.active_profile =
                                     self.profile_rename_buffer.clone();
                                 self.profile_dropdown = self.profile_rename_buffer.clone();
-                                self.profile_rename_buffer_needs_prefill = true;
+                                self.profile_rename_buffer_needs_prefill_and_focus = true;
                             }
                         }
                     });
@@ -729,17 +731,19 @@ impl App {
             |ui| {
                 ui.set_min_width(200.0);
                 ui.vertical(|ui| {
-                    if self.add_profile_buffer_needs_clear {
+                    if self.add_profile_buffer_needs_clear_and_focus {
                         self.add_profile_buffer = String::new();
-                        self.add_profile_buffer_needs_clear = false;
                     }
-
                     let res = ui.add_enabled(
                         true,
                         egui::TextEdit::singleline(&mut self.add_profile_buffer)
                             .hint_text("Enter new profile name"),
                     );
-                    ui.memory_mut(|mem| mem.request_focus(res.id));
+                    if self.add_profile_buffer_needs_clear_and_focus {
+                        ui.memory_mut(|mem| mem.request_focus(res.id));
+                        self.add_profile_buffer_needs_clear_and_focus = false;
+                    }
+
                     ui.horizontal(|ui| {
                         if ui.button("Cancel").clicked() {
                             ui.memory_mut(|mem| mem.close_popup());
@@ -754,7 +758,7 @@ impl App {
                         {
                             ui.add_enabled(false, egui::Button::new("OK"));
                         } else {
-                            if ui.button("OK").clicked() {
+                            if ui.button("OK").clicked() || is_committed(&res) {
                                 ui.memory_mut(|mem| mem.close_popup());
 
                                 self.state
@@ -766,7 +770,7 @@ impl App {
                                     self.add_profile_buffer.clone();
                                 self.state.profiles.save().unwrap();
                                 self.profile_dropdown = self.add_profile_buffer.clone();
-                                self.add_profile_buffer_needs_clear = true;
+                                self.add_profile_buffer_needs_clear_and_focus = true;
                             }
                         }
                     });
@@ -789,10 +793,9 @@ impl App {
             |ui| {
                 ui.set_min_width(200.0);
                 ui.vertical(|ui| {
-                    if self.duplicate_profile_buffer_needs_prefill {
+                    if self.duplicate_profile_buffer_needs_prefill_and_focus {
                         self.duplicate_profile_buffer =
                             format!("{} - Copy", self.state.profiles.active_profile);
-                        self.duplicate_profile_buffer_needs_prefill = false;
                     }
 
                     let res = ui.add_enabled(
@@ -800,7 +803,11 @@ impl App {
                         egui::TextEdit::singleline(&mut self.duplicate_profile_buffer)
                             .hint_text("Enter new profile name"),
                     );
-                    ui.memory_mut(|mem| mem.request_focus(res.id));
+                    if self.duplicate_profile_buffer_needs_prefill_and_focus {
+                        ui.memory_mut(|mem| mem.request_focus(res.id));
+                        self.duplicate_profile_buffer_needs_prefill_and_focus = false;
+                    }
+
                     ui.horizontal(|ui| {
                         if ui.button("Cancel").clicked() {
                             ui.memory_mut(|mem| mem.close_popup());
@@ -815,7 +822,7 @@ impl App {
                         {
                             ui.add_enabled(false, egui::Button::new("OK"));
                         } else {
-                            if ui.button("OK").clicked() {
+                            if ui.button("OK").clicked() || is_committed(&res) {
                                 ui.memory_mut(|mem| mem.close_popup());
 
                                 let active_profile_mods =
@@ -829,7 +836,7 @@ impl App {
                                 self.state.profiles.active_profile =
                                     self.duplicate_profile_buffer.clone();
                                 self.profile_dropdown = self.duplicate_profile_buffer.clone();
-                                self.duplicate_profile_buffer_needs_prefill = true;
+                                self.duplicate_profile_buffer_needs_prefill_and_focus = true;
                             }
                         }
                     });
