@@ -667,19 +667,14 @@ impl App {
                             ui.memory_mut(|mem| mem.close_popup());
 
                             if self.profile_rename_buffer.is_empty() {
-                                self.last_action_status = LastActionStatus::Failure(
-                                    "Profile name cannot be empty".to_string(),
-                                );
+                                // TODO
                             } else if self
                                 .state
                                 .profiles
                                 .profiles
                                 .contains_key(&self.profile_rename_buffer)
                             {
-                                self.last_action_status = LastActionStatus::Failure(format!(
-                                    "Profile name \"{}\" already exists!",
-                                    &self.profile_rename_buffer
-                                ));
+                                // TODO
                             } else {
                                 let profile_to_remove = self.state.profiles.active_profile.clone();
                                 let profile = self
@@ -695,11 +690,6 @@ impl App {
                                 self.state.profiles.active_profile =
                                     self.profile_rename_buffer.clone();
                                 self.profile_dropdown = self.profile_rename_buffer.clone();
-
-                                self.last_action_status = LastActionStatus::Success(format!(
-                                    "Successfully renamed profile \"{}\" to \"{}\"",
-                                    profile_to_remove, self.state.profiles.active_profile
-                                ));
                             }
                         }
                     });
