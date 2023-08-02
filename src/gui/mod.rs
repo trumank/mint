@@ -71,6 +71,8 @@ struct App {
     last_action_status: LastActionStatus,
     profile_rename_buffer_needs_prefill: bool,
     profile_rename_buffer: String,
+    add_profile_buffer_needs_clear: bool,
+    add_profile_buffer: String,
 }
 
 enum LastActionStatus {
@@ -105,6 +107,8 @@ impl App {
             last_action_status: LastActionStatus::Idle,
             profile_rename_buffer: String::new(),
             profile_rename_buffer_needs_prefill: true,
+            add_profile_buffer_needs_clear: true,
+            add_profile_buffer: String::new(),
         })
     }
 
@@ -706,6 +710,66 @@ impl App {
             },
         )
     }
+
+    fn mk_add_profile_popup(
+        &mut self,
+        ui: &mut egui::Ui,
+        popup_id: egui::Id,
+        response: egui::Response,
+    ) {
+        custom_popup_above_or_below_widget(
+            ui,
+            popup_id,
+            &response,
+            egui::AboveOrBelow::Below,
+            |ui| {
+                ui.set_min_width(200.0);
+                ui.vertical(|ui| {
+                    if self.add_profile_buffer_needs_clear {
+                        self.add_profile_buffer = String::new();
+                        self.add_profile_buffer_needs_clear = false;
+                    }
+
+                    let res = ui.add_enabled(
+                        true,
+                        egui::TextEdit::singleline(&mut self.add_profile_buffer)
+                            .hint_text("Enter new profile name"),
+                    );
+                    ui.memory_mut(|mem| mem.request_focus(res.id));
+                    ui.horizontal(|ui| {
+                        if ui.button("Cancel").clicked() {
+                            ui.memory_mut(|mem| mem.close_popup());
+                        }
+
+                        if self.add_profile_buffer.is_empty()
+                            || self
+                                .state
+                                .profiles
+                                .profiles
+                                .contains_key(&self.add_profile_buffer)
+                        {
+                            ui.add_enabled(false, egui::Button::new("OK"));
+                        } else {
+                            if ui.button("OK").clicked() {
+                                ui.memory_mut(|mem| mem.close_popup());
+
+                                self.state
+                                    .profiles
+                                    .profiles
+                                    .entry(self.add_profile_buffer.to_string())
+                                    .or_default();
+                                self.state.profiles.active_profile =
+                                    self.add_profile_buffer.to_string();
+                                self.state.profiles.save().unwrap();
+
+                                self.add_profile_buffer_needs_clear = true;
+                            }
+                        }
+                    });
+                });
+            },
+        );
+    }
 }
 
 mod request_counter {
@@ -1033,20 +1097,16 @@ impl eframe::App for App {
                         }
                     },
                 );
-                ui.add_enabled_ui(
-                    self.profile_dropdown != self.state.profiles.active_profile,
-                    |ui| {
-                        if ui.button(" ➕ ").clicked() {
-                            self.state
-                                .profiles
-                                .profiles
-                                .entry(self.profile_dropdown.to_string())
-                                .or_default();
-                            self.state.profiles.active_profile = self.profile_dropdown.to_string();
-                            self.state.profiles.save().unwrap();
-                        }
-                    },
-                );
+                ui.add_enabled_ui(true, |ui| {
+                    let response = ui
+                        .button(" ➕ ")
+                        .on_hover_text_at_pointer("add new profile");
+                    let popup_id = ui.make_persistent_id("add-profile-popup");
+                    if response.clicked() {
+                        ui.memory_mut(|mem| mem.open_popup(popup_id));
+                    }
+                    self.mk_add_profile_popup(ui, popup_id, response);
+                });
 
                 ui.add_enabled_ui(true, |ui| {
                     let response = ui
@@ -1097,23 +1157,19 @@ impl eframe::App for App {
                         ui.output_mut(|o| o.copied_text = mods);
                     }
                     ui.with_layout(ui.layout().with_main_justify(true), |ui| {
-                        let res = ui.add(egui_dropdown::DropDownBox::from_iter(
-                            self.state.profiles.profiles.keys(),
-                            "profile_dropdown",
-                            &mut self.profile_dropdown,
-                            |ui, text| {
-                                let mut job = LayoutJob {
-                                    halign: egui::Align::LEFT,
-                                    ..Default::default()
-                                };
-                                job.append(text, 0.0, Default::default());
-                                ui.selectable_label(text == self.state.profiles.active_profile, job)
-                            },
-                        ));
-                        if res.gained_focus() {
-                            self.profile_dropdown.clear();
-                        }
-                        if is_committed(&res) {
+                        let res = egui::ComboBox::from_id_source("profile-dropdown")
+                            .width(ui.available_width())
+                            .selected_text(&self.profile_dropdown)
+                            .show_ui(ui, |ui| {
+                                self.state.profiles.profiles.keys().for_each(|k| {
+                                    ui.selectable_value(
+                                        &mut self.profile_dropdown,
+                                        k.to_string(),
+                                        k,
+                                    );
+                                })
+                            });
+                        if is_committed(&res.response) {
                             self.state
                                 .profiles
                                 .profiles
