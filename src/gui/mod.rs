@@ -948,30 +948,6 @@ impl eframe::App for App {
                         }
 
                         ui.add_enabled_ui(self.state.config.drg_pak_path.is_some(), |ui| {
-                            let mut button = ui.button("Uninstall mods");
-                            if self.state.config.drg_pak_path.is_none() {
-                                button = button.on_disabled_hover_text(
-                                    "DRG install not found. Configure it in the settings menu.",
-                                );
-                            }
-                            if button.clicked() {
-                                self.last_action_status = LastActionStatus::Idle;
-                                if let Some(pak_path) = &self.state.config.drg_pak_path {
-                                    match uninstall(pak_path) {
-                                        Ok(()) => {
-                                            self.last_action_status =
-                                            LastActionStatus::Success("Successfully uninstalled mods".to_string());
-                                        },
-                                        Err(e) => {
-                                            self.last_action_status =
-                                            LastActionStatus::Failure(format!("Failed to uninstall mods: {e}"))
-                                        }
-                                    }
-                                }
-                            }
-                        });
-
-                        ui.add_enabled_ui(self.state.config.drg_pak_path.is_some(), |ui| {
                             let mut button = ui.button("Install mods");
                             if self.state.config.drg_pak_path.is_none() {
                                 button = button.on_disabled_hover_text(
@@ -994,6 +970,30 @@ impl eframe::App for App {
                                     self.tx.clone(),
                                     ctx.clone(),
                                 );
+                            }
+                        });
+
+                        ui.add_enabled_ui(self.state.config.drg_pak_path.is_some(), |ui| {
+                            let mut button = ui.button("Uninstall mods");
+                            if self.state.config.drg_pak_path.is_none() {
+                                button = button.on_disabled_hover_text(
+                                    "DRG install not found. Configure it in the settings menu.",
+                                );
+                            }
+                            if button.clicked() {
+                                self.last_action_status = LastActionStatus::Idle;
+                                if let Some(pak_path) = &self.state.config.drg_pak_path {
+                                    match uninstall(pak_path) {
+                                        Ok(()) => {
+                                            self.last_action_status =
+                                            LastActionStatus::Success("Successfully uninstalled mods".to_string());
+                                        },
+                                        Err(e) => {
+                                            self.last_action_status =
+                                            LastActionStatus::Failure(format!("Failed to uninstall mods: {e}"))
+                                        }
+                                    }
+                                }
                             }
                         });
 
