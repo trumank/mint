@@ -22,6 +22,9 @@ impl<C: Default + Serialize + DeserializeOwned> ConfigWrapper<C> {
         }
     }
     pub fn save(&self) -> Result<()> {
+        if let Some(parent) = self.path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
         write_file(&self.path, serde_json::to_vec_pretty(&self.config)?)?;
         Ok(())
     }
