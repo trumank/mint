@@ -52,7 +52,7 @@ jobs:
     steps:
       - uses: actions/checkout@v3
       - name: Install Rust
-        run: rustup update 1.70.0 --no-self-update && rustup default 1.70.0
+        run: rustup update nightly --no-self-update && rustup default nightly
       - name: Install cargo-dist
         run: curl --proto '=https' --tlsv1.2 -LsSf https://github.com/axodotdev/cargo-dist/releases/download/v0.0.7/cargo-dist-installer.sh | sh
       - id: create-release
@@ -101,14 +101,22 @@ jobs:
     steps:
       - uses: actions/checkout@v3
       - name: Install Rust
-        run: rustup update 1.70.0 --no-self-update && rustup default 1.70.0
+        run: rustup update nightly --no-self-update && rustup default nightly
+      - name: Install x86_64-pc-windows-gnu target
+        if: runner.os == 'Linux' || runner.os == 'macOS'
+        run: rustup target add x86_64-pc-windows-gnu
       - name: Cache Dependencies
         uses: Swatinem/rust-cache@v2
       - name: Install cargo-dist
         run: ${{ matrix.install-dist }}
       - name: Install packages (Linux)
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install libgtk-3-dev
+        run: sudo apt-get update && sudo apt-get install libgtk-3-dev gcc-mingw-w64
+      - name: Install packages (MacOS)
+        if: runner.os == 'macOS'
+        run: |
+          NONINTERACTIVE=1 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+          brew install mingw-w64
       - name: Run cargo-dist
         # This logic is a bit janky because it's trying to be a polyglot between
         # powershell and bash since this will run on windows, macos, and linux!
