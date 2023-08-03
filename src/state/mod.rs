@@ -1,7 +1,7 @@
 pub mod config;
 
 use std::{
-    collections::HashMap,
+    collections::{BTreeMap, HashMap},
     path::{Path, PathBuf},
     sync::Arc,
 };
@@ -18,7 +18,7 @@ use self::config::ConfigWrapper;
 #[derive(serde::Serialize, serde::Deserialize)]
 pub struct ModProfiles {
     pub active_profile: String,
-    pub profiles: HashMap<String, ModProfile>,
+    pub profiles: BTreeMap<String, ModProfile>,
 }
 
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
