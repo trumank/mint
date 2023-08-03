@@ -356,6 +356,7 @@ pub struct ProviderParameter<'a> {
     pub id: &'a str,
     pub name: &'a str,
     pub description: &'a str,
+    pub link: Option<&'a str>,
 }
 
 #[typetag::serde(tag = "type")]

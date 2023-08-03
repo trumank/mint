@@ -549,7 +549,11 @@ impl App {
                 ui.add_enabled_ui(window.check_rid.is_none(), |ui| {
                     egui::Grid::new("grid").num_columns(2).show(ui, |ui| {
                         for p in window.factory.parameters {
-                            ui.label(p.name).on_hover_text(p.description);
+                            if let Some(link) = p.link {
+                                ui.hyperlink_to(p.name, link).on_hover_text(p.description);
+                            } else {
+                                ui.label(p.name).on_hover_text(p.description);
+                            }
                             let res = ui.add(
                                 egui::TextEdit::singleline(
                                     window.parameters.entry(p.id.to_string()).or_default(),
