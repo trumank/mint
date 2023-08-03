@@ -20,6 +20,7 @@ image = { version = "0.24.6", default-features = false, features = ["png"] }
 inventory = "0.3.6"
 lazy_static = "1.4.0"
 modio = { version = "0.7.1", features = ["rustls-tls"] }
+opener = "0.6.1"
 regex = "1.8.3"
 repak = { git = "https://github.com/trumank/repak.git", version = "0.1.3" }
 reqwest = { version = "0.11.18", features = ["blocking"] }
