@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
 use std::fs::OpenOptions;
-use std::io::{self, BufReader, BufWriter, Cursor, Read, Seek, Write};
+use std::io::{self, BufReader, BufWriter, Cursor, ErrorKind, Read, Seek, Write};
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
@@ -31,6 +31,24 @@ use unreal_asset::{
     unversioned::ancestry::Ancestry,
     Asset,
 };
+
+pub fn uninstall<P: AsRef<Path>>(path_pak: P) -> Result<()> {
+    let path_mods_pak = path_pak.as_ref().parent().unwrap().join("mods_P.pak");
+    let path_hook_dll = get_binaries_directory_from_pak(&path_pak)?.join("x3daudio1_7.dll");
+    match std::fs::remove_file(&path_mods_pak) {
+        Ok(()) => Ok(()),
+        Err(e) if e.kind() == ErrorKind::NotFound => Ok(()),
+        Err(e) => Err(e),
+    }
+    .with_context(|| format!("failed to remove {}", path_mods_pak.display()))?;
+    match std::fs::remove_file(&path_hook_dll) {
+        Ok(()) => Ok(()),
+        Err(e) if e.kind() == ErrorKind::NotFound => Ok(()),
+        Err(e) => Err(e),
+    }
+    .with_context(|| format!("failed to remove {}", path_hook_dll.display()))?;
+    Ok(())
+}
 
 pub fn integrate<P: AsRef<Path>>(path_pak: P, mods: Vec<(ModInfo, PathBuf)>) -> Result<()> {
     let path_paks = path_pak.as_ref().parent().with_context(|| {
