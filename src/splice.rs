@@ -732,7 +732,7 @@ fn to_tracked_statements(
 }
 
 fn resolve_tracked_statements<C: std::io::Read + std::io::Seek>(
-    asset: &mut Asset<C>,
+    asset: &Asset<C>,
     mappings: &NamedSpliceMappings,
     inst: Vec<TrackedStatement>,
 ) -> Vec<KismetExpression> {

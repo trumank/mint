@@ -668,7 +668,7 @@ impl App {
                                     .on_hover_text(format!("Open \"{}\" settings", provider_factory.id))
                                     .clicked() {
                                 self.window_provider_parameters = Some(
-                                    WindowProviderParameters::new(provider_factory, &mut self.state),
+                                    WindowProviderParameters::new(provider_factory, &self.state),
                                 );
                             }
                             ui.end_row();
@@ -703,7 +703,7 @@ impl App {
     fn mk_profile_name_popup(
         state: &mut State,
         popup: &mut ProfileNamePopup,
-        ui: &mut egui::Ui,
+        ui: &egui::Ui,
         popup_id: egui::Id,
         response: egui::Response,
         default_name: impl Fn(&mut State) -> String,
@@ -781,7 +781,7 @@ struct WindowProviderParameters {
     parameters: HashMap<String, String>,
 }
 impl WindowProviderParameters {
-    fn new(factory: &'static ProviderFactory, state: &mut State) -> Self {
+    fn new(factory: &'static ProviderFactory, state: &State) -> Self {
         let (tx, rx) = mpsc::channel(10);
         Self {
             tx,
@@ -804,7 +804,7 @@ struct WindowSettings {
     drg_pak_path_err: Option<String>,
 }
 impl WindowSettings {
-    fn new(state: &mut State) -> Self {
+    fn new(state: &State) -> Self {
         let path = state
             .config
             .drg_pak_path
@@ -860,9 +860,8 @@ impl eframe::App for App {
                             }
                             Err(e) => match e.downcast::<IntegrationError>() {
                                 Ok(IntegrationError::NoProvider { url: _, factory }) => {
-                                    self.window_provider_parameters = Some(
-                                        WindowProviderParameters::new(factory, &mut self.state),
-                                    );
+                                    self.window_provider_parameters =
+                                        Some(WindowProviderParameters::new(factory, &self.state));
                                     self.last_action_status =
                                         LastActionStatus::Failure("no provider".to_string());
                                 }
@@ -893,9 +892,8 @@ impl eframe::App for App {
                             }
                             Err(e) => match e.downcast::<IntegrationError>() {
                                 Ok(IntegrationError::NoProvider { url: _, factory }) => {
-                                    self.window_provider_parameters = Some(
-                                        WindowProviderParameters::new(factory, &mut self.state),
-                                    );
+                                    self.window_provider_parameters =
+                                        Some(WindowProviderParameters::new(factory, &self.state));
                                     self.last_action_status =
                                         LastActionStatus::Failure("no provider".to_string());
                                 }
@@ -921,9 +919,8 @@ impl eframe::App for App {
                             Err(e) => match e.downcast::<IntegrationError>() {
                                 // TODO make provider initializing more generic
                                 Ok(IntegrationError::NoProvider { url: _, factory }) => {
-                                    self.window_provider_parameters = Some(
-                                        WindowProviderParameters::new(factory, &mut self.state),
-                                    );
+                                    self.window_provider_parameters =
+                                        Some(WindowProviderParameters::new(factory, &self.state));
                                     self.last_action_status =
                                         LastActionStatus::Failure("no provider".to_string());
                                 }
@@ -1060,7 +1057,7 @@ impl eframe::App for App {
                     ui.spinner();
                 }
                 if ui.button("⚙").on_hover_text("Open settings").clicked() {
-                    self.settings_window = Some(WindowSettings::new(&mut self.state));
+                    self.settings_window = Some(WindowSettings::new(&self.state));
                 }
                 ui.with_layout(egui::Layout::left_to_right(egui::Align::TOP), |ui| {
                     match &self.last_action_status {
