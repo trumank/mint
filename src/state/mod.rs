@@ -90,8 +90,8 @@ impl State {
     pub fn new() -> Result<Self> {
         let project_dirs = ProjectDirs::from("", "", "drg-mod-integration")
             .context("constructing project dirs")?;
-        std::fs::create_dir(project_dirs.cache_dir()).ok();
-        std::fs::create_dir(project_dirs.config_dir()).ok();
+        std::fs::create_dir_all(project_dirs.cache_dir())?;
+        std::fs::create_dir_all(project_dirs.config_dir())?;
         let config = ConfigWrapper::<Config>::new(project_dirs.config_dir().join("config.json"));
         let profiles =
             ConfigWrapper::<ModProfiles>::new(project_dirs.config_dir().join("profiles.json"));
