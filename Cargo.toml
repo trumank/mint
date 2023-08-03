@@ -9,6 +9,7 @@ anyhow = { version = "1.0.71", features = ["backtrace"] }
 async-trait = "0.1.68"
 clap = { version = "4.3.0", features = ["derive"] }
 dialoguer = "0.10.4"
+directories = "5.0.1"
 eframe = "0.22.0"
 egui-dropdown = { git = "https://github.com/ItsEthra/egui-dropdown" }
 egui_dnd = "0.4.0"
