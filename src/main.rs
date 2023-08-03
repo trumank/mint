@@ -20,7 +20,8 @@ struct ActionIntegrate {
     #[arg(short, long)]
     fsd_pak: Option<PathBuf>,
 
-    /// Update mods. By default all mods and metadata are cached offline so this is necessary to check for updates.
+    /// Update mods. By default all mods and metadata are cached offline so this is necessary to
+    /// check for updates.
     #[arg(short, long)]
     update: bool,
 
@@ -44,7 +45,8 @@ struct ActionIntegrateProfile {
     #[arg(short, long)]
     fsd_pak: Option<PathBuf>,
 
-    /// Update mods. By default all mods and metadata are cached offline so this is necessary to check for updates.
+    /// Update mods. By default all mods and metadata are cached offline so this is necessary to
+    /// check for updates.
     #[arg(short, long)]
     update: bool,
 

@@ -2,11 +2,12 @@ pub mod config;
 
 use std::{
     collections::{BTreeMap, HashMap},
-    path::{Path, PathBuf},
+    path::PathBuf,
     sync::Arc,
 };
 
-use anyhow::Result;
+use anyhow::{Context, Result};
+use directories::ProjectDirs;
 
 use crate::{
     find_drg_pak,
@@ -49,6 +50,7 @@ impl Default for ModProfiles {
         }
     }
 }
+
 impl ModProfiles {
     pub fn get_active_profile(&self) -> &ModProfile {
         &self.profiles[&self.active_profile]
@@ -67,6 +69,7 @@ pub struct Config {
     pub provider_parameters: HashMap<String, HashMap<String, String>>,
     pub drg_pak_path: Option<PathBuf>,
 }
+
 impl Default for Config {
     fn default() -> Self {
         Self {
@@ -77,23 +80,24 @@ impl Default for Config {
 }
 
 pub struct State {
-    pub data_dir: PathBuf,
+    pub project_dirs: ProjectDirs,
     pub config: ConfigWrapper<Config>,
     pub profiles: ConfigWrapper<ModProfiles>,
     pub store: Arc<ModStore>,
 }
+
 impl State {
     pub fn new() -> Result<Self> {
-        Self::new_from_path("data")
-    }
-    pub fn new_from_path<P: AsRef<Path>>(data_dir: P) -> Result<Self> {
-        let data_dir = data_dir.as_ref().to_path_buf();
-        std::fs::create_dir(&data_dir).ok();
-        let config = ConfigWrapper::<Config>::new(data_dir.join("config.json"));
-        let profiles = ConfigWrapper::<ModProfiles>::new(data_dir.join("profiles.json"));
-        let store = ModStore::new(&data_dir, &config.provider_parameters)?.into();
+        let project_dirs = ProjectDirs::from("", "", "drg-mod-integration")
+            .context("constructing project dirs")?;
+        std::fs::create_dir(project_dirs.cache_dir()).ok();
+        std::fs::create_dir(project_dirs.config_dir()).ok();
+        let config = ConfigWrapper::<Config>::new(project_dirs.config_dir().join("config.json"));
+        let profiles =
+            ConfigWrapper::<ModProfiles>::new(project_dirs.config_dir().join("profiles.json"));
+        let store = ModStore::new(project_dirs.cache_dir(), &config.provider_parameters)?.into();
         Ok(Self {
-            data_dir,
+            project_dirs,
             config,
             profiles,
             store,

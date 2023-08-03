@@ -97,7 +97,16 @@ impl ProfileNamePopup {
 impl App {
     fn new(args: Option<Vec<String>>) -> Result<Self> {
         let (tx, rx) = mpsc::channel(10);
+        let mut log = Log::default();
         let state = State::new()?;
+        log.println(format!(
+            "config dir: {}",
+            state.project_dirs.config_dir().display()
+        ));
+        log.println(format!(
+            "cache dir: {}",
+            state.project_dirs.cache_dir().display()
+        ));
 
         Ok(Self {
             args,
@@ -105,7 +114,7 @@ impl App {
             rx,
             request_counter: Default::default(),
             state,
-            log: Default::default(),
+            log,
             resolve_mod: Default::default(),
             resolve_mod_rid: None,
             integrate_rid: None,
