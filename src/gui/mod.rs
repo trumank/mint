@@ -63,6 +63,8 @@ struct App {
         HashMap<ModSpecification, SpecFetchProgress>,
     )>,
     update_rid: Option<(RequestID, JoinHandle<()>)>,
+    check_updates_rid: Option<RequestID>,
+    checked_updates_initially: bool,
     request_counter: RequestCounter,
     dnd: egui_dnd::DragDropUi,
     window_provider_parameters: Option<WindowProviderParameters>,
@@ -74,6 +76,7 @@ struct App {
     rename_profile_popup: ProfileNamePopup,
     add_profile_popup: ProfileNamePopup,
     duplicate_profile_popup: ProfileNamePopup,
+    available_update: Option<GitHubRelease>,
 }
 
 enum LastActionStatus {
@@ -120,6 +123,8 @@ impl App {
             resolve_mod_rid: None,
             integrate_rid: None,
             update_rid: None,
+            check_updates_rid: None,
+            checked_updates_initially: false,
             dnd: Default::default(),
             window_provider_parameters: None,
             search_string: Default::default(),
@@ -130,6 +135,7 @@ impl App {
             rename_profile_popup: ProfileNamePopup::new(),
             add_profile_popup: ProfileNamePopup::new(),
             duplicate_profile_popup: ProfileNamePopup::new(),
+            available_update: None,
         })
     }
 
@@ -515,6 +521,31 @@ impl App {
         self.resolve_mod_rid = Some(rid);
     }
 
+    fn check_updates(&mut self, ctx: &egui::Context) {
+        let rid = self.request_counter.next();
+        let tx = self.tx.clone();
+        let ctx = ctx.clone();
+
+        async fn req() -> Result<GitHubRelease> {
+            Ok(reqwest::Client::builder()
+                .user_agent("trumank/drg-mod-integration")
+                .build()?
+                .get("https://api.github.com/repos/trumank/drg-mod-integration/releases/latest")
+                .send()
+                .await?
+                .json::<GitHubRelease>()
+                .await?)
+        }
+
+        tokio::spawn(async move {
+            tx.send(message::Message::CheckUpdates(rid, req().await))
+                .await
+                .unwrap();
+            ctx.request_repaint();
+        });
+        self.check_updates_rid = Some(rid);
+    }
+
     fn show_provider_parameters(&mut self, ctx: &egui::Context) {
         let Some(window) = &mut self.window_provider_parameters else {
             return;
@@ -820,6 +851,11 @@ impl WindowSettings {
 
 impl eframe::App for App {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        if !self.checked_updates_initially {
+            self.checked_updates_initially = true;
+            self.check_updates(ctx);
+        }
+
         // message handling
         while let Ok(msg) = self.rx.try_recv() {
             match msg {
@@ -932,6 +968,24 @@ impl eframe::App for App {
                             },
                         }
                         self.update_rid = None;
+                    }
+                }
+                message::Message::CheckUpdates(rid, res) => {
+                    if self.check_updates_rid == Some(rid) {
+                        self.check_updates_rid = None;
+                        if let Ok(release) = res {
+                            if let (Ok(version), Some(Ok(release_version))) = (
+                                semver::Version::parse(env!("CARGO_PKG_VERSION")),
+                                release
+                                    .tag_name
+                                    .strip_prefix('v')
+                                    .map(semver::Version::parse),
+                            ) {
+                                if release_version > version {
+                                    self.available_update = Some(release);
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -1058,6 +1112,18 @@ impl eframe::App for App {
                 }
                 if ui.button("⚙").on_hover_text("Open settings").clicked() {
                     self.settings_window = Some(WindowSettings::new(&self.state));
+                }
+                if let Some(available_update) = &self.available_update {
+                    if ui.button(egui::RichText::new("\u{26A0}").color(ui.visuals().warn_fg_color))
+                        .on_hover_text(format!("Update available: {}\n{}", available_update.tag_name, available_update.html_url))
+                        .clicked() {
+                            ui.ctx().output_mut(|o| {
+                                o.open_url = Some(egui::output::OpenUrl {
+                                    url: available_update.html_url.clone(),
+                                    new_tab: true,
+                                });
+                            });
+                        }
                 }
                 ui.with_layout(egui::Layout::left_to_right(egui::Align::TOP), |ui| {
                     match &self.last_action_status {
@@ -1363,6 +1429,12 @@ fn custom_popup_above_or_below_widget<R>(
     } else {
         None
     }
+}
+
+#[derive(Debug, serde::Deserialize)]
+pub struct GitHubRelease {
+    html_url: String,
+    tag_name: String,
 }
 
 #[derive(Debug)]
