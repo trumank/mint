@@ -639,6 +639,20 @@ impl App {
                             }
                         });
                         ui.end_row();
+
+                        let config_dir = self.state.project_dirs.config_dir();
+                        ui.label("Config directory:");
+                        if ui.link(config_dir.display().to_string()).clicked() {
+                            opener::open(config_dir).ok();
+                        }
+                        ui.end_row();
+
+                        let cache_dir = self.state.project_dirs.cache_dir();
+                        ui.label("Cache directory:");
+                        if ui.link(cache_dir.display().to_string()).clicked() {
+                            opener::open(cache_dir).ok();
+                        }
+                        ui.end_row();
                     });
 
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::TOP), |ui| {
