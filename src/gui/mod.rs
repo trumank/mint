@@ -22,6 +22,7 @@ use tokio::{
 
 use crate::{
     error::IntegrationError,
+    integrate::uninstall,
     is_drg_pak,
     providers::ModioTags,
     providers::{FetchProgress, ModResolution, ModSpecification, ModStore, ProviderFactory},
@@ -933,7 +934,7 @@ impl eframe::App for App {
                         && self.state.config.drg_pak_path.is_some(),
                     |ui| {
                         if let Some(args) = &self.args {
-                            if ui.button("launch game").on_hover_ui(|ui| for arg in args {
+                            if ui.button("Launch game").on_hover_ui(|ui| for arg in args {
                                 ui.label(arg);
                             }).clicked() {
                                 let args = args.clone();
@@ -945,11 +946,36 @@ impl eframe::App for App {
                                 });
                             }
                         }
+
                         ui.add_enabled_ui(self.state.config.drg_pak_path.is_some(), |ui| {
-                            let mut button = ui.button("install mods");
+                            let mut button = ui.button("Uninstall mods");
                             if self.state.config.drg_pak_path.is_none() {
                                 button = button.on_disabled_hover_text(
-                                    "DRG install not found. Configure it in via the settings menu",
+                                    "DRG install not found. Configure it in the settings menu.",
+                                );
+                            }
+                            if button.clicked() {
+                                self.last_action_status = LastActionStatus::Idle;
+                                if let Some(pak_path) = &self.state.config.drg_pak_path {
+                                    match uninstall(pak_path) {
+                                        Ok(()) => {
+                                            self.last_action_status =
+                                            LastActionStatus::Success("Successfully uninstalled mods".to_string());
+                                        },
+                                        Err(e) => {
+                                            self.last_action_status =
+                                            LastActionStatus::Failure(format!("Failed to uninstall mods: {e}"))
+                                        }
+                                    }
+                                }
+                            }
+                        });
+
+                        ui.add_enabled_ui(self.state.config.drg_pak_path.is_some(), |ui| {
+                            let mut button = ui.button("Install mods");
+                            if self.state.config.drg_pak_path.is_none() {
+                                button = button.on_disabled_hover_text(
+                                    "DRG install not found. Configure it in the settings menu.",
                                 );
                             }
                             if button.clicked() {
@@ -970,10 +996,11 @@ impl eframe::App for App {
                                 );
                             }
                         });
+
                         if ui
-                            .button("update cache")
+                            .button("Update cache")
                             .on_hover_text(
-                                "checks for updates for all mods and updates local cache\n\
+                                "Checks for updates for all mods and updates local cache\n\
                                 due to strict mod.io rate-limiting, can take a long time for large mod lists",
                             )
                             .clicked()
@@ -1002,13 +1029,13 @@ impl eframe::App for App {
                     },
                 );
                 if self.integrate_rid.is_some() {
-                    if ui.button("cancel").clicked() {
+                    if ui.button("Cancel").clicked() {
                         self.integrate_rid.take().unwrap().1.abort();
                     }
                     ui.spinner();
                 }
                 if self.update_rid.is_some() {
-                    if ui.button("cancel").clicked() {
+                    if ui.button("Cancel").clicked() {
                         self.update_rid.take().unwrap().1.abort();
                     }
                     ui.spinner();
@@ -1052,7 +1079,7 @@ impl eframe::App for App {
                     |ui| {
                         if ui
                             .button(" ➖ ")
-                            .on_hover_text_at_pointer("delete profile")
+                            .on_hover_text_at_pointer("Delete profile")
                             .clicked()
                         {
                             self.state.profiles.remove_active();
@@ -1063,7 +1090,7 @@ impl eframe::App for App {
                 ui.add_enabled_ui(true, |ui| {
                     let response = ui
                         .button(" ➕ ")
-                        .on_hover_text_at_pointer("add new profile");
+                        .on_hover_text_at_pointer("Add new profile");
                     let popup_id = ui.make_persistent_id("add-profile-popup");
                     if response.clicked() {
                         ui.memory_mut(|mem| mem.open_popup(popup_id));
@@ -1085,7 +1112,7 @@ impl eframe::App for App {
                 ui.add_enabled_ui(true, |ui| {
                     let response = ui
                         .button("Rename")
-                        .on_hover_text_at_pointer("edit profile name");
+                        .on_hover_text_at_pointer("Edit profile name");
                     let popup_id = ui.make_persistent_id("edit-profile-name-popup");
                     if response.clicked() {
                         ui.memory_mut(|mem| mem.open_popup(popup_id));
