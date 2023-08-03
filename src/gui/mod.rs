@@ -542,7 +542,7 @@ impl App {
 
         let mut open = true;
         let mut check = false;
-        egui::Window::new(format!("configure {} provider", window.factory.id))
+        egui::Window::new(format!("Configure {} provider", window.factory.id))
             .open(&mut open)
             .resizable(false)
             .show(ctx, |ui| {
@@ -569,7 +569,7 @@ impl App {
                     });
 
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::TOP), |ui| {
-                        if ui.button("check").clicked() {
+                        if ui.button("Save").clicked() {
                             check = true;
                         }
                         if window.check_rid.is_some() {
@@ -658,6 +658,21 @@ impl App {
                             opener::open(cache_dir).ok();
                         }
                         ui.end_row();
+
+                        ui.label("Mod providers:");
+                        ui.end_row();
+
+                        for provider_factory in ModStore::get_provider_factories() {
+                            ui.label(provider_factory.id);
+                            if ui.add_enabled(!provider_factory.parameters.is_empty(), egui::Button::new("⚙"))
+                                    .on_hover_text(format!("Open \"{}\" settings", provider_factory.id))
+                                    .clicked() {
+                                self.window_provider_parameters = Some(
+                                    WindowProviderParameters::new(provider_factory, &mut self.state),
+                                );
+                            }
+                            ui.end_row();
+                        }
                     });
 
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::TOP), |ui| {

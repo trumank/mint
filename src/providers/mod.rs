@@ -48,6 +48,9 @@ impl ModStore {
             blob_cache: BlobCache::new(cache_path.as_ref().join("blobs")),
         })
     }
+    pub fn get_provider_factories() -> impl Iterator<Item = &'static ProviderFactory> {
+        inventory::iter::<ProviderFactory>()
+    }
     pub fn add_provider(
         &self,
         provider_factory: &ProviderFactory,
