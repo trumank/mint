@@ -45,12 +45,17 @@ unsafe fn patch() {
         .and_then(Path::parent)
         .and_then(Path::parent)
         .and_then(Path::parent)
-        .map(|p| p.join("Content/Paks/mods_P.pak")) else { return };
+        .map(|p| p.join("Content/Paks/mods_P.pak"))
+    else {
+        return;
+    };
     if !pak_path.exists() {
         return;
     }
 
-    let Ok(module) = GetModuleHandleA(None) else { return };
+    let Ok(module) = GetModuleHandleA(None) else {
+        return;
+    };
     let process = GetCurrentProcess();
 
     let mut mod_info = MODULEINFO::default();
@@ -67,7 +72,9 @@ unsafe fn patch() {
     );
 
     let pattern = [0x4C, 0x8B, 0xB4, 0x24, 0x48, 0x01, 0x00, 0x00, 0x0F, 0x84];
-    let Some(sig_rva) = scan(memory, &pattern) else { return };
+    let Some(sig_rva) = scan(memory, &pattern) else {
+        return;
+    };
 
     let patch = [0xB8, 0x01, 0x00, 0x00, 0x00];
 
