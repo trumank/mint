@@ -188,6 +188,11 @@ pub fn integrate<P: AsRef<Path>>(path_pak: P, mods: Vec<(ModInfo, PathBuf)>) -> 
                     if filename == "AssetRegistry.bin" {
                         continue;
                     }
+                    if new_path.extension().and_then(std::ffi::OsStr::to_str)
+                        == Some("ushaderbytecode")
+                    {
+                        continue;
+                    }
                     let lower = filename.to_string_lossy().to_lowercase();
                     if lower == "initspacerig.uasset" {
                         init_spacerig_assets.insert(format_soft_class(new_path));
