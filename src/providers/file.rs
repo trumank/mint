@@ -56,6 +56,7 @@ impl ModProvider for FileProvider {
             suggested_require: false,
             suggested_dependencies: vec![],
             modio_tags: None,
+            modio_id: None,
         }))
     }
 
@@ -96,6 +97,7 @@ impl ModProvider for FileProvider {
             suggested_require: false,
             suggested_dependencies: vec![],
             modio_tags: None,
+            modio_id: None,
         })
     }
 

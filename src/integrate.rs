@@ -32,7 +32,13 @@ use unreal_asset::{
     Asset,
 };
 
-pub fn uninstall<P: AsRef<Path>>(path_pak: P) -> Result<()> {
+/// Why does the uninstall function require a list of Modio mod IDs?
+/// Glad you ask. The official integration enables *every mod the user has installed* once it gets
+/// re-enabled. We do the user a favor and collect all the installed mods and explicitly add them
+/// back to the config so they will be disabled when the game is launched again. Since we have
+/// Modio IDs anyway, with just a little more effort we can make the 'uninstall' button work as an
+/// 'install' button for the official integration. Best anti-feature ever.
+pub fn uninstall<P: AsRef<Path>>(path_pak: P, modio_mods: HashSet<u32>) -> Result<()> {
     let installation = DRGInstallation::from_pak_path(path_pak)?;
     let path_mods_pak = installation.paks_path().join("mods_P.pak");
     let path_hook_dll = installation.binaries_directory().join("x3daudio1_7.dll");
@@ -48,6 +54,79 @@ pub fn uninstall<P: AsRef<Path>>(path_pak: P) -> Result<()> {
         Err(e) => Err(e),
     }
     .with_context(|| format!("failed to remove {}", path_hook_dll.display()))?;
+    uninstall_modio(&installation, modio_mods).ok();
+    Ok(())
+}
+
+fn uninstall_modio(installation: &DRGInstallation, modio_mods: HashSet<u32>) -> Result<()> {
+    #[derive(Debug, serde::Deserialize)]
+    struct ModioState {
+        #[serde(rename = "Mods")]
+        mods: Vec<ModioMod>,
+    }
+    #[derive(Debug, serde::Deserialize)]
+    struct ModioMod {
+        #[serde(rename = "ID")]
+        id: u32,
+    }
+    let Some(modio_dir) = installation.modio_directory() else {
+        return Ok(());
+    };
+    let modio_state: ModioState = serde_json::from_reader(std::io::BufReader::new(
+        std::fs::File::open(modio_dir.join("metadata/state.json"))?,
+    ))?;
+    let config_path = installation
+        .root
+        .join("Saved/Config/WindowsNoEditor/GameUserSettings.ini");
+    let mut config = ini::Ini::load_from_file(&config_path)?;
+
+    let ignore_keys = HashSet::from([
+        "CurrentModioUserId",
+        "CheckGameversion",
+        "CurrentBranchName",
+        "RecentlyInstalledMods",
+    ]);
+
+    if let Some(ugc_section) = config.section_mut(Some("/Script/FSD.UserGeneratedContent")) {
+        let local_mods = installation
+            .root
+            .join("Mods")
+            .read_dir()?
+            .map(|f| {
+                let f = f?;
+                Ok((!f.path().is_file())
+                    .then_some(f.file_name().to_string_lossy().to_string().to_string()))
+            })
+            .collect::<Result<Vec<Option<String>>>>()?;
+        let to_remove = HashSet::from_iter(ugc_section.iter().map(|(k, _)| k))
+            .difference(&ignore_keys)
+            .map(|&k| k.to_owned())
+            .collect::<Vec<String>>();
+        for r in to_remove {
+            let _ = ugc_section.remove_all(r);
+        }
+        for m in modio_state.mods {
+            ugc_section.insert(
+                m.id.to_string(),
+                if modio_mods.contains(&m.id) {
+                    "True"
+                } else {
+                    "False"
+                },
+            );
+        }
+        for m in local_mods.into_iter().flatten() {
+            ugc_section.insert(m, "False");
+        }
+    }
+
+    config.write_to_file_opt(
+        config_path,
+        ini::WriteOption {
+            line_separator: ini::LineSeparator::CRLF,
+            ..Default::default()
+        },
+    )?;
     Ok(())
 }
 

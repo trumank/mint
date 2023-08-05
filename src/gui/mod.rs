@@ -1053,7 +1053,14 @@ impl eframe::App for App {
                             if button.clicked() {
                                 self.last_action_status = LastActionStatus::Idle;
                                 if let Some(pak_path) = &self.state.config.drg_pak_path {
-                                    match uninstall(pak_path) {
+                                    let mods = self.state
+                                        .profiles
+                                        .get_active_profile()
+                                        .mods
+                                        .iter()
+                                        .filter_map(|m| m.enabled.then(|| self.state.store.get_mod_info(&m.spec).and_then(|i| i.modio_id)).flatten())
+                                        .collect();
+                                    match uninstall(pak_path, mods) {
                                         Ok(()) => {
                                             self.last_action_status =
                                             LastActionStatus::Success("Successfully uninstalled mods".to_string());

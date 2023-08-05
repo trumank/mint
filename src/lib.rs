@@ -92,6 +92,25 @@ impl DRGInstallation {
             .join("Paks")
             .join(self.installation_type.main_pak_name())
     }
+    pub fn modio_directory(&self) -> Option<PathBuf> {
+        match self.installation_type {
+            DRGInstallationType::Steam => {
+                #[cfg(target_os = "windows")]
+                {
+                    Some(PathBuf::from("C:\\Users\\Public\\mod.io\\2475"))
+                }
+                #[cfg(target_os = "linux")]
+                {
+                    steamlocate::SteamDir::locate().map(|s| {
+                        s.path.join(
+                            "steamapps/compatdata/548430/pfx/drive_c/users/Public/mod.io/2475",
+                        )
+                    })
+                }
+            }
+            DRGInstallationType::Xbox => None,
+        }
+    }
 }
 
 /// File::open with the file path included in any error messages

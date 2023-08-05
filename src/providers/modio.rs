@@ -340,6 +340,7 @@ impl ModProvider for ModioProvider {
                 suggested_require: mod_.tags.contains("RequiredByAll"),
                 suggested_dependencies: deps,
                 modio_tags: Some(process_modio_tags(&mod_.tags)),
+                modio_id: Some(mod_id),
             }))
         } else if let Some(mod_id) = captures.name("mod_id") {
             // only mod ID specified, use latest version (either cached local or remote depending)
@@ -609,6 +610,7 @@ impl ModProvider for ModioProvider {
             suggested_require: mod_.tags.contains("RequiredByAll"),
             suggested_dependencies: deps,
             modio_tags: Some(process_modio_tags(&mod_.tags)),
+            modio_id: Some(mod_id),
         })
     }
 

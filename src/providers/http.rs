@@ -89,6 +89,7 @@ impl ModProvider for HttpProvider {
             suggested_require: false,
             suggested_dependencies: vec![],
             modio_tags: None,
+            modio_id: None,
         }))
     }
 
@@ -193,6 +194,7 @@ impl ModProvider for HttpProvider {
             suggested_require: false,
             suggested_dependencies: vec![],
             modio_tags: None,
+            modio_id: None,
         })
     }
 
