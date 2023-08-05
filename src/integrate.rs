@@ -169,6 +169,8 @@ pub fn integrate<P: AsRef<Path>>(path_pak: P, mods: Vec<(ModInfo, PathBuf)>) -> 
     let mut init_spacerig_assets = HashSet::new();
     let mut init_cave_assets = HashSet::new();
 
+    let mut added_paths = HashSet::new();
+
     let mods = mods
         .into_iter()
         .map(|(m, path)| {
@@ -182,7 +184,14 @@ pub fn integrate<P: AsRef<Path>>(path_pak: P, mods: Vec<(ModInfo, PathBuf)>) -> 
                 let new_path = j
                     .strip_prefix("../../../")
                     .context("prefix does not match")?;
-                let new_path_str = &new_path.to_string_lossy().replace('\\', "/");
+                let new_path_str = &new_path
+                    .to_string_lossy()
+                    .to_ascii_lowercase()
+                    .replace('\\', "/");
+                let lowercase = new_path_str.to_ascii_lowercase();
+                if added_paths.contains(&lowercase) {
+                    continue;
+                }
 
                 if let Some(filename) = new_path.file_name() {
                     if filename == "AssetRegistry.bin" {
@@ -215,6 +224,7 @@ pub fn integrate<P: AsRef<Path>>(path_pak: P, mods: Vec<(ModInfo, PathBuf)>) -> 
                     raw.uexp = Some(file_data);
                 } else {
                     mod_pak.write_file(new_path_str, &mut Cursor::new(file_data))?;
+                    added_paths.insert(lowercase);
                 }
             }
             Ok(m.resolution.url) // TODO don't leak paths of local mods to clients
