@@ -4,11 +4,11 @@ use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 
 use drg_mod_integration::{
-    find_drg_pak,
     gui::gui,
     providers::{ModSpecification, ProviderFactory},
     resolve_and_integrate_with_provider_init,
     state::State,
+    DRGInstallation,
 };
 
 /// Command line integration tool.
@@ -131,7 +131,11 @@ fn init_provider(state: &mut State, url: String, factory: &ProviderFactory) -> R
 async fn action_integrate(action: ActionIntegrate) -> Result<()> {
     let path_game_pak = action
         .fsd_pak
-        .or_else(find_drg_pak)
+        .or_else(|| {
+            DRGInstallation::find()
+                .as_ref()
+                .map(DRGInstallation::main_pak)
+        })
         .context("Could not find DRG pak file, please specify manually with the --fsd_pak flag")?;
 
     let mut state = State::new()?;
@@ -155,7 +159,11 @@ async fn action_integrate(action: ActionIntegrate) -> Result<()> {
 async fn action_integrate_profile(action: ActionIntegrateProfile) -> Result<()> {
     let path_game_pak = action
         .fsd_pak
-        .or_else(find_drg_pak)
+        .or_else(|| {
+            DRGInstallation::find()
+                .as_ref()
+                .map(DRGInstallation::main_pak)
+        })
         .context("Could not find DRG pak file, please specify manually with the --fsd_pak flag")?;
 
     let mut state = State::new()?;

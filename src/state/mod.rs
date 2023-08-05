@@ -10,8 +10,8 @@ use anyhow::{Context, Result};
 use directories::ProjectDirs;
 
 use crate::{
-    find_drg_pak,
     providers::{ModSpecification, ModStore},
+    DRGInstallation,
 };
 
 use self::config::ConfigWrapper;
@@ -74,7 +74,9 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             provider_parameters: Default::default(),
-            drg_pak_path: find_drg_pak(),
+            drg_pak_path: DRGInstallation::find()
+                .as_ref()
+                .map(DRGInstallation::main_pak),
         }
     }
 }

@@ -8,7 +8,7 @@ use repak::PakWriter;
 
 use crate::providers::{ModInfo, ReadSeek};
 use crate::splice::TrackedStatement;
-use crate::{get_binaries_directory_from_pak, open_file, splice};
+use crate::{open_file, splice, DRGInstallation};
 
 use unreal_asset::{
     exports::ExportBaseTrait,
@@ -33,8 +33,9 @@ use unreal_asset::{
 };
 
 pub fn uninstall<P: AsRef<Path>>(path_pak: P) -> Result<()> {
-    let path_mods_pak = path_pak.as_ref().parent().unwrap().join("mods_P.pak");
-    let path_hook_dll = get_binaries_directory_from_pak(&path_pak)?.join("x3daudio1_7.dll");
+    let installation = DRGInstallation::from_pak_path(path_pak)?;
+    let path_mods_pak = installation.paks_path().join("mods_P.pak");
+    let path_hook_dll = installation.binaries_directory().join("x3daudio1_7.dll");
     match std::fs::remove_file(&path_mods_pak) {
         Ok(()) => Ok(()),
         Err(e) if e.kind() == ErrorKind::NotFound => Ok(()),
@@ -51,14 +52,9 @@ pub fn uninstall<P: AsRef<Path>>(path_pak: P) -> Result<()> {
 }
 
 pub fn integrate<P: AsRef<Path>>(path_pak: P, mods: Vec<(ModInfo, PathBuf)>) -> Result<()> {
-    let path_paks = path_pak.as_ref().parent().with_context(|| {
-        format!(
-            "Could not derive Paks directory from {}",
-            path_pak.as_ref().display()
-        )
-    })?;
-    let path_mod_pak = Path::join(path_paks, "mods_P.pak");
-    let path_binaries = get_binaries_directory_from_pak(&path_pak)?;
+    let installation = DRGInstallation::from_pak_path(&path_pak)?;
+    let path_mod_pak = installation.paks_path().join("mods_P.pak");
+    let path_hook_dll = installation.binaries_directory().join("x3daudio1_7.dll");
 
     let mut fsd_pak_reader = BufReader::new(open_file(path_pak)?);
     let fsd_pak = repak::PakReader::new_any(&mut fsd_pak_reader, None)?;
@@ -156,14 +152,13 @@ pub fn integrate<P: AsRef<Path>>(path_pak: P, mods: Vec<(ModInfo, PathBuf)>) -> 
     );
 
     let hook_dll = include_bytes!(env!("CARGO_CDYLIB_FILE_HOOK_x3daudio1_7"));
-    let hook_dll_path = path_binaries.join("x3daudio1_7.dll");
-    if hook_dll_path
+    if path_hook_dll
         .metadata()
         .map(|m| m.len() != hook_dll.len() as u64)
         .unwrap_or(true)
     {
-        std::fs::write(&hook_dll_path, hook_dll)
-            .with_context(|| format!("failed to write hook to {}", hook_dll_path.display()))?;
+        std::fs::write(&path_hook_dll, hook_dll)
+            .with_context(|| format!("failed to write hook to {}", path_hook_dll.display()))?;
     }
 
     let mut init_spacerig_assets = HashSet::new();
