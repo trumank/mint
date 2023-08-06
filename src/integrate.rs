@@ -1,6 +1,7 @@
 use std::collections::{HashMap, HashSet};
+use std::ffi::{OsStr, OsString};
 use std::fs::OpenOptions;
-use std::io::{self, BufReader, BufWriter, Cursor, ErrorKind, Read, Seek, Write};
+use std::io::{self, BufReader, BufWriter, Cursor, ErrorKind, Read, Seek};
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
@@ -139,6 +140,30 @@ pub fn integrate<P: AsRef<Path>>(path_pak: P, mods: Vec<(ModInfo, PathBuf)>) -> 
     let fsd_pak = repak::PakReader::new_any(&mut fsd_pak_reader, None)?;
 
     #[derive(Debug, Default)]
+    struct Dir<'a> {
+        name: &'a OsStr,
+        children: HashMap<OsString, Dir<'a>>,
+    }
+    let paths = fsd_pak
+        .files()
+        .into_iter()
+        .map(PathBuf::from)
+        .collect::<Vec<_>>();
+    let mut directories: HashMap<OsString, Dir> = HashMap::new();
+    for f in &paths {
+        let mut dir = &mut directories;
+        for c in f.components() {
+            dir = &mut dir
+                .entry(c.as_os_str().to_ascii_lowercase())
+                .or_insert(Dir {
+                    name: c.as_os_str(),
+                    children: Default::default(),
+                })
+                .children;
+        }
+    }
+
+    #[derive(Debug, Default)]
     struct RawAsset {
         uasset: Option<Vec<u8>>,
         uexp: Option<Vec<u8>>,
@@ -154,22 +179,43 @@ pub fn integrate<P: AsRef<Path>>(path_pak: P, mods: Vec<(ModInfo, PathBuf)>) -> 
         }
     }
 
-    fn write_asset<T: Seek + Write, C: Seek + Read>(
-        pak: &mut PakWriter<T>,
-        asset: Asset<C>,
-        path: &str,
-    ) -> Result<()> {
+    // Used to normalize match path case to existing files in the DRG pak.
+    let normalize_path = |path_str: &str| {
+        let mut dir = Some(&directories);
+        let path = Path::new(path_str);
+        let mut normalized_path = PathBuf::new();
+        for c in path.components() {
+            if let Some(entry) = dir.and_then(|d| d.get(&c.as_os_str().to_ascii_lowercase())) {
+                normalized_path.push(entry.name);
+                dir = Some(&entry.children);
+            } else {
+                normalized_path.push(c);
+            }
+        }
+        normalized_path
+    };
+
+    let write_file = |pak: &mut PakWriter<_>, data: &[u8], path: &str| -> Result<()> {
+        let binding = normalize_path(path);
+        let path = binding.to_str().unwrap().replace('\\', "/");
+
+        pak.write_file(&path, &mut Cursor::new(data))?;
+
+        Ok(())
+    };
+
+    let write_asset = |pak: &mut PakWriter<_>, asset: Asset<_>, path: &str| -> Result<()> {
         let mut data_out = (Cursor::new(vec![]), Cursor::new(vec![]));
 
         asset.write_data(&mut data_out.0, Some(&mut data_out.1))?;
         data_out.0.rewind()?;
         data_out.1.rewind()?;
 
-        pak.write_file(&format!("{path}.uasset"), &mut data_out.0)?;
-        pak.write_file(&format!("{path}.uexp"), &mut data_out.1)?;
+        write_file(pak, &data_out.0.into_inner(), &format!("{path}.uasset"))?;
+        write_file(pak, &data_out.1.into_inner(), &format!("{path}.uexp"))?;
 
         Ok(())
-    }
+    };
 
     fn format_soft_class(path: &Path) -> String {
         let name = path.file_stem().unwrap().to_string_lossy();
@@ -258,10 +304,7 @@ pub fn integrate<P: AsRef<Path>>(path_pak: P, mods: Vec<(ModInfo, PathBuf)>) -> 
                 let new_path = j
                     .strip_prefix("../../../")
                     .context("prefix does not match")?;
-                let new_path_str = &new_path
-                    .to_string_lossy()
-                    .to_ascii_lowercase()
-                    .replace('\\', "/");
+                let new_path_str = &new_path.to_string_lossy().replace('\\', "/");
                 let lowercase = new_path_str.to_ascii_lowercase();
                 if added_paths.contains(&lowercase) {
                     continue;
@@ -297,7 +340,7 @@ pub fn integrate<P: AsRef<Path>>(path_pak: P, mods: Vec<(ModInfo, PathBuf)>) -> 
                 {
                     raw.uexp = Some(file_data);
                 } else {
-                    mod_pak.write_file(new_path_str, &mut Cursor::new(file_data))?;
+                    write_file(&mut mod_pak, &file_data, new_path_str)?;
                     added_paths.insert(lowercase);
                 }
             }
@@ -345,9 +388,10 @@ pub fn integrate<P: AsRef<Path>>(path_pak: P, mods: Vec<(ModInfo, PathBuf)>) -> 
     int_files.remove(int_path.1);
 
     for (p, new_path) in int_files {
-        mod_pak.write_file(
+        write_file(
+            &mut mod_pak,
+            &int_pak.get(&p, &mut int_pak_reader)?,
             new_path,
-            &mut Cursor::new(int_pak.get(&p, &mut int_pak_reader)?),
         )?;
     }
 
@@ -371,8 +415,8 @@ pub fn integrate<P: AsRef<Path>>(path_pak: P, mods: Vec<(ModInfo, PathBuf)>) -> 
     int_out.0.rewind()?;
     int_out.1.rewind()?;
 
-    mod_pak.write_file(int_path.0, &mut int_out.0)?;
-    mod_pak.write_file(int_path.1, &mut int_out.1)?;
+    write_file(&mut mod_pak, &mut int_out.0.into_inner(), int_path.0)?;
+    write_file(&mut mod_pak, &mut int_out.1.into_inner(), int_path.1)?;
 
     mod_pak.write_index()?;
 

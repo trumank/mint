@@ -3,6 +3,9 @@
 <!-- next-header -->
 
 ## [Unreleased] - ReleaseDate
+
+- Fix regression introduced by case sensitive path fix ([#36](https://github.com/trumank/drg-mod-integration/issues/36))
+
 ## [0.2.8] - 2023-08-05
 
 - Fix `*.ushaderbytecode` files not being filtered out and causing crash on load
