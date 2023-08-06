@@ -11,13 +11,11 @@ pub struct ConfigWrapper<C: Default + Serialize + DeserializeOwned> {
     path: PathBuf,
     config: C,
 }
+
 impl<C: Default + Serialize + DeserializeOwned> ConfigWrapper<C> {
-    pub fn new<P: AsRef<Path>>(path: P) -> Self {
+    pub fn new<P: AsRef<Path>>(path: P, config: C) -> Self {
         Self {
-            config: std::fs::read(&path)
-                .ok()
-                .and_then(|s| serde_json::from_slice(&s).ok())
-                .unwrap_or_default(),
+            config,
             path: path.as_ref().to_path_buf(),
         }
     }

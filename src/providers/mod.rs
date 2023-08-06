@@ -14,17 +14,26 @@ use tokio::sync::mpsc::Sender;
 use std::collections::{BTreeSet, HashMap, HashSet};
 
 use std::io::{Read, Seek};
+use std::ops::{Deref, DerefMut};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, RwLock};
 
 type Providers = RwLock<HashMap<&'static str, Arc<dyn ModProvider>>>;
-pub type ProviderCache = Arc<RwLock<ConfigWrapper<Cache>>>;
+pub type ProviderCache = Arc<RwLock<ConfigWrapper<VersionAnnotatedCache>>>;
+
+#[obake::versioned]
+#[obake(version("0.0.0"))]
+#[derive(Debug, Default, Serialize, Deserialize)]
+pub struct Cache {
+    cache: HashMap<String, Box<dyn ModProviderCache>>,
+}
 
 pub struct ModStore {
     providers: Providers,
     cache: ProviderCache,
     blob_cache: BlobCache,
 }
+
 impl ModStore {
     pub fn new<P: AsRef<Path>>(
         cache_path: P,
@@ -40,11 +49,55 @@ impl ModStore {
             })
             .collect::<Result<HashMap<_, _>>>()?;
 
+        let cache_metadata_path = cache_path.as_ref().join("cache.json");
+        let cache: MaybeVersionedCache = std::fs::read(&cache_metadata_path)
+            .ok()
+            .and_then(|s| {
+                let Ok(mut v) = serde_json::from_slice::<serde_json::Value>(&s) else {
+                    return None;
+                };
+                let Some(obj_map) = v.as_object_mut() else {
+                    return None;
+                };
+                let version = obj_map.remove("version");
+
+                if let Some(v) = version && let serde_json::Value::String(vs) = v
+                {
+                    match vs.as_str() {
+                        "0.0.0" => {
+                            // HACK: workaround a serde issue relating to flattening with tags
+                            // involving numeric keys in hashmaps, see
+                            // <https://github.com/serde-rs/serde/issues/1183>.
+                            if let Ok(c) = serde_json::from_slice::<Cache!["0.0.0"]>(&s)
+                            {
+                                return Some(MaybeVersionedCache::Versioned(VersionAnnotatedCache::V0_0_0(c)));
+                            }
+                        }
+                        _ => unimplemented!(),
+                    }
+                } else {
+                    // HACK: workaround a serde issue relating to flattening with tags involving
+                    // numeric keys in hashmaps, see <https://github.com/serde-rs/serde/issues/1183>.
+                    if let Ok(c) =
+                        serde_json::from_slice::<HashMap<String, Box<dyn ModProviderCache>>>(&s)
+                    {
+                        return Some(MaybeVersionedCache::Legacy(Cache_v0_0_0 { cache: c }));
+                    }
+                }
+
+                None
+            })
+            .unwrap_or_default();
+        let cache: VersionAnnotatedCache = match cache {
+            MaybeVersionedCache::Versioned(c) => c,
+            MaybeVersionedCache::Legacy(legacy) => VersionAnnotatedCache::V0_0_0(legacy),
+        };
+        let cache = ConfigWrapper::new(&cache_metadata_path, cache);
+        cache.save().unwrap();
+
         Ok(Self {
             providers: RwLock::new(providers),
-            cache: Arc::new(RwLock::new(ConfigWrapper::new(
-                cache_path.as_ref().join("cache.json"),
-            ))),
+            cache: Arc::new(RwLock::new(cache)),
             blob_cache: BlobCache::new(cache_path.as_ref().join("blobs")),
         })
     }
@@ -372,23 +425,69 @@ pub trait ModProviderCache: Sync + Send + std::fmt::Debug {
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any;
 }
 
-#[derive(Debug, Default, Serialize, Deserialize)]
-pub struct Cache(HashMap<String, Box<dyn ModProviderCache>>);
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(tag = "version")]
+pub enum VersionAnnotatedCache {
+    #[serde(rename = "0.0.0")]
+    V0_0_0(Cache!["0.0.0"]),
+}
+
+impl Default for VersionAnnotatedCache {
+    fn default() -> Self {
+        VersionAnnotatedCache::V0_0_0(Default::default())
+    }
+}
+
+impl Deref for VersionAnnotatedCache {
+    type Target = Cache!["0.0.0"];
+
+    fn deref(&self) -> &Self::Target {
+        match self {
+            VersionAnnotatedCache::V0_0_0(c) => c,
+        }
+    }
+}
+
+impl DerefMut for VersionAnnotatedCache {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        match self {
+            VersionAnnotatedCache::V0_0_0(c) => c,
+        }
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum MaybeVersionedCache {
+    Versioned(VersionAnnotatedCache),
+    Legacy(Cache!["0.0.0"]),
+}
+
+impl Default for MaybeVersionedCache {
+    fn default() -> Self {
+        MaybeVersionedCache::Versioned(Default::default())
+    }
+}
+
 impl Cache {
     fn has<T: ModProviderCache + 'static>(&self, id: &str) -> bool {
-        self.0
+        self.cache
             .get(id)
             .and_then(|c| c.as_any().downcast_ref::<T>())
             .is_none()
     }
+
     fn get<T: ModProviderCache + 'static>(&self, id: &str) -> Option<&T> {
-        self.0.get(id).and_then(|c| c.as_any().downcast_ref::<T>())
+        self.cache
+            .get(id)
+            .and_then(|c| c.as_any().downcast_ref::<T>())
     }
+
     fn get_mut<T: ModProviderCache + 'static>(&mut self, id: &str) -> &mut T {
         if self.has::<T>(id) {
-            self.0.insert(id.to_owned(), Box::new(T::new()));
+            self.cache.insert(id.to_owned(), Box::new(T::new()));
         }
-        self.0
+        self.cache
             .get_mut(id)
             .and_then(|c| c.as_any_mut().downcast_mut::<T>())
             .unwrap()
@@ -402,6 +501,7 @@ pub struct BlobRef(String);
 pub struct BlobCache {
     path: PathBuf,
 }
+
 impl BlobCache {
     fn new<P: AsRef<Path>>(path: P) -> Self {
         std::fs::create_dir(&path).ok();
@@ -409,6 +509,7 @@ impl BlobCache {
             path: path.as_ref().to_path_buf(),
         }
     }
+
     fn write(&self, blob: &[u8]) -> Result<BlobRef> {
         use sha2::{Digest, Sha256};
 
@@ -422,6 +523,7 @@ impl BlobCache {
 
         Ok(BlobRef(hash))
     }
+
     fn get_path(&self, blob: &BlobRef) -> Option<PathBuf> {
         let path = self.path.join(&blob.0);
         path.exists().then_some(path)
