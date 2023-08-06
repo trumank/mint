@@ -172,7 +172,7 @@ async fn action_integrate_profile(action: ActionIntegrateProfile) -> Result<()> 
     let mod_specs = profile
         .mods
         .iter()
-        .map(|config| config.spec.clone())
+        .filter_map(|config| config.enabled.then(|| config.spec.clone()))
         .collect::<Vec<_>>();
 
     resolve_and_integrate_with_provider_init(
