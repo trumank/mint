@@ -36,9 +36,9 @@ struct ActionIntegrate {
     mods: Vec<String>,
 }
 
-/// Integrate a profile
+/// Integrate a mod group
 #[derive(Parser, Debug)]
-struct ActionIntegrateProfile {
+struct ActionIntegrateModGroup {
     /// Path to FSD-WindowsNoEditor.pak (FSD-WinGDK.pak for Microsoft Store version) located
     /// inside the "Deep Rock Galactic" installation directory under FSD/Content/Paks. Only
     /// necessary if it cannot be found automatically.
@@ -51,7 +51,7 @@ struct ActionIntegrateProfile {
     update: bool,
 
     /// Paths of mods to integrate
-    profile: String,
+    mod_group: String,
 }
 
 /// Launch via steam
@@ -63,7 +63,7 @@ struct ActionLaunch {
 #[derive(Subcommand, Debug)]
 enum Action {
     Integrate(ActionIntegrate),
-    Profile(ActionIntegrateProfile),
+    ModGroup(ActionIntegrateModGroup),
     Launch(ActionLaunch),
 }
 
@@ -86,8 +86,8 @@ fn main() -> Result<()> {
             action_integrate(action).await?;
             Ok(())
         }),
-        Some(Action::Profile(action)) => rt.block_on(async {
-            action_integrate_profile(action).await?;
+        Some(Action::ModGroup(action)) => rt.block_on(async {
+            action_integrate_mod_group(action).await?;
             Ok(())
         }),
         Some(Action::Launch(action)) => {
@@ -156,7 +156,7 @@ async fn action_integrate(action: ActionIntegrate) -> Result<()> {
     .await
 }
 
-async fn action_integrate_profile(action: ActionIntegrateProfile) -> Result<()> {
+async fn action_integrate_mod_group(action: ActionIntegrateModGroup) -> Result<()> {
     let path_game_pak = action
         .fsd_pak
         .or_else(|| {
@@ -167,9 +167,9 @@ async fn action_integrate_profile(action: ActionIntegrateProfile) -> Result<()> 
         .context("Could not find DRG pak file, please specify manually with the --fsd_pak flag")?;
 
     let mut state = State::new()?;
-    let profile = &state.profiles.profiles[&action.profile];
+    let mod_group = &state.mod_data.groups[&action.mod_group];
 
-    let mod_specs = profile
+    let mod_specs = mod_group
         .mods
         .iter()
         .filter_map(|config| config.enabled.then(|| config.spec.clone()))

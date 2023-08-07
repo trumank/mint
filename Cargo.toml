@@ -17,6 +17,7 @@ egui_extras = "0.22.0"
 futures = "0.3.28"
 hex = "0.4.3"
 image = { version = "0.24.6", default-features = false, features = ["png"] }
+indexmap = { version = "2.0.0", features = ["serde"] }
 inventory = "0.3.6"
 lazy_static = "1.4.0"
 modio = { version = "0.7.1", features = ["rustls-tls"] }

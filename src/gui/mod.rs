@@ -15,18 +15,21 @@ use eframe::{
     egui::{self, FontSelection, TextFormat},
     epaint::{text::LayoutJob, Color32, Stroke},
 };
+use egui_dnd::utils::shift_vec;
+use egui_dnd::DragDropItem;
+use indexmap::IndexMap;
 use tokio::{
     sync::mpsc::{self, Receiver, Sender},
     task::JoinHandle,
 };
 
+use crate::state::{ModData, ModProfile};
 use crate::{
     error::IntegrationError,
     integrate::uninstall,
     is_drg_pak,
     providers::ModioTags,
     providers::{FetchProgress, ModResolution, ModSpecification, ModStore, ProviderFactory},
-    state::ModProfiles,
     state::{ModConfig, State},
 };
 
@@ -34,7 +37,7 @@ use request_counter::{RequestCounter, RequestID};
 
 pub fn gui(args: Option<Vec<String>>) -> Result<()> {
     let options = eframe::NativeOptions {
-        initial_window_size: Some(egui::vec2(800.0, 400.0)),
+        initial_window_size: Some(egui::vec2(1200.0, 400.0)),
         drag_and_drop_support: true,
         ..Default::default()
     };
@@ -66,17 +69,21 @@ struct App {
     check_updates_rid: Option<RequestID>,
     checked_updates_initially: bool,
     request_counter: RequestCounter,
-    dnd: egui_dnd::DragDropUi,
+    mod_group_dnd: egui_dnd::DragDropUi,
     window_provider_parameters: Option<WindowProviderParameters>,
     search_string: Option<String>,
     scroll_to_match: bool,
     settings_window: Option<WindowSettings>,
     modio_texture_handle: Option<egui::TextureHandle>,
     last_action_status: LastActionStatus,
-    rename_profile_popup: ProfileNamePopup,
-    add_profile_popup: ProfileNamePopup,
-    duplicate_profile_popup: ProfileNamePopup,
+    rename_mod_group_popup: NamePopup,
+    add_mod_group_popup: NamePopup,
+    duplicate_mod_group_popup: NamePopup,
     available_update: Option<GitHubRelease>,
+    add_profile_popup: NamePopup,
+    rename_profile_popup: NamePopup,
+    duplicate_profile_popup: NamePopup,
+    profile_dnd: egui_dnd::DragDropUi,
 }
 
 enum LastActionStatus {
@@ -85,11 +92,11 @@ enum LastActionStatus {
     Failure(String),
 }
 
-struct ProfileNamePopup {
+struct NamePopup {
     buffer_needs_prefill_and_focus: bool,
     buffer: String,
 }
-impl ProfileNamePopup {
+impl NamePopup {
     fn new() -> Self {
         Self {
             buffer_needs_prefill_and_focus: true,
@@ -125,36 +132,39 @@ impl App {
             update_rid: None,
             check_updates_rid: None,
             checked_updates_initially: false,
-            dnd: Default::default(),
+            mod_group_dnd: Default::default(),
             window_provider_parameters: None,
             search_string: Default::default(),
             scroll_to_match: false,
             settings_window: None,
             modio_texture_handle: None,
             last_action_status: LastActionStatus::Idle,
-            rename_profile_popup: ProfileNamePopup::new(),
-            add_profile_popup: ProfileNamePopup::new(),
-            duplicate_profile_popup: ProfileNamePopup::new(),
+            rename_mod_group_popup: NamePopup::new(),
+            add_mod_group_popup: NamePopup::new(),
+            duplicate_mod_group_popup: NamePopup::new(),
             available_update: None,
+            add_profile_popup: NamePopup::new(),
+            rename_profile_popup: NamePopup::new(),
+            duplicate_profile_popup: NamePopup::new(),
+            profile_dnd: Default::default(),
         })
     }
 
-    fn ui_profile(&mut self, ui: &mut egui::Ui) {
+    fn ui_mod_group(&mut self, ui: &mut egui::Ui) {
         ui.with_layout(ui.layout().with_cross_justify(true), |ui| {
-            egui::ScrollArea::vertical().show(ui, |ui| {
-                self.ui_profile_table(ui);
+            ui.push_id("mod-group-scrollarea", |ui| {
+                egui::ScrollArea::vertical().show(ui, |ui| {
+                    self.ui_mod_group_table(ui);
+                });
             });
         });
     }
 
-    fn ui_profile_table(&mut self, ui: &mut egui::Ui) {
-        let mods = &mut self.state.profiles.get_active_profile_mut().mods;
+    fn ui_mod_group_table(&mut self, ui: &mut egui::Ui) {
+        let mods = &mut self.state.mod_data.get_active_group_mut().mods;
         let mut needs_save = false;
         let mut btn_remove = None;
         let mut add_deps = None;
-
-        use egui_dnd::utils::shift_vec;
-        use egui_dnd::DragDropItem;
 
         struct DndItem<'item> {
             index: usize,
@@ -163,7 +173,7 @@ impl App {
 
         impl<'item> DragDropItem for DndItem<'item> {
             fn id(&self) -> egui::Id {
-                egui::Id::new(self.index)
+                egui::Id::new(format!("mod-group-dnd {}", self.index))
             }
         }
 
@@ -180,7 +190,7 @@ impl App {
             .collect::<Vec<_>>();
 
         let res = self
-            .dnd
+            .mod_group_dnd
             .ui::<DndItem>(ui, items.iter_mut(), |item, ui, handle| {
                 ui.horizontal(|ui| {
                     handle.ui(ui, item, |ui| {
@@ -193,20 +203,11 @@ impl App {
 
                     if ui
                         .add(egui::Checkbox::without_text(&mut item.item.enabled))
-                        .on_hover_text_at_pointer("enabled?")
+                        .on_hover_text_at_pointer("Enabled?")
                         .changed()
                     {
                         needs_save = true;
                     }
-
-                    /*
-                    if ui
-                        .add(egui::Checkbox::without_text(&mut item.item.required))
-                        .changed()
-                    {
-                        needs_save = true;
-                    }
-                    */
 
                     let info = self.state.store.get_mod_info(&item.item.spec);
 
@@ -261,7 +262,7 @@ impl App {
 
                         if ui
                             .button("📋")
-                            .on_hover_text_at_pointer("copy URL")
+                            .on_hover_text_at_pointer("Copy URL")
                             .clicked()
                         {
                             ui.output_mut(|o| o.copied_text = item.item.spec.url.to_owned());
@@ -276,7 +277,7 @@ impl App {
                                     egui::RichText::new("\u{26A0}")
                                         .color(ui.visuals().warn_fg_color),
                                 )
-                                .on_hover_text_at_pointer("remove duplicate")
+                                .on_hover_text_at_pointer("Remove duplicate")
                                 .clicked()
                         {
                             btn_remove = Some(item.index);
@@ -481,7 +482,7 @@ impl App {
             self.add_mods(ui.ctx(), add_deps, true);
         }
         if needs_save {
-            self.state.profiles.save().unwrap();
+            self.state.mod_data.save().unwrap();
         }
     }
 
@@ -669,7 +670,7 @@ impl App {
                             if is_committed(&res) {
                                 try_save = true;
                             }
-                            if ui.button("browse").clicked() {
+                            if ui.button("Browse").clicked() {
                                 if let Some(fsd_pak) = rfd::FileDialog::new()
                                     .add_filter("DRG Pak", &["pak"])
                                     .pick_file()
@@ -712,7 +713,7 @@ impl App {
                     });
 
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::TOP), |ui| {
-                        if ui.add_enabled(window.drg_pak_path_err.is_none(), egui::Button::new("save")).clicked() {
+                        if ui.add_enabled(window.drg_pak_path_err.is_none(), egui::Button::new("Save")).clicked() {
                             try_save = true;
                         }
                         if let Some(error) = &window.drg_pak_path_err {
@@ -736,13 +737,15 @@ impl App {
         }
     }
 
-    fn mk_profile_name_popup(
+    fn mk_name_popup(
         state: &mut State,
-        popup: &mut ProfileNamePopup,
+        popup: &mut NamePopup,
         ui: &egui::Ui,
         popup_id: egui::Id,
         response: egui::Response,
         default_name: impl Fn(&mut State) -> String,
+        name_exists: impl Fn(&mut State, &str) -> bool,
+        hint_text: &str,
         accept: impl Fn(&mut State, String),
     ) {
         popup.buffer_needs_prefill_and_focus = custom_popup_above_or_below_widget(
@@ -757,10 +760,8 @@ impl App {
                         popup.buffer = default_name(state);
                     }
 
-                    let res = ui.add(
-                        egui::TextEdit::singleline(&mut popup.buffer)
-                            .hint_text("Enter new profile name"),
-                    );
+                    let res =
+                        ui.add(egui::TextEdit::singleline(&mut popup.buffer).hint_text(hint_text));
                     if popup.buffer_needs_prefill_and_focus {
                         res.request_focus();
                     }
@@ -770,21 +771,498 @@ impl App {
                             ui.memory_mut(|mem| mem.close_popup());
                         }
 
-                        let invalid_name = popup.buffer.is_empty()
-                            || state.profiles.profiles.contains_key(&popup.buffer);
+                        let invalid_name =
+                            popup.buffer.is_empty() || name_exists(state, &popup.buffer);
                         let clicked = ui
                             .add_enabled(!invalid_name, egui::Button::new("OK"))
                             .clicked();
                         if !invalid_name && (clicked || is_committed(&res)) {
                             ui.memory_mut(|mem| mem.close_popup());
                             accept(state, std::mem::take(&mut popup.buffer));
-                            state.profiles.save().unwrap();
+                            state.mod_data.save().unwrap();
                         }
                     });
                 });
             },
         )
         .is_none();
+    }
+
+    fn mk_mod_groups_panel(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
+        ui.label(egui::RichText::new("Mod Groups").font(egui::FontId::proportional(16.0)));
+        ui.set_enabled(self.integrate_rid.is_none() && self.update_rid.is_none());
+        ui.horizontal(|ui| {
+            ui.add_enabled_ui(
+                self.state
+                    .mod_data
+                    .groups
+                    .contains_key(&self.state.mod_data.active_group)
+                    && self.state.mod_data.groups.len() > 0,
+                |ui| {
+                    if ui
+                        .button(" ➖ ")
+                        .on_hover_text_at_pointer("Delete mod group")
+                        .clicked()
+                    {
+                        let active = self.state.mod_data.active_group.clone();
+                        self.state.mod_data.remove_active_group();
+                        self.state.mod_data.save().unwrap();
+
+                        for profile in self.state.mod_data.profiles.values_mut() {
+                            profile.mod_groups.remove(&active);
+                        }
+                        self.state.mod_data.save().unwrap();
+                    }
+                },
+            );
+            ui.add_enabled_ui(true, |ui| {
+                let response = ui
+                    .button(" ➕ ")
+                    .on_hover_text_at_pointer("Add new mod group");
+                let popup_id = ui.make_persistent_id("add-mod-group-popup");
+                if response.clicked() {
+                    ui.memory_mut(|mem| mem.open_popup(popup_id));
+                }
+                Self::mk_name_popup(
+                    &mut self.state,
+                    &mut self.add_mod_group_popup,
+                    ui,
+                    popup_id,
+                    response,
+                    |_state| String::new(),
+                    |state, name| state.mod_data.groups.contains_key(name),
+                    "Enter new mod group name",
+                    |state, name| {
+                        state.mod_data.groups.entry(name.clone()).or_default();
+                        state.mod_data.active_group = name.clone();
+
+                        for profile in state.mod_data.profiles.values_mut() {
+                            profile.mod_groups.insert(name.clone(), false);
+                        }
+                        state.mod_data.save().unwrap();
+                    },
+                );
+            });
+
+            ui.add_enabled_ui(true, |ui| {
+                let response = ui
+                    .button("Rename")
+                    .on_hover_text_at_pointer("Edit mod group name");
+                let popup_id = ui.make_persistent_id("edit-mod-group-name-popup");
+                if response.clicked() {
+                    ui.memory_mut(|mem| mem.open_popup(popup_id));
+                }
+                Self::mk_name_popup(
+                    &mut self.state,
+                    &mut self.rename_mod_group_popup,
+                    ui,
+                    popup_id,
+                    response,
+                    |state| state.mod_data.active_group.clone(),
+                    |state, name| state.mod_data.groups.contains_key(name),
+                    "Enter new mod group name",
+                    |state, name| {
+                        let mod_group_to_remove = state.mod_data.active_group.clone();
+                        let enabled = state.mod_data.groups.remove(&mod_group_to_remove).unwrap();
+                        state.mod_data.groups.insert(name.clone(), enabled);
+                        for (_, profile) in &mut state.mod_data.profiles {
+                            let enabled = profile.mod_groups.remove(&mod_group_to_remove).unwrap();
+                            profile.mod_groups.insert(name.clone(), enabled);
+                        }
+                        state.mod_data.active_group = name;
+                        state.mod_data.save().unwrap();
+                    },
+                );
+            });
+
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::TOP), |ui| {
+                let response = ui
+                    .button("🗐")
+                    .on_hover_text_at_pointer("Duplicate mod group");
+                let popup_id = ui.make_persistent_id("duplicate-mod-group-popup");
+                if response.clicked() {
+                    ui.memory_mut(|mem| mem.open_popup(popup_id));
+                }
+                Self::mk_name_popup(
+                    &mut self.state,
+                    &mut self.duplicate_mod_group_popup,
+                    ui,
+                    popup_id,
+                    response,
+                    |state| format!("{} - Copy", state.mod_data.active_profile),
+                    |state, name| state.mod_data.groups.contains_key(name),
+                    "Enter new mod group name",
+                    |state, name| {
+                        let mod_group = state.mod_data.groups[&state.mod_data.active_group].clone();
+                        state.mod_data.groups.insert(name.clone(), mod_group);
+                        for (_, profile) in &mut state.mod_data.profiles {
+                            profile.mod_groups.insert(name.clone(), false);
+                        }
+                        state.mod_data.active_group = name;
+                        state.mod_data.save().unwrap();
+                    },
+                );
+
+                if ui
+                    .button("📋")
+                    .on_hover_text_at_pointer("Copy mod group mods")
+                    .clicked()
+                {
+                    let mods = Self::build_mod_string(&self.state.mod_data.get_active_group().mods);
+                    ui.output_mut(|o| o.copied_text = mods);
+                }
+                ui.with_layout(ui.layout().with_main_justify(true), |ui| {
+                    let ModData {
+                        groups,
+                        ref mut active_group,
+                        ..
+                    } = self.state.mod_data.deref_mut();
+                    let res = egui::ComboBox::from_id_source("mod-group-dropdown")
+                        .width(ui.available_width())
+                        .selected_text(active_group.clone())
+                        .show_ui(ui, |ui| {
+                            groups.keys().for_each(|k| {
+                                ui.selectable_value(active_group, k.to_string(), k);
+                            })
+                        });
+                    if res.response.changed() {
+                        self.state.mod_data.save().unwrap();
+                    }
+                });
+            });
+        });
+
+        ui.separator();
+
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::TOP), |ui| {
+            if self.resolve_mod_rid.is_some() {
+                ui.spinner();
+            }
+            ui.with_layout(ui.layout().with_main_justify(true), |ui| {
+                // define multiline layouter to be able to show multiple lines in a single line widget
+                let font_id = FontSelection::default().resolve(ui.style());
+                let text_color = ui.visuals().widgets.inactive.text_color();
+                let mut multiline_layouter = move |ui: &egui::Ui, text: &str, wrap_width: f32| {
+                    let layout_job = LayoutJob::simple(
+                        text.to_string(),
+                        font_id.clone(),
+                        text_color,
+                        wrap_width,
+                    );
+                    ui.fonts(|f| f.layout_job(layout_job))
+                };
+
+                let resolve = ui.add_enabled(
+                    self.resolve_mod_rid.is_none(),
+                    egui::TextEdit::singleline(&mut self.resolve_mod)
+                        .layouter(&mut multiline_layouter)
+                        .hint_text("Add mods..."),
+                );
+                if is_committed(&resolve) {
+                    self.add_mods(ctx, self.parse_mods());
+                }
+            });
+        });
+
+        self.ui_mod_group(ui);
+
+        if let Some(search_string) = &mut self.search_string {
+            let lower = search_string.to_lowercase();
+            let mod_group = self.state.mod_data.get_active_group();
+            let any_matches = mod_group.mods.iter().any(|m| {
+                self.state
+                    .store
+                    .get_mod_info(&m.spec)
+                    .map(|i| i.name.to_lowercase().contains(&lower))
+                    .unwrap_or(false)
+            });
+            let mut text_edit = egui::TextEdit::singleline(search_string);
+            if !any_matches {
+                text_edit = text_edit.text_color(ui.visuals().error_fg_color);
+            }
+            let res = ui
+                .child_ui(ui.max_rect(), egui::Layout::bottom_up(egui::Align::RIGHT))
+                .add(text_edit);
+            if res.changed() {
+                self.scroll_to_match = true;
+            }
+            if res.lost_focus() {
+                self.search_string = None;
+                self.scroll_to_match = false;
+            } else if !res.has_focus() {
+                res.request_focus();
+            }
+        }
+
+        ctx.input(|i| {
+            if !i.raw.dropped_files.is_empty()
+                && self.integrate_rid.is_none()
+                && self.update_rid.is_none()
+            {
+                let mut mods = String::new();
+                for f in i
+                    .raw
+                    .dropped_files
+                    .iter()
+                    .filter_map(|f| f.path.as_ref().map(|p| p.to_string_lossy()))
+                {
+                    mods.push_str(&f);
+                    mods.push('\n');
+                }
+
+                self.resolve_mod = mods.trim().to_string();
+                self.add_mods(ctx, self.parse_mods());
+            }
+            for e in &i.events {
+                match e {
+                    egui::Event::Paste(s) => {
+                        if self.integrate_rid.is_none()
+                            && self.update_rid.is_none()
+                            && ctx.memory(|m| m.focus().is_none())
+                        {
+                            self.resolve_mod = s.trim().to_string();
+                            self.add_mods(ctx, self.parse_mods());
+                        }
+                    }
+                    egui::Event::Text(text) => {
+                        if ctx.memory(|m| m.focus().is_none()) {
+                            self.search_string = Some(text.to_string());
+                            self.scroll_to_match = true;
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        });
+    }
+
+    fn mk_profiles_panel(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
+        ui.label(egui::RichText::new("Profiles").font(egui::FontId::proportional(16.0)));
+        self.ui_profile(ui, ctx);
+    }
+
+    fn ui_profile(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
+        ui.with_layout(ui.layout().with_cross_justify(true), |ui| {
+            ui.push_id("profile-scrollarea", |ui| {
+                egui::ScrollArea::vertical().show(ui, |ui| {
+                    self.ui_profile_table(ui, ctx);
+                });
+            });
+        });
+    }
+
+    fn ui_profile_table(&mut self, ui: &mut egui::Ui, _ctx: &egui::Context) {
+        ui.horizontal(|ui| {
+            ui.add_enabled_ui(
+                self.state
+                    .mod_data
+                    .profiles
+                    .contains_key(&self.state.mod_data.active_profile)
+                    && self.state.mod_data.profiles.len() > 1,
+                |ui| {
+                    if ui
+                        .button(" ➖ ")
+                        .on_hover_text_at_pointer("Delete profile")
+                        .clicked()
+                    {
+                        self.state.mod_data.remove_active_profile();
+                        self.state.mod_data.save().unwrap();
+                    }
+                },
+            );
+
+            ui.add_enabled_ui(true, |ui| {
+                let response = ui
+                    .button(" ➕ ")
+                    .on_hover_text_at_pointer("Add new profile");
+                let popup_id = ui.make_persistent_id("add-profile-popup");
+                if response.clicked() {
+                    ui.memory_mut(|mem| mem.open_popup(popup_id));
+                }
+                Self::mk_name_popup(
+                    &mut self.state,
+                    &mut self.add_profile_popup,
+                    ui,
+                    popup_id,
+                    response,
+                    |_state| String::new(),
+                    |state, name| state.mod_data.profiles.contains_key(name),
+                    "Enter new profile name",
+                    |state, name| {
+                        let ModData {
+                            profiles, groups, ..
+                        } = state.mod_data.deref_mut();
+
+                        profiles.entry(name.clone()).or_insert_with(|| {
+                            let mut mod_groups = IndexMap::new();
+                            for mg in groups.keys() {
+                                mod_groups.insert(mg.clone(), false);
+                            }
+                            ModProfile { mod_groups }
+                        });
+                        state.mod_data.active_profile = name.clone();
+                        state.mod_data.save().unwrap();
+                    },
+                );
+            });
+
+            ui.add_enabled_ui(true, |ui| {
+                let response = ui
+                    .button("Rename")
+                    .on_hover_text_at_pointer("Edit profile name");
+                let popup_id = ui.make_persistent_id("edit-profile-name-popup");
+                if response.clicked() {
+                    ui.memory_mut(|mem| mem.open_popup(popup_id));
+                }
+                Self::mk_name_popup(
+                    &mut self.state,
+                    &mut self.rename_profile_popup,
+                    ui,
+                    popup_id,
+                    response,
+                    |state| state.mod_data.active_profile.clone(),
+                    |state, name| state.mod_data.profiles.contains_key(name),
+                    "Enter new profile name",
+                    |state, name| {
+                        let profile_to_remove = state.mod_data.active_profile.clone();
+                        let profile = state.mod_data.profiles.remove(&profile_to_remove).unwrap();
+                        state.mod_data.profiles.insert(name.clone(), profile);
+                        state.mod_data.active_profile = name;
+                        state.mod_data.save().unwrap();
+                    },
+                );
+            });
+
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::TOP), |ui| {
+                let response = ui.button("🗐").on_hover_text_at_pointer("Duplicate profile");
+                let popup_id = ui.make_persistent_id("duplicate-profile-popup");
+                if response.clicked() {
+                    ui.memory_mut(|mem| mem.open_popup(popup_id));
+                }
+                Self::mk_name_popup(
+                    &mut self.state,
+                    &mut self.duplicate_profile_popup,
+                    ui,
+                    popup_id,
+                    response,
+                    |state| format!("{} - Copy", state.mod_data.active_profile),
+                    |state, name| state.mod_data.profiles.contains_key(name),
+                    "Enter new profile name",
+                    |state, name| {
+                        let profile =
+                            state.mod_data.profiles[&state.mod_data.active_profile].clone();
+                        state.mod_data.profiles.insert(name.clone(), profile);
+                        state.mod_data.active_profile = name;
+                        state.mod_data.save().unwrap();
+                    },
+                );
+
+                if ui
+                    .button("📋")
+                    .on_hover_text_at_pointer("Copy profile mods")
+                    .clicked()
+                {
+                    let mut mods = Vec::new();
+                    let mod_groups = &self.state.mod_data.profiles
+                        [&self.state.mod_data.active_profile]
+                        .mod_groups;
+                    for (mod_group, enabled) in mod_groups {
+                        if *enabled {
+                            let mods_inner = &self.state.mod_data.groups[mod_group].mods;
+                            for r#mod in mods_inner {
+                                if r#mod.enabled {
+                                    mods.push(r#mod.clone());
+                                }
+                            }
+                        }
+                    }
+
+                    let mods = Self::build_mod_string(&mods);
+                    ui.output_mut(|o| o.copied_text = mods);
+                }
+                ui.with_layout(ui.layout().with_main_justify(true), |ui| {
+                    let ModData {
+                        profiles,
+                        ref mut active_profile,
+                        ..
+                    } = self.state.mod_data.deref_mut();
+                    let res = egui::ComboBox::from_id_source("profile-dropdown")
+                        .width(ui.available_width())
+                        .selected_text(active_profile.clone())
+                        .show_ui(ui, |ui| {
+                            profiles.keys().for_each(|k| {
+                                ui.selectable_value(active_profile, k.to_string(), k);
+                            })
+                        });
+                    if res.response.changed() {
+                        self.state.mod_data.save().unwrap();
+                    }
+                });
+            });
+        });
+
+        ui.separator();
+
+        let active_profile = &self.state.mod_data.active_profile.clone();
+        let mod_groups = &mut self
+            .state
+            .mod_data
+            .profiles
+            .get_mut(active_profile)
+            .unwrap()
+            .mod_groups;
+
+        struct DndItem<'item> {
+            index: usize,
+            item: (&'item String, &'item mut bool),
+        }
+
+        impl<'item> DragDropItem for DndItem<'item> {
+            fn id(&self) -> egui::Id {
+                egui::Id::new(format!("profile-dnd {}", self.index))
+            }
+        }
+
+        let mut items = mod_groups
+            .iter_mut()
+            .enumerate()
+            .map(|(index, item)| DndItem { index, item })
+            .collect::<Vec<_>>();
+
+        let mut needs_save = false;
+        let res = self
+            .profile_dnd
+            .ui::<DndItem>(ui, items.iter_mut(), |item, ui, handle| {
+                ui.horizontal(|ui| {
+                    handle.ui(ui, item, |ui| {
+                        ui.label("☰");
+                    });
+
+                    if ui
+                        .add(egui::Checkbox::without_text(&mut item.item.1))
+                        .on_hover_text_at_pointer("Enabled?")
+                        .changed()
+                    {
+                        needs_save = true;
+                    }
+
+                    ui.label(item.item.0);
+                });
+            });
+
+        if let Some(response) = res.completed {
+            let mut vec = mod_groups
+                .iter()
+                .map(|(k, v)| (k.clone(), v.clone()))
+                .collect::<Vec<_>>();
+            shift_vec(response.from, response.to, &mut vec);
+            mod_groups.clear();
+            mod_groups.extend(vec);
+        }
+
+        if needs_save {
+            self.state.mod_data.save().unwrap();
+        }
     }
 }
 
@@ -873,7 +1351,7 @@ impl eframe::App for App {
                     if Some(rid) == self.resolve_mod_rid {
                         match result {
                             Ok(resolved_mods) => {
-                                let profile = self.state.profiles.get_active_profile_mut();
+                                let mod_group = self.state.mod_data.get_active_group_mut();
                                 let primary_mods =
                                     mods.into_iter().collect::<HashSet<ModSpecification>>();
                                 for (resolved_spec, info) in resolved_mods {
@@ -896,7 +1374,7 @@ impl eframe::App for App {
                                         true
                                     };
                                     if add {
-                                        profile.mods.insert(
+                                        mod_group.mods.insert(
                                             0,
                                             ModConfig {
                                                 spec: info.spec,
@@ -907,7 +1385,7 @@ impl eframe::App for App {
                                     }
                                 }
                                 self.resolve_mod.clear();
-                                self.state.profiles.save().unwrap();
+                                self.state.mod_data.save().unwrap();
                                 self.last_action_status = LastActionStatus::Success(
                                     "mods successfully resolved".to_string(),
                                 );
@@ -1014,7 +1492,7 @@ impl eframe::App for App {
         self.show_provider_parameters(ctx);
         self.show_settings(ctx);
 
-        egui::TopBottomPanel::bottom("bottom_panel").show(ctx, |ui| {
+        egui::TopBottomPanel::bottom("bottom-panel").show(ctx, |ui| {
             ui.with_layout(egui::Layout::right_to_left(egui::Align::TOP), |ui| {
                 ui.add_enabled_ui(
                     self.integrate_rid.is_none()
@@ -1044,16 +1522,24 @@ impl eframe::App for App {
                             }
                             if button.clicked() {
                                 self.last_action_status = LastActionStatus::Idle;
+
+                                let mut mod_specs = Vec::new();
+                                let profile = &self.state.mod_data.profiles[&self.state.mod_data.active_profile];
+                                for mod_group in profile.mod_groups.iter().filter(|(_, enabled)| **enabled).map(|(mod_group, _)| mod_group) {
+                                    mod_specs.extend(
+                                        self.state
+                                            .mod_data
+                                            .groups[mod_group]
+                                            .mods
+                                            .iter()
+                                            .filter_map(|m| m.enabled.then(|| m.spec.clone()))
+                                    );
+                                }
+
                                 self.integrate_rid = integrate(
                                     &mut self.request_counter,
                                     self.state.store.clone(),
-                                    self.state
-                                        .profiles
-                                        .get_active_profile()
-                                        .mods
-                                        .iter()
-                                        .filter_map(|m| m.enabled.then(|| m.spec.clone()))
-                                        .collect(),
+                                    mod_specs,
                                     self.state.config.drg_pak_path.as_ref().unwrap().clone(),
                                     self.tx.clone(),
                                     ctx.clone(),
@@ -1071,13 +1557,17 @@ impl eframe::App for App {
                             if button.clicked() {
                                 self.last_action_status = LastActionStatus::Idle;
                                 if let Some(pak_path) = &self.state.config.drg_pak_path {
-                                    let mods = self.state
-                                        .profiles
-                                        .get_active_profile()
-                                        .mods
-                                        .iter()
-                                        .filter_map(|m| m.enabled.then(|| self.state.store.get_mod_info(&m.spec).and_then(|i| i.modio_id)).flatten())
-                                        .collect();
+                                    let mut mods = HashSet::new();
+                                    for (mod_group_name, enabled) in &self.state.mod_data.get_active_profile().mod_groups {
+                                        if *enabled {
+                                            for ModConfig { enabled, spec, .. } in &self.state.mod_data.groups[mod_group_name].mods {
+                                                if let Some(modio_id) = enabled.then(|| self.state.store.get_mod_info(spec).and_then(|i| i.modio_id)).flatten() {
+                                                    mods.insert(modio_id);
+                                                }
+                                            }
+                                        }
+                                    }
+
                                     match uninstall(pak_path, mods) {
                                         Ok(()) => {
                                             self.last_action_status =
@@ -1100,14 +1590,18 @@ impl eframe::App for App {
                             )
                             .clicked()
                         {
-                            let mod_specs = self
-                                .state
-                                .profiles
-                                .get_active_profile()
-                                .mods
-                                .iter()
-                                .map(|m| m.spec.clone())
-                                .collect::<Vec<_>>();
+                            let mut mod_specs = Vec::new();
+                            let profile = &self.state.mod_data.profiles[&self.state.mod_data.active_profile];
+                            for mod_group in profile.mod_groups.iter().filter(|(_, enabled)| **enabled).map(|(mod_group, _)| mod_group) {
+                                mod_specs.extend(
+                                    self.state
+                                        .mod_data
+                                        .groups[mod_group]
+                                        .mods
+                                        .iter()
+                                        .filter_map(|m| m.enabled.then(|| m.spec.clone()))
+                                );
+                            }
                             let store = self.state.store.clone();
 
                             let rid = self.request_counter.next();
