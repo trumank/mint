@@ -38,7 +38,7 @@ struct ActionIntegrate {
 
 /// Integrate a mod group
 #[derive(Parser, Debug)]
-struct ActionIntegrateModGroup {
+struct ActionIntegrateProfile {
     /// Path to FSD-WindowsNoEditor.pak (FSD-WinGDK.pak for Microsoft Store version) located
     /// inside the "Deep Rock Galactic" installation directory under FSD/Content/Paks. Only
     /// necessary if it cannot be found automatically.
@@ -50,8 +50,8 @@ struct ActionIntegrateModGroup {
     #[arg(short, long)]
     update: bool,
 
-    /// Paths of mods to integrate
-    mod_group: String,
+    /// Profile to integrate.
+    profile: String,
 }
 
 /// Launch via steam
@@ -63,7 +63,7 @@ struct ActionLaunch {
 #[derive(Subcommand, Debug)]
 enum Action {
     Integrate(ActionIntegrate),
-    ModGroup(ActionIntegrateModGroup),
+    Profile(ActionIntegrateProfile),
     Launch(ActionLaunch),
 }
 
@@ -86,8 +86,8 @@ fn main() -> Result<()> {
             action_integrate(action).await?;
             Ok(())
         }),
-        Some(Action::ModGroup(action)) => rt.block_on(async {
-            action_integrate_mod_group(action).await?;
+        Some(Action::Profile(action)) => rt.block_on(async {
+            action_integrate_profile(action).await?;
             Ok(())
         }),
         Some(Action::Launch(action)) => {
@@ -156,7 +156,7 @@ async fn action_integrate(action: ActionIntegrate) -> Result<()> {
     .await
 }
 
-async fn action_integrate_mod_group(action: ActionIntegrateModGroup) -> Result<()> {
+async fn action_integrate_profile(action: ActionIntegrateProfile) -> Result<()> {
     let path_game_pak = action
         .fsd_pak
         .or_else(|| {
@@ -167,13 +167,17 @@ async fn action_integrate_mod_group(action: ActionIntegrateModGroup) -> Result<(
         .context("Could not find DRG pak file, please specify manually with the --fsd_pak flag")?;
 
     let mut state = State::init()?;
-    let mod_group = &state.mod_data.groups[&action.mod_group];
 
-    let mod_specs = mod_group
-        .mods
-        .iter()
-        .filter_map(|config| config.enabled.then(|| config.spec.clone()))
-        .collect::<Vec<_>>();
+    let mut mod_specs = Vec::new();
+    for (name, enabled) in &state.mod_data.profiles[&action.profile].mod_groups {
+        if *enabled {
+            for m in &state.mod_data.groups[name].mods {
+                if m.enabled {
+                    mod_specs.push(m.spec.clone());
+                }
+            }
+        }
+    }
 
     resolve_and_integrate_with_provider_init(
         path_game_pak,
