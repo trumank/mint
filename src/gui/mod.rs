@@ -2,13 +2,7 @@ mod message;
 
 //#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")] // hide console window on Windows in release
 
-use std::{
-    collections::{HashMap, HashSet},
-    fmt::Display,
-    ops::DerefMut,
-    path::PathBuf,
-    sync::Arc,
-};
+use std::{collections::HashMap, fmt::Display, ops::DerefMut, path::PathBuf};
 
 use anyhow::{anyhow, Context, Result};
 use eframe::{
@@ -21,15 +15,15 @@ use tokio::{
 };
 
 use crate::{
-    error::IntegrationError,
     integrate::uninstall,
     is_drg_pak,
     providers::ModioTags,
-    providers::{FetchProgress, ModResolution, ModSpecification, ModStore, ProviderFactory},
+    providers::{FetchProgress, ModSpecification, ModStore, ProviderFactory},
     state::ModProfiles,
     state::{ModConfig, State},
 };
 
+use message::MessageHandle;
 use request_counter::{RequestCounter, RequestID};
 
 pub fn gui(args: Option<Vec<String>>) -> Result<()> {
@@ -49,21 +43,17 @@ pub fn gui(args: Option<Vec<String>>) -> Result<()> {
 
 const MODIO_LOGO_PNG: &[u8] = include_bytes!("../../assets/modio-cog-blue.png");
 
-struct App {
+pub struct App {
     args: Option<Vec<String>>,
     tx: Sender<message::Message>,
     rx: Receiver<message::Message>,
     state: State,
     log: Log,
     resolve_mod: String,
-    resolve_mod_rid: Option<RequestID>,
-    integrate_rid: Option<(
-        RequestID,
-        JoinHandle<()>,
-        HashMap<ModSpecification, SpecFetchProgress>,
-    )>,
-    update_rid: Option<(RequestID, JoinHandle<()>)>,
-    check_updates_rid: Option<RequestID>,
+    resolve_mod_rid: Option<MessageHandle<()>>,
+    integrate_rid: Option<MessageHandle<HashMap<ModSpecification, SpecFetchProgress>>>,
+    update_rid: Option<MessageHandle<()>>,
+    check_updates_rid: Option<MessageHandle<()>>,
     checked_updates_initially: bool,
     request_counter: RequestCounter,
     dnd: egui_dnd::DragDropUi,
@@ -211,8 +201,8 @@ impl App {
                     let info = self.state.store.get_mod_info(&item.item.spec);
 
                     if item.item.enabled {
-                        if let Some((_, _, progress)) = &self.integrate_rid {
-                            match progress.get(&item.item.spec) {
+                        if let Some(req) = &self.integrate_rid {
+                            match req.state.get(&item.item.spec) {
                                 Some(SpecFetchProgress::Progress { progress, size }) => {
                                     ui.add(
                                         egui::ProgressBar::new(*progress as f32 / *size as f32)
@@ -478,7 +468,7 @@ impl App {
             needs_save = true;
         }
         if let Some(add_deps) = add_deps {
-            self.add_mods(ui.ctx(), add_deps, true);
+            message::ResolveMods::send(self, ui.ctx(), add_deps, true);
         }
         if needs_save {
             self.state.profiles.save().unwrap();
@@ -503,52 +493,6 @@ impl App {
             }
         }
         string
-    }
-
-    fn add_mods(&mut self, ctx: &egui::Context, specs: Vec<ModSpecification>, is_dependency: bool) {
-        let rid = self.request_counter.next();
-        let store = self.state.store.clone();
-        let tx = self.tx.clone();
-        let ctx = ctx.clone();
-        tokio::spawn(async move {
-            let result = store.resolve_mods(&specs, false).await;
-            tx.send(message::Message::ResolveMods {
-                rid,
-                specs,
-                result,
-                is_dependency,
-            })
-            .await
-            .unwrap();
-            ctx.request_repaint();
-        });
-        self.last_action_status = LastActionStatus::Idle;
-        self.resolve_mod_rid = Some(rid);
-    }
-
-    fn check_updates(&mut self, ctx: &egui::Context) {
-        let rid = self.request_counter.next();
-        let tx = self.tx.clone();
-        let ctx = ctx.clone();
-
-        async fn req() -> Result<GitHubRelease> {
-            Ok(reqwest::Client::builder()
-                .user_agent("trumank/drg-mod-integration")
-                .build()?
-                .get("https://api.github.com/repos/trumank/drg-mod-integration/releases/latest")
-                .send()
-                .await?
-                .json::<GitHubRelease>()
-                .await?)
-        }
-
-        tokio::spawn(async move {
-            tx.send(message::Message::CheckUpdates(rid, req().await))
-                .await
-                .unwrap();
-            ctx.request_repaint();
-        });
-        self.check_updates_rid = Some(rid);
     }
 
     fn show_provider_parameters(&mut self, ctx: &egui::Context) {
@@ -858,155 +802,12 @@ impl eframe::App for App {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         if !self.checked_updates_initially {
             self.checked_updates_initially = true;
-            self.check_updates(ctx);
+            message::CheckUpdates::send(self, ctx);
         }
 
         // message handling
         while let Ok(msg) = self.rx.try_recv() {
-            match msg {
-                message::Message::ResolveMods {
-                    rid,
-                    specs: mods,
-                    result,
-                    is_dependency,
-                } => {
-                    if Some(rid) == self.resolve_mod_rid {
-                        match result {
-                            Ok(resolved_mods) => {
-                                let profile = self.state.profiles.get_active_profile_mut();
-                                let primary_mods =
-                                    mods.into_iter().collect::<HashSet<ModSpecification>>();
-                                for (resolved_spec, info) in resolved_mods {
-                                    let is_dep =
-                                        is_dependency || !primary_mods.contains(&resolved_spec);
-                                    let add = if is_dep {
-                                        // if mod is a dependency then check if there is a disabled
-                                        // mod that satisfies the dependency and enable it. if it
-                                        // is not a dependency then assume the user explicitly
-                                        // wants to add a specific mod version
-                                        !profile.mods.iter_mut().any(|m| {
-                                            if m.spec.satisfies_dependency(&resolved_spec) {
-                                                m.enabled = true;
-                                                true
-                                            } else {
-                                                false
-                                            }
-                                        })
-                                    } else {
-                                        true
-                                    };
-                                    if add {
-                                        profile.mods.insert(
-                                            0,
-                                            ModConfig {
-                                                spec: info.spec,
-                                                required: info.suggested_require,
-                                                enabled: true,
-                                            },
-                                        );
-                                    }
-                                }
-                                self.resolve_mod.clear();
-                                self.state.profiles.save().unwrap();
-                                self.last_action_status = LastActionStatus::Success(
-                                    "mods successfully resolved".to_string(),
-                                );
-                            }
-                            Err(e) => match e.downcast::<IntegrationError>() {
-                                Ok(IntegrationError::NoProvider { url: _, factory }) => {
-                                    self.window_provider_parameters =
-                                        Some(WindowProviderParameters::new(factory, &self.state));
-                                    self.last_action_status =
-                                        LastActionStatus::Failure("no provider".to_string());
-                                }
-                                Err(e) => {
-                                    self.log.println(format!("{:#?}\n{}", e, e.backtrace()));
-                                    self.last_action_status =
-                                        LastActionStatus::Failure(e.to_string());
-                                }
-                            },
-                        }
-                        self.resolve_mod_rid = None;
-                    }
-                }
-                message::Message::FetchModProgress(rid, spec, progress) => {
-                    if let Some((r, _, progress_map)) = &mut self.integrate_rid {
-                        if rid == *r {
-                            progress_map.insert(spec, progress);
-                        }
-                    }
-                }
-                message::Message::Integrate(rid, res) => {
-                    if self.integrate_rid.as_ref().map_or(false, |r| rid == r.0) {
-                        match res {
-                            Ok(()) => {
-                                self.log.println("Integration complete");
-                                self.last_action_status =
-                                    LastActionStatus::Success("integration complete".to_string());
-                            }
-                            Err(e) => match e.downcast::<IntegrationError>() {
-                                Ok(IntegrationError::NoProvider { url: _, factory }) => {
-                                    self.window_provider_parameters =
-                                        Some(WindowProviderParameters::new(factory, &self.state));
-                                    self.last_action_status =
-                                        LastActionStatus::Failure("no provider".to_string());
-                                }
-                                Err(e) => {
-                                    self.log.println(format!("{:#?}\n{}", e, e.backtrace()));
-                                    self.last_action_status =
-                                        LastActionStatus::Failure(e.to_string());
-                                }
-                            },
-                        }
-                        self.integrate_rid = None;
-                    }
-                }
-                message::Message::UpdateCache(rid, res) => {
-                    if self.update_rid.as_ref().map_or(false, |r| rid == r.0) {
-                        match res {
-                            Ok(()) => {
-                                self.log.println("Cache update complete");
-                                self.last_action_status = LastActionStatus::Success(
-                                    "successfully updated cache".to_string(),
-                                );
-                            }
-                            Err(e) => match e.downcast::<IntegrationError>() {
-                                // TODO make provider initializing more generic
-                                Ok(IntegrationError::NoProvider { url: _, factory }) => {
-                                    self.window_provider_parameters =
-                                        Some(WindowProviderParameters::new(factory, &self.state));
-                                    self.last_action_status =
-                                        LastActionStatus::Failure("no provider".to_string());
-                                }
-                                Err(e) => {
-                                    self.log.println(format!("{:#?}", e));
-                                    self.last_action_status =
-                                        LastActionStatus::Failure(e.to_string());
-                                }
-                            },
-                        }
-                        self.update_rid = None;
-                    }
-                }
-                message::Message::CheckUpdates(rid, res) => {
-                    if self.check_updates_rid == Some(rid) {
-                        self.check_updates_rid = None;
-                        if let Ok(release) = res {
-                            if let (Ok(version), Some(Ok(release_version))) = (
-                                semver::Version::parse(env!("CARGO_PKG_VERSION")),
-                                release
-                                    .tag_name
-                                    .strip_prefix('v')
-                                    .map(semver::Version::parse),
-                            ) {
-                                if release_version > version {
-                                    self.available_update = Some(release);
-                                }
-                            }
-                        }
-                    }
-                }
-            }
+            msg.handle(self);
         }
 
         // begin draw
@@ -1044,7 +845,7 @@ impl eframe::App for App {
                             }
                             if button.clicked() {
                                 self.last_action_status = LastActionStatus::Idle;
-                                self.integrate_rid = integrate(
+                                self.integrate_rid = Some(message::Integrate::send(
                                     &mut self.request_counter,
                                     self.state.store.clone(),
                                     self.state
@@ -1057,7 +858,7 @@ impl eframe::App for App {
                                     self.state.config.drg_pak_path.as_ref().unwrap().clone(),
                                     self.tx.clone(),
                                     ctx.clone(),
-                                );
+                                ));
                             }
                         });
 
@@ -1108,30 +909,19 @@ impl eframe::App for App {
                                 .iter()
                                 .map(|m| m.spec.clone())
                                 .collect::<Vec<_>>();
-                            let store = self.state.store.clone();
-
-                            let rid = self.request_counter.next();
-                            let tx = self.tx.clone();
-                            let handle = tokio::spawn(async move {
-                                let res = store.resolve_mods(&mod_specs, true).await.map(|_| ());
-                                tx.send(message::Message::UpdateCache(rid, res))
-                                    .await
-                                    .unwrap();
-                            });
-                            self.last_action_status = LastActionStatus::Idle;
-                            self.update_rid = Some((rid, handle));
+                            message::UpdateCache::send(self, mod_specs);
                         }
                     },
                 );
                 if self.integrate_rid.is_some() {
                     if ui.button("Cancel").clicked() {
-                        self.integrate_rid.take().unwrap().1.abort();
+                        self.integrate_rid.take().unwrap().handle.abort();
                     }
                     ui.spinner();
                 }
                 if self.update_rid.is_some() {
                     if ui.button("Cancel").clicked() {
-                        self.update_rid.take().unwrap().1.abort();
+                        self.update_rid.take().unwrap().handle.abort();
                     }
                     ui.spinner();
                 }
@@ -1324,7 +1114,7 @@ impl eframe::App for App {
                             .hint_text("Add mod..."),
                     );
                     if is_committed(&resolve) {
-                        self.add_mods(ctx, self.parse_mods(), false);
+                        message::ResolveMods::send(self, ctx, self.parse_mods(), false);
                     }
                 });
             });
@@ -1376,7 +1166,7 @@ impl eframe::App for App {
                     }
 
                     self.resolve_mod = mods.trim().to_string();
-                    self.add_mods(ctx, self.parse_mods(), false);
+                    message::ResolveMods::send(self, ctx, self.parse_mods(), false);
                 }
                 for e in &i.events {
                     match e {
@@ -1386,7 +1176,7 @@ impl eframe::App for App {
                                 && ctx.memory(|m| m.focus().is_none())
                             {
                                 self.resolve_mod = s.trim().to_string();
-                                self.add_mods(ctx, self.parse_mods(), false);
+                                message::ResolveMods::send(self, ctx, self.parse_mods(), false);
                             }
                         }
                         egui::Event::Text(text) => {
@@ -1476,85 +1266,6 @@ impl From<FetchProgress> for SpecFetchProgress {
     }
 }
 
-fn integrate(
-    rc: &mut RequestCounter,
-    store: Arc<ModStore>,
-    mods: Vec<ModSpecification>,
-    fsd_pak: PathBuf,
-    tx: Sender<message::Message>,
-    ctx: egui::Context,
-) -> Option<(
-    RequestID,
-    JoinHandle<()>,
-    HashMap<ModSpecification, SpecFetchProgress>,
-)> {
-    let rid = rc.next();
-
-    async fn integrate(
-        store: Arc<ModStore>,
-        ctx: egui::Context,
-        mod_specs: Vec<ModSpecification>,
-        fsd_pak: PathBuf,
-        rid: RequestID,
-        message_tx: Sender<message::Message>,
-    ) -> Result<()> {
-        let update = false;
-
-        let mods = store.resolve_mods(&mod_specs, update).await?;
-
-        let to_integrate = mod_specs
-            .iter()
-            .map(|u| mods[u].clone())
-            .collect::<Vec<_>>();
-        let res_map: HashMap<ModResolution, ModSpecification> = mods
-            .iter()
-            .map(|(spec, info)| (info.resolution.clone(), spec.clone()))
-            .collect();
-        let urls = to_integrate
-            .iter()
-            .map(|m| &m.resolution)
-            .collect::<Vec<&ModResolution>>();
-
-        let (tx, mut rx) = mpsc::channel::<FetchProgress>(10);
-
-        tokio::spawn(async move {
-            while let Some(progress) = rx.recv().await {
-                if let Some(spec) = res_map.get(progress.resolution()) {
-                    message_tx
-                        .send(message::Message::FetchModProgress(
-                            rid,
-                            spec.clone(),
-                            progress.into(),
-                        ))
-                        .await
-                        .unwrap();
-                    ctx.request_repaint();
-                }
-            }
-        });
-
-        let paths = store.fetch_mods(&urls, update, Some(tx)).await?;
-
-        tokio::task::spawn_blocking(|| {
-            crate::integrate::integrate(fsd_pak, to_integrate.into_iter().zip(paths).collect())
-        })
-        .await??;
-
-        Ok(())
-    }
-
-    Some((
-        rid,
-        tokio::task::spawn(async move {
-            let res = integrate(store, ctx.clone(), mods, fsd_pak, rid, tx.clone()).await;
-            tx.send(message::Message::Integrate(rid, res))
-                .await
-                .unwrap();
-            ctx.request_repaint();
-        }),
-        Default::default(),
-    ))
-}
 #[derive(Default)]
 struct Log {
     buffer: String,
