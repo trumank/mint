@@ -478,7 +478,7 @@ impl App {
             needs_save = true;
         }
         if let Some(add_deps) = add_deps {
-            self.add_mods(ui.ctx(), add_deps);
+            self.add_mods(ui.ctx(), add_deps, true);
         }
         if needs_save {
             self.state.profiles.save().unwrap();
@@ -505,16 +505,21 @@ impl App {
         string
     }
 
-    fn add_mods(&mut self, ctx: &egui::Context, specs: Vec<ModSpecification>) {
+    fn add_mods(&mut self, ctx: &egui::Context, specs: Vec<ModSpecification>, is_dependency: bool) {
         let rid = self.request_counter.next();
         let store = self.state.store.clone();
         let tx = self.tx.clone();
         let ctx = ctx.clone();
         tokio::spawn(async move {
-            let res = store.resolve_mods(&specs, false).await;
-            tx.send(message::Message::ResolveMods(rid, specs, res))
-                .await
-                .unwrap();
+            let result = store.resolve_mods(&specs, false).await;
+            tx.send(message::Message::ResolveMods {
+                rid,
+                specs,
+                result,
+                is_dependency,
+            })
+            .await
+            .unwrap();
             ctx.request_repaint();
         });
         self.last_action_status = LastActionStatus::Idle;
@@ -859,23 +864,36 @@ impl eframe::App for App {
         // message handling
         while let Ok(msg) = self.rx.try_recv() {
             match msg {
-                message::Message::ResolveMods(rid, specs, res) => {
+                message::Message::ResolveMods {
+                    rid,
+                    specs: mods,
+                    result,
+                    is_dependency,
+                } => {
                     if Some(rid) == self.resolve_mod_rid {
-                        match res {
+                        match result {
                             Ok(resolved_mods) => {
                                 let profile = self.state.profiles.get_active_profile_mut();
                                 let primary_mods =
-                                    specs.into_iter().collect::<HashSet<ModSpecification>>();
+                                    mods.into_iter().collect::<HashSet<ModSpecification>>();
                                 for (resolved_spec, info) in resolved_mods {
-                                    let add = if primary_mods.contains(&resolved_spec) {
-                                        true
+                                    let is_dep =
+                                        is_dependency || !primary_mods.contains(&resolved_spec);
+                                    let add = if is_dep {
+                                        // if mod is a dependency then check if there is a disabled
+                                        // mod that satisfies the dependency and enable it. if it
+                                        // is not a dependency then assume the user explicitly
+                                        // wants to add a specific mod version
+                                        !profile.mods.iter_mut().any(|m| {
+                                            if m.spec.satisfies_dependency(&resolved_spec) {
+                                                m.enabled = true;
+                                                true
+                                            } else {
+                                                false
+                                            }
+                                        })
                                     } else {
-                                        // not primary mod so must be a dependency
-                                        // check if there isn't already a matching dependency in the mod list
-                                        !profile
-                                            .mods
-                                            .iter()
-                                            .any(|m| m.spec.satisfies_dependency(&resolved_spec))
+                                        true
                                     };
                                     if add {
                                         profile.mods.insert(
@@ -1306,7 +1324,7 @@ impl eframe::App for App {
                             .hint_text("Add mod..."),
                     );
                     if is_committed(&resolve) {
-                        self.add_mods(ctx, self.parse_mods());
+                        self.add_mods(ctx, self.parse_mods(), false);
                     }
                 });
             });
@@ -1358,7 +1376,7 @@ impl eframe::App for App {
                     }
 
                     self.resolve_mod = mods.trim().to_string();
-                    self.add_mods(ctx, self.parse_mods());
+                    self.add_mods(ctx, self.parse_mods(), false);
                 }
                 for e in &i.events {
                     match e {
@@ -1368,7 +1386,7 @@ impl eframe::App for App {
                                 && ctx.memory(|m| m.focus().is_none())
                             {
                                 self.resolve_mod = s.trim().to_string();
-                                self.add_mods(ctx, self.parse_mods());
+                                self.add_mods(ctx, self.parse_mods(), false);
                             }
                         }
                         egui::Event::Text(text) => {

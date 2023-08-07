@@ -8,11 +8,12 @@ use super::{request_counter::RequestID, GitHubRelease, SpecFetchProgress};
 
 #[derive(Debug)]
 pub enum Message {
-    ResolveMods(
-        RequestID,
-        Vec<ModSpecification>,
-        Result<HashMap<ModSpecification, ModInfo>>,
-    ),
+    ResolveMods {
+        rid: RequestID,
+        specs: Vec<ModSpecification>,
+        result: Result<HashMap<ModSpecification, ModInfo>>,
+        is_dependency: bool,
+    },
     FetchModProgress(RequestID, ModSpecification, SpecFetchProgress),
     Integrate(RequestID, Result<()>),
     UpdateCache(RequestID, Result<()>),
