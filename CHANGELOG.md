@@ -4,6 +4,7 @@
 
 ## [Unreleased] - ReleaseDate
 
+- Restore modding subsystem config upon uninstalling to prevent all mods getting enabled and kicking the user to sandbox
 - Fix regression introduced by case sensitive path fix ([#36](https://github.com/trumank/drg-mod-integration/issues/36))
 
 ## [0.2.8] - 2023-08-05
