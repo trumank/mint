@@ -1,8 +1,12 @@
+mod find_string;
+mod log;
 mod message;
+mod named_combobox;
+mod request_counter;
 
 //#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")] // hide console window on Windows in release
 
-use std::{collections::HashMap, fmt::Display, ops::DerefMut, path::PathBuf};
+use std::{collections::HashMap, ops::DerefMut, path::PathBuf};
 
 use anyhow::{anyhow, Context, Result};
 use eframe::{
@@ -19,10 +23,12 @@ use crate::{
     is_drg_pak,
     providers::ModioTags,
     providers::{FetchProgress, ModSpecification, ModStore, ProviderFactory},
-    state::{ModConfig, ModData_v0_0_0 as ModData, ModProfile, State},
+    state::{ModConfig, ModData_v0_0_0 as ModData, State},
 };
-
+use find_string::FindString;
+use log::Log;
 use message::MessageHandle;
+use named_combobox::NamedComboBox;
 use request_counter::{RequestCounter, RequestID};
 
 pub fn gui(args: Option<Vec<String>>) -> Result<()> {
@@ -41,298 +47,6 @@ pub fn gui(args: Option<Vec<String>>) -> Result<()> {
 }
 
 const MODIO_LOGO_PNG: &[u8] = include_bytes!("../../assets/modio-cog-blue.png");
-
-#[allow(clippy::len_without_is_empty)]
-pub trait NamedEntries<E> {
-    fn len(&self) -> usize;
-    fn contains(&self, name: &str) -> bool;
-    fn select(&mut self, name: String);
-    fn selected_name(&self) -> &str;
-    fn add_new(&mut self, name: &str);
-    fn remove_selected(&mut self);
-    fn rename_selected(&mut self, new_name: String);
-    fn duplicate_selected(&mut self, new_name: String);
-    fn entries<'s>(&'s mut self) -> Box<dyn Iterator<Item = (&'s String, &'s E)> + 's>;
-}
-
-impl NamedEntries<ModProfile> for ModData {
-    fn len(&self) -> usize {
-        self.profiles.len()
-    }
-    fn contains(&self, name: &str) -> bool {
-        self.profiles.contains_key(name)
-    }
-    fn select(&mut self, name: String) {
-        self.active_profile = name;
-    }
-    fn selected_name(&self) -> &str {
-        &self.active_profile
-    }
-    fn add_new(&mut self, name: &str) {
-        self.profiles.insert(name.to_owned(), Default::default());
-        self.active_profile = name.to_owned();
-    }
-    fn remove_selected(&mut self) {
-        self.remove_active_profile();
-    }
-    fn rename_selected(&mut self, new_name: String) {
-        let tmp = self.profiles.remove(&self.active_profile).unwrap();
-        self.profiles.insert(new_name.clone(), tmp);
-        self.active_profile = new_name;
-    }
-    fn duplicate_selected(&mut self, new_name: String) {
-        let new = self.get_active_profile().clone();
-        self.profiles.insert(new_name.clone(), new);
-        self.active_profile = new_name;
-    }
-    fn entries<'s>(&'s mut self) -> Box<dyn Iterator<Item = (&'s String, &'s ModProfile)> + 's> {
-        Box::new(self.profiles.iter())
-    }
-}
-
-#[derive(Debug)]
-pub struct NamedComboBox {
-    rename_popup: NamePopup,
-    add_popup: NamePopup,
-    duplicate_popup: NamePopup,
-}
-
-impl NamedComboBox {
-    fn new() -> Self {
-        Self {
-            rename_popup: NamePopup::new(),
-            add_popup: NamePopup::new(),
-            duplicate_popup: NamePopup::new(),
-        }
-    }
-
-    /// Render and return whether any changes were made
-    fn ui<E, N>(
-        &mut self,
-        ui: &mut egui::Ui,
-        name: &str,
-        entries: &mut N,
-        additional_ui: Option<impl FnOnce(&mut egui::Ui, &mut N)>,
-    ) -> bool
-    where
-        N: NamedEntries<E>,
-    {
-        let mut modified = false;
-        ui.push_id(name, |ui| {
-            ui.horizontal(|ui| {
-                self.mk_delete(ui, name, entries, &mut modified);
-                self.mk_add(ui, name, entries, &mut modified);
-                self.mk_rename(ui, name, entries, &mut modified);
-
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::TOP), |ui| {
-                    self.mk_duplicate(ui, name, entries, &mut modified);
-
-                    if let Some(additional_ui) = additional_ui {
-                        additional_ui(ui, entries);
-                    }
-
-                    ui.with_layout(ui.layout().with_main_justify(true), |ui| {
-                        self.mk_dropdown(ui, name, entries, &mut modified);
-                    });
-                });
-            });
-        });
-        modified
-    }
-
-    fn mk_delete<E, N>(
-        &mut self,
-        ui: &mut egui::Ui,
-        name: &str,
-        entries: &mut N,
-        modified: &mut bool,
-    ) where
-        N: NamedEntries<E>,
-    {
-        ui.add_enabled_ui(entries.len() > 1, |ui| {
-            if ui
-                .button(" ➖ ")
-                .on_hover_text_at_pointer(format!("Delete {name}"))
-                .clicked()
-            {
-                entries.remove_selected();
-                *modified = true;
-            }
-        });
-    }
-
-    fn mk_add<E, N>(&mut self, ui: &mut egui::Ui, name: &str, entries: &mut N, modified: &mut bool)
-    where
-        N: NamedEntries<E>,
-    {
-        ui.add_enabled_ui(true, |ui| {
-            let response = ui
-                .button(" ➕ ")
-                .on_hover_text_at_pointer(format!("Add new {name}"));
-            let popup_id = ui.make_persistent_id(format!("add-{name}"));
-            if response.clicked() {
-                ui.memory_mut(|mem| mem.open_popup(popup_id));
-            }
-            Self::mk_name_popup(
-                entries,
-                &mut self.add_popup,
-                ui,
-                name,
-                popup_id,
-                response,
-                |_state| String::new(),
-                |entries, name| {
-                    entries.add_new(&name);
-                    *modified = true;
-                },
-            );
-        });
-    }
-
-    fn mk_rename<E, N>(
-        &mut self,
-        ui: &mut egui::Ui,
-        name: &str,
-        entries: &mut N,
-        modified: &mut bool,
-    ) where
-        N: NamedEntries<E>,
-    {
-        ui.add_enabled_ui(true, |ui| {
-            let response = ui
-                .button("Rename")
-                .on_hover_text_at_pointer(format!("Rename {name}"));
-            let popup_id = ui.make_persistent_id(format!("rename-{name}"));
-            if response.clicked() {
-                ui.memory_mut(|mem| mem.open_popup(popup_id));
-            }
-            Self::mk_name_popup(
-                entries,
-                &mut self.rename_popup,
-                ui,
-                name,
-                popup_id,
-                response,
-                |entries| entries.selected_name().to_string(),
-                |entries, name| {
-                    entries.rename_selected(name);
-                    *modified = true;
-                },
-            );
-        });
-    }
-
-    fn mk_duplicate<E, N>(
-        &mut self,
-        ui: &mut egui::Ui,
-        name: &str,
-        entries: &mut N,
-        modified: &mut bool,
-    ) where
-        N: NamedEntries<E>,
-    {
-        let response = ui
-            .button("🗐")
-            .on_hover_text_at_pointer(format!("Duplicate {name}"));
-        let popup_id = ui.make_persistent_id(format!("duplicate-{name}"));
-        if response.clicked() {
-            ui.memory_mut(|mem| mem.open_popup(popup_id));
-        }
-        Self::mk_name_popup(
-            entries,
-            &mut self.duplicate_popup,
-            ui,
-            name,
-            popup_id,
-            response,
-            |state| format!("{} - Copy", state.selected_name()),
-            |state, name| {
-                state.duplicate_selected(name);
-                *modified = true;
-            },
-        );
-    }
-
-    fn mk_dropdown<E, N>(
-        &mut self,
-        ui: &mut egui::Ui,
-        name: &str,
-        entries: &mut N,
-        modified: &mut bool,
-    ) where
-        N: NamedEntries<E>,
-    {
-        let mut selected = entries.selected_name().to_owned();
-
-        egui::ComboBox::from_id_source(format!("dropdown-{name}"))
-            .width(ui.available_width())
-            .selected_text(selected.clone())
-            .show_ui(ui, |ui| {
-                entries.entries().for_each(|(k, _)| {
-                    ui.selectable_value(&mut selected, k.to_owned(), k);
-                })
-            });
-
-        if selected != entries.selected_name() {
-            entries.select(selected);
-            *modified = true;
-        }
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    fn mk_name_popup<E, N>(
-        entries: &mut N,
-        popup: &mut NamePopup,
-        ui: &egui::Ui,
-        name: &str,
-        popup_id: egui::Id,
-        response: egui::Response,
-        default_name: impl Fn(&mut N) -> String,
-        mut accept: impl FnMut(&mut N, String),
-    ) where
-        N: NamedEntries<E>,
-    {
-        popup.buffer_needs_prefill_and_focus = custom_popup_above_or_below_widget(
-            ui,
-            popup_id,
-            &response,
-            egui::AboveOrBelow::Below,
-            |ui| {
-                ui.set_min_width(200.0);
-                ui.vertical(|ui| {
-                    if popup.buffer_needs_prefill_and_focus {
-                        popup.buffer = default_name(entries);
-                    }
-
-                    let res = ui.add(
-                        egui::TextEdit::singleline(&mut popup.buffer)
-                            .hint_text(format!("Enter new {name} name")),
-                    );
-                    if popup.buffer_needs_prefill_and_focus {
-                        res.request_focus();
-                    }
-
-                    ui.horizontal(|ui| {
-                        if ui.button("Cancel").clicked() {
-                            ui.memory_mut(|mem| mem.close_popup());
-                        }
-
-                        let invalid_name =
-                            popup.buffer.is_empty() || entries.contains(&popup.buffer);
-                        let clicked = ui
-                            .add_enabled(!invalid_name, egui::Button::new("OK"))
-                            .clicked();
-                        if !invalid_name && (clicked || is_committed(&res)) {
-                            ui.memory_mut(|mem| mem.close_popup());
-                            accept(entries, std::mem::take(&mut popup.buffer));
-                        }
-                    });
-                });
-            },
-        )
-        .is_none();
-    }
-}
 
 pub struct App {
     args: Option<Vec<String>>,
@@ -362,20 +76,6 @@ enum LastActionStatus {
     Idle,
     Success(String),
     Failure(String),
-}
-
-#[derive(Debug)]
-struct NamePopup {
-    buffer_needs_prefill_and_focus: bool,
-    buffer: String,
-}
-impl NamePopup {
-    fn new() -> Self {
-        Self {
-            buffer_needs_prefill_and_focus: true,
-            buffer: String::new(),
-        }
-    }
 }
 
 impl App {
@@ -412,7 +112,7 @@ impl App {
             settings_window: None,
             modio_texture_handle: None,
             last_action_status: LastActionStatus::Idle,
-            profile_combobox: NamedComboBox::new(),
+            profile_combobox: named_combobox::NamedComboBox::new(),
             available_update: None,
         })
     }
@@ -658,7 +358,7 @@ impl App {
                                 let mut job = LayoutJob::default();
                                 let mut is_match = false;
                                 if let Some(search_string) = &self.search_string {
-                                    for (m, chunk) in FindString::new(tag_str, search_string) {
+                                    for (m, chunk) in find_string::FindString::new(tag_str, search_string) {
                                         let background = if m {
                                             is_match = true;
                                             TextFormat {
@@ -737,7 +437,7 @@ impl App {
                     } else {
                         if ui
                             .button("📋")
-                            .on_hover_text_at_pointer("copy URL")
+                            .on_hover_text_at_pointer("Copy URL")
                             .clicked()
                         {
                             ui.output_mut(|o| o.copied_text = item.item.spec.url.to_owned());
@@ -969,26 +669,6 @@ impl App {
     }
 }
 
-mod request_counter {
-    /// Simple counter that returns a new ID each time it is called
-    #[derive(Default)]
-    pub struct RequestCounter(u32);
-
-    impl RequestCounter {
-        /// Get next ID
-        pub fn next(&mut self) -> RequestID {
-            let id = self.0;
-            self.0 += 1;
-            RequestID { id }
-        }
-    }
-
-    #[derive(Debug, Clone, Copy, Eq, PartialEq)]
-    pub struct RequestID {
-        id: u32,
-    }
-}
-
 struct WindowProviderParameters {
     tx: Sender<(RequestID, Result<()>)>,
     rx: Receiver<(RequestID, Result<()>)>,
@@ -997,6 +677,7 @@ struct WindowProviderParameters {
     factory: &'static ProviderFactory,
     parameters: HashMap<String, String>,
 }
+
 impl WindowProviderParameters {
     fn new(factory: &'static ProviderFactory, state: &State) -> Self {
         let (tx, rx) = mpsc::channel(10);
@@ -1020,6 +701,7 @@ struct WindowSettings {
     drg_pak_path: String,
     drg_pak_path_err: Option<String>,
 }
+
 impl WindowSettings {
     fn new(state: &State) -> Self {
         let path = state
@@ -1392,83 +1074,12 @@ pub enum SpecFetchProgress {
     Progress { progress: u64, size: u64 },
     Complete,
 }
+
 impl From<FetchProgress> for SpecFetchProgress {
     fn from(value: FetchProgress) -> Self {
         match value {
             FetchProgress::Progress { progress, size, .. } => Self::Progress { progress, size },
             FetchProgress::Complete { .. } => Self::Complete,
         }
-    }
-}
-
-#[derive(Default)]
-struct Log {
-    buffer: String,
-}
-impl Log {
-    fn println(&mut self, msg: impl Display) {
-        println!("{}", msg);
-        let msg = msg.to_string();
-        self.buffer.push_str(&msg);
-        self.buffer.push('\n');
-    }
-}
-struct FindString<'data> {
-    string: &'data str,
-    string_lower: String,
-    needle: &'data str,
-    needle_lower: String,
-    curr: usize,
-    curr_match: bool,
-    finished: bool,
-}
-impl<'data> FindString<'data> {
-    fn new(string: &'data str, needle: &'data str) -> Self {
-        Self {
-            string,
-            string_lower: string.to_lowercase(),
-            needle,
-            needle_lower: needle.to_lowercase(),
-            curr: 0,
-            curr_match: false,
-            finished: false,
-        }
-    }
-    fn next_internal(&mut self) -> Option<(bool, &'data str)> {
-        if self.finished {
-            None
-        } else if self.needle.is_empty() {
-            self.finished = true;
-            Some((false, self.string))
-        } else if self.curr_match {
-            self.curr_match = false;
-            Some((true, &self.string[self.curr - self.needle.len()..self.curr]))
-        } else if let Some(index) = self.string_lower[self.curr..].find(&self.needle_lower) {
-            let next = self.curr + index;
-            let chunk = &self.string[self.curr..next];
-            self.curr = next + self.needle.len();
-            self.curr_match = true;
-            Some((false, chunk))
-        } else {
-            self.finished = true;
-            Some((false, &self.string[self.curr..]))
-        }
-    }
-}
-
-impl<'data> Iterator for FindString<'data> {
-    type Item = (bool, &'data str);
-
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.string.is_empty() {
-            return None;
-        }
-        // skip empty chunks
-        while let Some(chunk) = self.next_internal() {
-            if !chunk.1.is_empty() {
-                return Some(chunk);
-            }
-        }
-        None
     }
 }
