@@ -6,7 +6,11 @@ mod request_counter;
 
 //#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")] // hide console window on Windows in release
 
-use std::{collections::HashMap, ops::DerefMut, path::PathBuf};
+use std::{
+    collections::{HashMap, HashSet},
+    ops::DerefMut,
+    path::PathBuf,
+};
 
 use anyhow::{anyhow, Context, Result};
 use eframe::{
@@ -61,7 +65,6 @@ pub struct App {
     check_updates_rid: Option<MessageHandle<()>>,
     checked_updates_initially: bool,
     request_counter: RequestCounter,
-    dnd: egui_dnd::DragDropUi,
     window_provider_parameters: Option<WindowProviderParameters>,
     search_string: Option<String>,
     scroll_to_match: bool,
@@ -70,6 +73,7 @@ pub struct App {
     last_action_status: LastActionStatus,
     profile_combobox: NamedComboBox,
     available_update: Option<GitHubRelease>,
+    open_profiles: HashSet<String>,
 }
 
 enum LastActionStatus {
@@ -105,7 +109,6 @@ impl App {
             update_rid: None,
             check_updates_rid: None,
             checked_updates_initially: false,
-            dnd: Default::default(),
             window_provider_parameters: None,
             search_string: Default::default(),
             scroll_to_match: false,
@@ -114,51 +117,61 @@ impl App {
             last_action_status: LastActionStatus::Idle,
             profile_combobox: named_combobox::NamedComboBox::new(),
             available_update: None,
+            open_profiles: Default::default(),
         })
     }
 
-    fn ui_profile(&mut self, ui: &mut egui::Ui) {
+    fn ui_profile(&mut self, ui: &mut egui::Ui, profile: &str) {
         ui.with_layout(ui.layout().with_cross_justify(true), |ui| {
             egui::ScrollArea::vertical().show(ui, |ui| {
-                self.ui_profile_table(ui);
+                self.ui_profile_table(ui, profile);
             });
         });
     }
 
-    fn ui_profile_table(&mut self, ui: &mut egui::Ui) {
-        let mods = &mut self.state.mod_data.get_active_profile_mut().mods;
-        let mut needs_save = false;
-        let mut btn_remove = None;
-        let mut add_deps = None;
+    fn ui_profile_table(&mut self, ui: &mut egui::Ui, profile: &str) {
+        if let Some(profile) = &mut self.state.mod_data.profiles.get_mut(profile) {
+            let mods = &mut profile.mods;
+            let mut needs_save = false;
+            let mut btn_remove = None;
+            let mut add_deps = None;
 
-        use egui_dnd::utils::shift_vec;
-        use egui_dnd::DragDropItem;
+            use egui_dnd::utils::shift_vec;
+            use egui_dnd::DragDropItem;
 
-        struct DndItem<'item> {
-            index: usize,
-            item: &'item mut ModConfig,
-        }
-
-        impl<'item> DragDropItem for DndItem<'item> {
-            fn id(&self) -> egui::Id {
-                egui::Id::new(self.index)
+            struct DndItem<'item> {
+                id: egui::Id,
+                index: usize,
+                item: &'item mut ModConfig,
             }
-        }
 
-        let enabled_specs = mods
-            .iter()
-            .enumerate()
-            .filter_map(|(i, m)| m.enabled.then_some((i, m.spec.clone())))
-            .collect::<Vec<_>>();
+            impl<'item> DragDropItem for DndItem<'item> {
+                fn id(&self) -> egui::Id {
+                    self.id
+                }
+            }
 
-        let mut items = mods
-            .iter_mut()
-            .enumerate()
-            .map(|(index, item)| DndItem { index, item })
-            .collect::<Vec<_>>();
+            let dnd_id = ui.id().with("dnd");
+            let mut dnd: egui_dnd::DragDropUi =
+                ui.data(|data| data.get_temp(dnd_id).unwrap_or_default());
 
-        let res = self
-            .dnd
+            let enabled_specs = mods
+                .iter()
+                .enumerate()
+                .filter_map(|(i, m)| m.enabled.then_some((i, m.spec.clone())))
+                .collect::<Vec<_>>();
+
+            let mut items = mods
+                .iter_mut()
+                .enumerate()
+                .map(|(index, item)| DndItem {
+                    id: ui.id().with(index),
+                    index,
+                    item,
+                })
+                .collect::<Vec<_>>();
+
+            let res = dnd
             .ui::<DndItem>(ui, items.iter_mut(), |item, ui, handle| {
                 ui.horizontal(|ui| {
                     handle.ui(ui, item, |ui| {
@@ -447,19 +460,24 @@ impl App {
                 });
             });
 
-        if let Some(response) = res.completed {
-            shift_vec(response.from, response.to, mods);
-        }
+            ui.data_mut(|data| data.insert_temp(dnd_id, dnd));
 
-        if let Some(remove) = btn_remove {
-            mods.remove(remove);
-            needs_save = true;
-        }
-        if let Some(add_deps) = add_deps {
-            message::ResolveMods::send(self, ui.ctx(), add_deps, true);
-        }
-        if needs_save {
-            self.state.mod_data.save().unwrap();
+            if let Some(response) = res.completed {
+                shift_vec(response.from, response.to, mods);
+            }
+
+            if let Some(remove) = btn_remove {
+                mods.remove(remove);
+                needs_save = true;
+            }
+            if let Some(add_deps) = add_deps {
+                message::ResolveMods::send(self, ui.ctx(), add_deps, true);
+            }
+            if needs_save {
+                self.state.mod_data.save().unwrap();
+            }
+        } else {
+            ui.label("no such profile");
         }
     }
 
@@ -565,6 +583,24 @@ impl App {
                 ctx.request_repaint();
             });
             window.check_rid = Some((rid, handle));
+        }
+    }
+
+    fn show_profile_windows(&mut self, ctx: &egui::Context) {
+        let mut to_remove = vec![];
+        for profile in &self.open_profiles.clone() {
+            let mut open = true;
+            egui::Window::new(format!("Profile \"{profile}\""))
+                .open(&mut open)
+                .show(ctx, |ui| {
+                    self.ui_profile(ui, profile);
+                });
+            if !open {
+                to_remove.push(profile.clone());
+            }
+        }
+        for r in to_remove {
+            self.open_profiles.remove(&r);
         }
     }
 
@@ -732,6 +768,7 @@ impl eframe::App for App {
         // begin draw
 
         self.show_provider_parameters(ctx);
+        self.show_profile_windows(ctx);
         self.show_settings(ctx);
 
         egui::TopBottomPanel::bottom("bottom_panel").show(ctx, |ui| {
@@ -885,20 +922,29 @@ impl eframe::App for App {
         egui::CentralPanel::default().show(ctx, |ui| {
             ui.set_enabled(self.integrate_rid.is_none() && self.update_rid.is_none());
             // profile selection
+            let buttons = |ui: &mut egui::Ui, profiles: &mut ModData| {
+                if ui
+                    .button("📋")
+                    .on_hover_text_at_pointer("Copy profile mods")
+                    .clicked()
+                {
+                    let mods = Self::build_mod_string(&profiles.get_active_profile().mods);
+                    ui.output_mut(|o| o.copied_text = mods);
+                }
+                // TODO find better icon, flesh out multiple-view usage, fix GUI locking
+                if ui
+                    .button("pop out")
+                    .on_hover_text_at_pointer("pop out")
+                    .clicked()
+                {
+                    self.open_profiles.insert(profiles.active_profile.clone());
+                }
+            };
             if self.profile_combobox.ui(
                 ui,
                 "profile",
                 self.state.mod_data.deref_mut().deref_mut(),
-                Some(|ui: &mut egui::Ui, profiles: &mut ModData| {
-                    if ui
-                        .button("📋")
-                        .on_hover_text_at_pointer("Copy profile mods")
-                        .clicked()
-                    {
-                        let mods = Self::build_mod_string(&profiles.get_active_profile().mods);
-                        ui.output_mut(|o| o.copied_text = mods);
-                    }
-                }),
+                Some(buttons),
             ) {
                 self.state.mod_data.save().unwrap();
             }
@@ -936,7 +982,8 @@ impl eframe::App for App {
                 });
             });
 
-            self.ui_profile(ui);
+            let profile = self.state.mod_data.active_profile.clone();
+            self.ui_profile(ui, &profile);
 
             if let Some(search_string) = &mut self.search_string {
                 let lower = search_string.to_lowercase();
