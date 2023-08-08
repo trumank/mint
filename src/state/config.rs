@@ -11,13 +11,11 @@ pub struct ConfigWrapper<C: Default + Serialize + DeserializeOwned> {
     path: PathBuf,
     config: C,
 }
+
 impl<C: Default + Serialize + DeserializeOwned> ConfigWrapper<C> {
-    pub fn new<P: AsRef<Path>>(path: P) -> Self {
+    pub fn new<P: AsRef<Path>>(path: P, config: C) -> Self {
         Self {
-            config: std::fs::read(&path)
-                .ok()
-                .and_then(|s| serde_json::from_slice(&s).ok())
-                .unwrap_or_default(),
+            config,
             path: path.as_ref().to_path_buf(),
         }
     }
@@ -26,17 +24,20 @@ impl<C: Default + Serialize + DeserializeOwned> ConfigWrapper<C> {
         Ok(())
     }
 }
+
 impl<C: Default + Serialize + DeserializeOwned> std::ops::Deref for ConfigWrapper<C> {
     type Target = C;
     fn deref(&self) -> &Self::Target {
         &self.config
     }
 }
+
 impl<C: Default + Serialize + DeserializeOwned> std::ops::DerefMut for ConfigWrapper<C> {
     fn deref_mut(&mut self) -> &mut C {
         &mut self.config
     }
 }
+
 impl<C: Default + Serialize + DeserializeOwned> Drop for ConfigWrapper<C> {
     fn drop(&mut self) {
         self.save().unwrap();

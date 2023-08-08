@@ -19,8 +19,7 @@ use crate::{
     is_drg_pak,
     providers::ModioTags,
     providers::{FetchProgress, ModSpecification, ModStore, ProviderFactory},
-    state::ModProfiles,
-    state::{ModConfig, ModProfile, State},
+    state::{ModConfig, ModData_v0_0_0 as ModData, ModProfile, State},
 };
 
 use message::MessageHandle;
@@ -56,7 +55,7 @@ pub trait NamedEntries<E> {
     fn entries<'s>(&'s mut self) -> Box<dyn Iterator<Item = (&'s String, &'s E)> + 's>;
 }
 
-impl NamedEntries<ModProfile> for ModProfiles {
+impl NamedEntries<ModProfile> for ModData {
     fn len(&self) -> usize {
         self.profiles.len()
     }
@@ -74,7 +73,7 @@ impl NamedEntries<ModProfile> for ModProfiles {
         self.active_profile = name.to_owned();
     }
     fn remove_selected(&mut self) {
-        self.remove_active();
+        self.remove_active_profile();
     }
     fn rename_selected(&mut self, new_name: String) {
         let tmp = self.profiles.remove(&self.active_profile).unwrap();
@@ -323,7 +322,7 @@ impl App {
     fn new(args: Option<Vec<String>>) -> Result<Self> {
         let (tx, rx) = mpsc::channel(10);
         let mut log = Log::default();
-        let state = State::new()?;
+        let state = State::init()?;
         log.println(format!(
             "config dir: {}",
             state.project_dirs.config_dir().display()
@@ -367,7 +366,7 @@ impl App {
     }
 
     fn ui_profile_table(&mut self, ui: &mut egui::Ui) {
-        let mods = &mut self.state.profiles.get_active_profile_mut().mods;
+        let mods = &mut self.state.mod_data.get_active_profile_mut().mods;
         let mut needs_save = false;
         let mut btn_remove = None;
         let mut add_deps = None;
@@ -700,7 +699,7 @@ impl App {
             message::ResolveMods::send(self, ui.ctx(), add_deps, true);
         }
         if needs_save {
-            self.state.profiles.save().unwrap();
+            self.state.mod_data.save().unwrap();
         }
     }
 
@@ -1027,7 +1026,7 @@ impl eframe::App for App {
                                     &mut self.request_counter,
                                     self.state.store.clone(),
                                     self.state
-                                        .profiles
+                                        .mod_data
                                         .get_active_profile()
                                         .mods
                                         .iter()
@@ -1051,7 +1050,7 @@ impl eframe::App for App {
                                 self.last_action_status = LastActionStatus::Idle;
                                 if let Some(pak_path) = &self.state.config.drg_pak_path {
                                     let mods = self.state
-                                        .profiles
+                                        .mod_data
                                         .get_active_profile()
                                         .mods
                                         .iter()
@@ -1081,7 +1080,7 @@ impl eframe::App for App {
                         {
                             let mod_specs = self
                                 .state
-                                .profiles
+                                .mod_data
                                 .get_active_profile()
                                 .mods
                                 .iter()
@@ -1147,8 +1146,8 @@ impl eframe::App for App {
             if self.profile_combobox.ui(
                 ui,
                 "profile",
-                self.state.profiles.deref_mut(),
-                Some(|ui: &mut egui::Ui, profiles: &mut ModProfiles| {
+                self.state.mod_data.deref_mut().deref_mut(),
+                Some(|ui: &mut egui::Ui, profiles: &mut ModData| {
                     if ui
                         .button("📋")
                         .on_hover_text_at_pointer("Copy profile mods")
@@ -1159,7 +1158,7 @@ impl eframe::App for App {
                     }
                 }),
             ) {
-                self.state.profiles.save().unwrap();
+                self.state.mod_data.save().unwrap();
             }
 
             ui.separator();
@@ -1199,7 +1198,7 @@ impl eframe::App for App {
 
             if let Some(search_string) = &mut self.search_string {
                 let lower = search_string.to_lowercase();
-                let profile = self.state.profiles.get_active_profile();
+                let profile = self.state.mod_data.get_active_profile();
                 let any_matches = profile.mods.iter().any(|m| {
                     self.state
                         .store
