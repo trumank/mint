@@ -20,7 +20,7 @@ use crate::{
     providers::ModioTags,
     providers::{FetchProgress, ModSpecification, ModStore, ProviderFactory},
     state::ModProfiles,
-    state::{ModConfig, State},
+    state::{ModConfig, ModProfile, State},
 };
 
 use message::MessageHandle;
@@ -43,6 +43,238 @@ pub fn gui(args: Option<Vec<String>>) -> Result<()> {
 
 const MODIO_LOGO_PNG: &[u8] = include_bytes!("../../assets/modio-cog-blue.png");
 
+#[allow(clippy::len_without_is_empty)]
+pub trait NamedEntries<E> {
+    fn len(&self) -> usize;
+    fn contains(&self, name: &str) -> bool;
+    fn select(&mut self, name: String);
+    fn selected_name(&self) -> &str;
+    fn add_new(&mut self, name: &str);
+    fn remove_selected(&mut self);
+    fn rename_selected(&mut self, new_name: String);
+    fn duplicate_selected(&mut self, new_name: String);
+    fn entries<'s>(&'s mut self) -> Box<dyn Iterator<Item = (&'s String, &'s E)> + 's>;
+}
+
+impl NamedEntries<ModProfile> for ModProfiles {
+    fn len(&self) -> usize {
+        self.profiles.len()
+    }
+    fn contains(&self, name: &str) -> bool {
+        self.profiles.contains_key(name)
+    }
+    fn select(&mut self, name: String) {
+        self.active_profile = name;
+    }
+    fn selected_name(&self) -> &str {
+        &self.active_profile
+    }
+    fn add_new(&mut self, name: &str) {
+        self.profiles.insert(name.to_owned(), Default::default());
+        self.active_profile = name.to_owned();
+    }
+    fn remove_selected(&mut self) {
+        self.remove_active();
+    }
+    fn rename_selected(&mut self, new_name: String) {
+        let tmp = self.profiles.remove(&self.active_profile).unwrap();
+        self.profiles.insert(new_name.clone(), tmp);
+        self.active_profile = new_name;
+    }
+    fn duplicate_selected(&mut self, new_name: String) {
+        let new = self.get_active_profile().clone();
+        self.profiles.insert(new_name.clone(), new);
+        self.active_profile = new_name;
+    }
+    fn entries<'s>(&'s mut self) -> Box<dyn Iterator<Item = (&'s String, &'s ModProfile)> + 's> {
+        Box::new(self.profiles.iter())
+    }
+}
+
+#[derive(Debug)]
+pub struct NamedComboBox {
+    rename_popup: NamePopup,
+    add_popup: NamePopup,
+    duplicate_popup: NamePopup,
+}
+
+impl NamedComboBox {
+    fn new() -> Self {
+        Self {
+            rename_popup: NamePopup::new(),
+            add_popup: NamePopup::new(),
+            duplicate_popup: NamePopup::new(),
+        }
+    }
+    /// Render and return whether any changes were made
+    fn ui<E, N>(
+        &mut self,
+        ui: &mut egui::Ui,
+        name: &str,
+        entries: &mut N,
+        additional_ui: Option<impl FnOnce(&mut egui::Ui, &mut N)>,
+    ) -> bool
+    where
+        N: NamedEntries<E>,
+    {
+        let mut modified = false;
+        ui.push_id(name, |ui| {
+            ui.horizontal(|ui| {
+                ui.add_enabled_ui(entries.len() > 1, |ui| {
+                    if ui
+                        .button(" ➖ ")
+                        .on_hover_text_at_pointer(format!("Delete {name}"))
+                        .clicked()
+                    {
+                        entries.remove_selected();
+                        modified = true;
+                    }
+                });
+                ui.add_enabled_ui(true, |ui| {
+                    let response = ui
+                        .button(" ➕ ")
+                        .on_hover_text_at_pointer(format!("Add new {name}"));
+                    let popup_id = ui.make_persistent_id("add-popup");
+                    if response.clicked() {
+                        ui.memory_mut(|mem| mem.open_popup(popup_id));
+                    }
+                    Self::mk_name_popup(
+                        entries,
+                        &mut self.add_popup,
+                        ui,
+                        name,
+                        popup_id,
+                        response,
+                        |_state| String::new(),
+                        |entries, name| {
+                            entries.add_new(&name);
+                            modified = true;
+                        },
+                    );
+                });
+
+                ui.add_enabled_ui(true, |ui| {
+                    let response = ui
+                        .button("Rename")
+                        .on_hover_text_at_pointer(format!("Edit {name} name"));
+                    let popup_id = ui.make_persistent_id("edit-name-popup");
+                    if response.clicked() {
+                        ui.memory_mut(|mem| mem.open_popup(popup_id));
+                    }
+                    Self::mk_name_popup(
+                        entries,
+                        &mut self.rename_popup,
+                        ui,
+                        name,
+                        popup_id,
+                        response,
+                        |entries| entries.selected_name().to_string(),
+                        |entries, name| {
+                            entries.rename_selected(name);
+                            modified = true;
+                        },
+                    );
+                });
+
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::TOP), |ui| {
+                    let response = ui
+                        .button("🗐")
+                        .on_hover_text_at_pointer(format!("Duplicate {name}"));
+                    let popup_id = ui.make_persistent_id("duplicate-popup");
+                    if response.clicked() {
+                        ui.memory_mut(|mem| mem.open_popup(popup_id));
+                    }
+                    Self::mk_name_popup(
+                        entries,
+                        &mut self.duplicate_popup,
+                        ui,
+                        name,
+                        popup_id,
+                        response,
+                        |state| format!("{} - Copy", state.selected_name()),
+                        |state, name| {
+                            state.duplicate_selected(name);
+                            modified = true;
+                        },
+                    );
+
+                    if let Some(additional_ui) = additional_ui {
+                        additional_ui(ui, entries);
+                    }
+
+                    ui.with_layout(ui.layout().with_main_justify(true), |ui| {
+                        let mut selected = entries.selected_name().to_owned();
+                        egui::ComboBox::from_id_source("dropdown")
+                            .width(ui.available_width())
+                            .selected_text(selected.clone())
+                            .show_ui(ui, |ui| {
+                                entries.entries().for_each(|(k, _)| {
+                                    ui.selectable_value(&mut selected, k.to_owned(), k);
+                                })
+                            });
+                        if selected != entries.selected_name() {
+                            entries.select(selected);
+                            modified = true;
+                        }
+                    });
+                });
+            });
+        });
+        modified
+    }
+    #[allow(clippy::too_many_arguments)]
+    fn mk_name_popup<T, E: NamedEntries<T>>(
+        entries: &mut E,
+        popup: &mut NamePopup,
+        ui: &egui::Ui,
+        name: &str,
+        popup_id: egui::Id,
+        response: egui::Response,
+        default_name: impl Fn(&mut E) -> String,
+        mut accept: impl FnMut(&mut E, String),
+    ) {
+        popup.buffer_needs_prefill_and_focus = custom_popup_above_or_below_widget(
+            ui,
+            popup_id,
+            &response,
+            egui::AboveOrBelow::Below,
+            |ui| {
+                ui.set_min_width(200.0);
+                ui.vertical(|ui| {
+                    if popup.buffer_needs_prefill_and_focus {
+                        popup.buffer = default_name(entries);
+                    }
+
+                    let res = ui.add(
+                        egui::TextEdit::singleline(&mut popup.buffer)
+                            .hint_text(format!("Enter new {name} name")),
+                    );
+                    if popup.buffer_needs_prefill_and_focus {
+                        res.request_focus();
+                    }
+
+                    ui.horizontal(|ui| {
+                        if ui.button("Cancel").clicked() {
+                            ui.memory_mut(|mem| mem.close_popup());
+                        }
+
+                        let invalid_name =
+                            popup.buffer.is_empty() || entries.contains(&popup.buffer);
+                        let clicked = ui
+                            .add_enabled(!invalid_name, egui::Button::new("OK"))
+                            .clicked();
+                        if !invalid_name && (clicked || is_committed(&res)) {
+                            ui.memory_mut(|mem| mem.close_popup());
+                            accept(entries, std::mem::take(&mut popup.buffer));
+                        }
+                    });
+                });
+            },
+        )
+        .is_none();
+    }
+}
+
 pub struct App {
     args: Option<Vec<String>>,
     tx: Sender<message::Message>,
@@ -63,9 +295,7 @@ pub struct App {
     settings_window: Option<WindowSettings>,
     modio_texture_handle: Option<egui::TextureHandle>,
     last_action_status: LastActionStatus,
-    rename_profile_popup: ProfileNamePopup,
-    add_profile_popup: ProfileNamePopup,
-    duplicate_profile_popup: ProfileNamePopup,
+    profile_combobox: NamedComboBox,
     available_update: Option<GitHubRelease>,
 }
 
@@ -75,11 +305,12 @@ enum LastActionStatus {
     Failure(String),
 }
 
-struct ProfileNamePopup {
+#[derive(Debug)]
+struct NamePopup {
     buffer_needs_prefill_and_focus: bool,
     buffer: String,
 }
-impl ProfileNamePopup {
+impl NamePopup {
     fn new() -> Self {
         Self {
             buffer_needs_prefill_and_focus: true,
@@ -122,9 +353,7 @@ impl App {
             settings_window: None,
             modio_texture_handle: None,
             last_action_status: LastActionStatus::Idle,
-            rename_profile_popup: ProfileNamePopup::new(),
-            add_profile_popup: ProfileNamePopup::new(),
-            duplicate_profile_popup: ProfileNamePopup::new(),
+            profile_combobox: NamedComboBox::new(),
             available_update: None,
         })
     }
@@ -679,57 +908,6 @@ impl App {
             }
         }
     }
-
-    fn mk_profile_name_popup(
-        state: &mut State,
-        popup: &mut ProfileNamePopup,
-        ui: &egui::Ui,
-        popup_id: egui::Id,
-        response: egui::Response,
-        default_name: impl Fn(&mut State) -> String,
-        accept: impl Fn(&mut State, String),
-    ) {
-        popup.buffer_needs_prefill_and_focus = custom_popup_above_or_below_widget(
-            ui,
-            popup_id,
-            &response,
-            egui::AboveOrBelow::Below,
-            |ui| {
-                ui.set_min_width(200.0);
-                ui.vertical(|ui| {
-                    if popup.buffer_needs_prefill_and_focus {
-                        popup.buffer = default_name(state);
-                    }
-
-                    let res = ui.add(
-                        egui::TextEdit::singleline(&mut popup.buffer)
-                            .hint_text("Enter new profile name"),
-                    );
-                    if popup.buffer_needs_prefill_and_focus {
-                        res.request_focus();
-                    }
-
-                    ui.horizontal(|ui| {
-                        if ui.button("Cancel").clicked() {
-                            ui.memory_mut(|mem| mem.close_popup());
-                        }
-
-                        let invalid_name = popup.buffer.is_empty()
-                            || state.profiles.profiles.contains_key(&popup.buffer);
-                        let clicked = ui
-                            .add_enabled(!invalid_name, egui::Button::new("OK"))
-                            .clicked();
-                        if !invalid_name && (clicked || is_committed(&res)) {
-                            ui.memory_mut(|mem| mem.close_popup());
-                            accept(state, std::mem::take(&mut popup.buffer));
-                            state.profiles.save().unwrap();
-                        }
-                    });
-                });
-            },
-        )
-        .is_none();
-    }
 }
 
 mod request_counter {
@@ -966,125 +1144,23 @@ impl eframe::App for App {
         egui::CentralPanel::default().show(ctx, |ui| {
             ui.set_enabled(self.integrate_rid.is_none() && self.update_rid.is_none());
             // profile selection
-            ui.horizontal(|ui| {
-                ui.add_enabled_ui(
-                    self.state
-                        .profiles
-                        .profiles
-                        .contains_key(&self.state.profiles.active_profile)
-                        && self.state.profiles.profiles.len() > 1,
-                    |ui| {
-                        if ui
-                            .button(" ➖ ")
-                            .on_hover_text_at_pointer("Delete profile")
-                            .clicked()
-                        {
-                            self.state.profiles.remove_active();
-                            self.state.profiles.save().unwrap();
-                        }
-                    },
-                );
-                ui.add_enabled_ui(true, |ui| {
-                    let response = ui
-                        .button(" ➕ ")
-                        .on_hover_text_at_pointer("Add new profile");
-                    let popup_id = ui.make_persistent_id("add-profile-popup");
-                    if response.clicked() {
-                        ui.memory_mut(|mem| mem.open_popup(popup_id));
-                    }
-                    Self::mk_profile_name_popup(
-                        &mut self.state,
-                        &mut self.add_profile_popup,
-                        ui,
-                        popup_id,
-                        response,
-                        |_state| String::new(),
-                        |state, name| {
-                            state.profiles.profiles.entry(name.clone()).or_default();
-                            state.profiles.active_profile = name;
-                        },
-                    );
-                });
-
-                ui.add_enabled_ui(true, |ui| {
-                    let response = ui
-                        .button("Rename")
-                        .on_hover_text_at_pointer("Edit profile name");
-                    let popup_id = ui.make_persistent_id("edit-profile-name-popup");
-                    if response.clicked() {
-                        ui.memory_mut(|mem| mem.open_popup(popup_id));
-                    }
-                    Self::mk_profile_name_popup(
-                        &mut self.state,
-                        &mut self.rename_profile_popup,
-                        ui,
-                        popup_id,
-                        response,
-                        |state| state.profiles.active_profile.clone(),
-                        |state, name| {
-                            let profile_to_remove = state.profiles.active_profile.clone();
-                            let profile =
-                                state.profiles.profiles.remove(&profile_to_remove).unwrap();
-                            state.profiles.profiles.insert(name.clone(), profile);
-                            state.profiles.active_profile = name;
-                        },
-                    );
-                });
-
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::TOP), |ui| {
-                    let response = ui.button("🗐").on_hover_text_at_pointer("duplicate profile");
-                    let popup_id = ui.make_persistent_id("duplicate-profile-popup");
-                    if response.clicked() {
-                        ui.memory_mut(|mem| mem.open_popup(popup_id));
-                    }
-                    Self::mk_profile_name_popup(
-                        &mut self.state,
-                        &mut self.duplicate_profile_popup,
-                        ui,
-                        popup_id,
-                        response,
-                        |state| format!("{} - Copy", state.profiles.active_profile),
-                        |state, name| {
-                            let active_profile_mods =
-                                state.profiles.get_active_profile().mods.clone();
-                            state.profiles.profiles.insert(
-                                name.clone(),
-                                crate::state::ModProfile {
-                                    mods: active_profile_mods,
-                                },
-                            );
-                            state.profiles.active_profile = name;
-                        },
-                    );
-
+            if self.profile_combobox.ui(
+                ui,
+                "profile",
+                self.state.profiles.deref_mut(),
+                Some(|ui: &mut egui::Ui, profiles: &mut ModProfiles| {
                     if ui
                         .button("📋")
-                        .on_hover_text_at_pointer("copy profile mods")
+                        .on_hover_text_at_pointer("Copy profile mods")
                         .clicked()
                     {
-                        let mods =
-                            Self::build_mod_string(&self.state.profiles.get_active_profile().mods);
+                        let mods = Self::build_mod_string(&profiles.get_active_profile().mods);
                         ui.output_mut(|o| o.copied_text = mods);
                     }
-                    ui.with_layout(ui.layout().with_main_justify(true), |ui| {
-                        let ModProfiles {
-                            profiles,
-                            ref mut active_profile,
-                        } = self.state.profiles.deref_mut();
-                        let res = egui::ComboBox::from_id_source("profile-dropdown")
-                            .width(ui.available_width())
-                            .selected_text(active_profile.clone())
-                            .show_ui(ui, |ui| {
-                                profiles.keys().for_each(|k| {
-                                    ui.selectable_value(active_profile, k.to_string(), k);
-                                })
-                            });
-                        if res.response.changed() {
-                            self.state.profiles.save().unwrap();
-                        }
-                    });
-                });
-            });
+                }),
+            ) {
+                self.state.profiles.save().unwrap();
+            }
 
             ui.separator();
 
