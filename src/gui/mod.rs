@@ -105,6 +105,7 @@ impl NamedComboBox {
             duplicate_popup: NamePopup::new(),
         }
     }
+
     /// Render and return whether any changes were made
     fn ui<E, N>(
         &mut self,
@@ -119,119 +120,178 @@ impl NamedComboBox {
         let mut modified = false;
         ui.push_id(name, |ui| {
             ui.horizontal(|ui| {
-                ui.add_enabled_ui(entries.len() > 1, |ui| {
-                    if ui
-                        .button(" ➖ ")
-                        .on_hover_text_at_pointer(format!("Delete {name}"))
-                        .clicked()
-                    {
-                        entries.remove_selected();
-                        modified = true;
-                    }
-                });
-                ui.add_enabled_ui(true, |ui| {
-                    let response = ui
-                        .button(" ➕ ")
-                        .on_hover_text_at_pointer(format!("Add new {name}"));
-                    let popup_id = ui.make_persistent_id("add-popup");
-                    if response.clicked() {
-                        ui.memory_mut(|mem| mem.open_popup(popup_id));
-                    }
-                    Self::mk_name_popup(
-                        entries,
-                        &mut self.add_popup,
-                        ui,
-                        name,
-                        popup_id,
-                        response,
-                        |_state| String::new(),
-                        |entries, name| {
-                            entries.add_new(&name);
-                            modified = true;
-                        },
-                    );
-                });
-
-                ui.add_enabled_ui(true, |ui| {
-                    let response = ui
-                        .button("Rename")
-                        .on_hover_text_at_pointer(format!("Edit {name} name"));
-                    let popup_id = ui.make_persistent_id("edit-name-popup");
-                    if response.clicked() {
-                        ui.memory_mut(|mem| mem.open_popup(popup_id));
-                    }
-                    Self::mk_name_popup(
-                        entries,
-                        &mut self.rename_popup,
-                        ui,
-                        name,
-                        popup_id,
-                        response,
-                        |entries| entries.selected_name().to_string(),
-                        |entries, name| {
-                            entries.rename_selected(name);
-                            modified = true;
-                        },
-                    );
-                });
+                self.mk_delete(ui, name, entries, &mut modified);
+                self.mk_add(ui, name, entries, &mut modified);
+                self.mk_rename(ui, name, entries, &mut modified);
 
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::TOP), |ui| {
-                    let response = ui
-                        .button("🗐")
-                        .on_hover_text_at_pointer(format!("Duplicate {name}"));
-                    let popup_id = ui.make_persistent_id("duplicate-popup");
-                    if response.clicked() {
-                        ui.memory_mut(|mem| mem.open_popup(popup_id));
-                    }
-                    Self::mk_name_popup(
-                        entries,
-                        &mut self.duplicate_popup,
-                        ui,
-                        name,
-                        popup_id,
-                        response,
-                        |state| format!("{} - Copy", state.selected_name()),
-                        |state, name| {
-                            state.duplicate_selected(name);
-                            modified = true;
-                        },
-                    );
+                    self.mk_duplicate(ui, name, entries, &mut modified);
 
                     if let Some(additional_ui) = additional_ui {
                         additional_ui(ui, entries);
                     }
 
                     ui.with_layout(ui.layout().with_main_justify(true), |ui| {
-                        let mut selected = entries.selected_name().to_owned();
-                        egui::ComboBox::from_id_source("dropdown")
-                            .width(ui.available_width())
-                            .selected_text(selected.clone())
-                            .show_ui(ui, |ui| {
-                                entries.entries().for_each(|(k, _)| {
-                                    ui.selectable_value(&mut selected, k.to_owned(), k);
-                                })
-                            });
-                        if selected != entries.selected_name() {
-                            entries.select(selected);
-                            modified = true;
-                        }
+                        self.mk_dropdown(ui, name, entries, &mut modified);
                     });
                 });
             });
         });
         modified
     }
+
+    fn mk_delete<E, N>(
+        &mut self,
+        ui: &mut egui::Ui,
+        name: &str,
+        entries: &mut N,
+        modified: &mut bool,
+    ) where
+        N: NamedEntries<E>,
+    {
+        ui.add_enabled_ui(entries.len() > 1, |ui| {
+            if ui
+                .button(" ➖ ")
+                .on_hover_text_at_pointer(format!("Delete {name}"))
+                .clicked()
+            {
+                entries.remove_selected();
+                *modified = true;
+            }
+        });
+    }
+
+    fn mk_add<E, N>(&mut self, ui: &mut egui::Ui, name: &str, entries: &mut N, modified: &mut bool)
+    where
+        N: NamedEntries<E>,
+    {
+        ui.add_enabled_ui(true, |ui| {
+            let response = ui
+                .button(" ➕ ")
+                .on_hover_text_at_pointer(format!("Add new {name}"));
+            let popup_id = ui.make_persistent_id(format!("add-{name}"));
+            if response.clicked() {
+                ui.memory_mut(|mem| mem.open_popup(popup_id));
+            }
+            Self::mk_name_popup(
+                entries,
+                &mut self.add_popup,
+                ui,
+                name,
+                popup_id,
+                response,
+                |_state| String::new(),
+                |entries, name| {
+                    entries.add_new(&name);
+                    *modified = true;
+                },
+            );
+        });
+    }
+
+    fn mk_rename<E, N>(
+        &mut self,
+        ui: &mut egui::Ui,
+        name: &str,
+        entries: &mut N,
+        modified: &mut bool,
+    ) where
+        N: NamedEntries<E>,
+    {
+        ui.add_enabled_ui(true, |ui| {
+            let response = ui
+                .button("Rename")
+                .on_hover_text_at_pointer(format!("Rename {name}"));
+            let popup_id = ui.make_persistent_id(format!("rename-{name}"));
+            if response.clicked() {
+                ui.memory_mut(|mem| mem.open_popup(popup_id));
+            }
+            Self::mk_name_popup(
+                entries,
+                &mut self.rename_popup,
+                ui,
+                name,
+                popup_id,
+                response,
+                |entries| entries.selected_name().to_string(),
+                |entries, name| {
+                    entries.rename_selected(name);
+                    *modified = true;
+                },
+            );
+        });
+    }
+
+    fn mk_duplicate<E, N>(
+        &mut self,
+        ui: &mut egui::Ui,
+        name: &str,
+        entries: &mut N,
+        modified: &mut bool,
+    ) where
+        N: NamedEntries<E>,
+    {
+        let response = ui
+            .button("🗐")
+            .on_hover_text_at_pointer(format!("Duplicate {name}"));
+        let popup_id = ui.make_persistent_id(format!("duplicate-{name}"));
+        if response.clicked() {
+            ui.memory_mut(|mem| mem.open_popup(popup_id));
+        }
+        Self::mk_name_popup(
+            entries,
+            &mut self.duplicate_popup,
+            ui,
+            name,
+            popup_id,
+            response,
+            |state| format!("{} - Copy", state.selected_name()),
+            |state, name| {
+                state.duplicate_selected(name);
+                *modified = true;
+            },
+        );
+    }
+
+    fn mk_dropdown<E, N>(
+        &mut self,
+        ui: &mut egui::Ui,
+        name: &str,
+        entries: &mut N,
+        modified: &mut bool,
+    ) where
+        N: NamedEntries<E>,
+    {
+        let mut selected = entries.selected_name().to_owned();
+
+        egui::ComboBox::from_id_source(format!("dropdown-{name}"))
+            .width(ui.available_width())
+            .selected_text(selected.clone())
+            .show_ui(ui, |ui| {
+                entries.entries().for_each(|(k, _)| {
+                    ui.selectable_value(&mut selected, k.to_owned(), k);
+                })
+            });
+
+        if selected != entries.selected_name() {
+            entries.select(selected);
+            *modified = true;
+        }
+    }
+
     #[allow(clippy::too_many_arguments)]
-    fn mk_name_popup<T, E: NamedEntries<T>>(
-        entries: &mut E,
+    fn mk_name_popup<E, N>(
+        entries: &mut N,
         popup: &mut NamePopup,
         ui: &egui::Ui,
         name: &str,
         popup_id: egui::Id,
         response: egui::Response,
-        default_name: impl Fn(&mut E) -> String,
-        mut accept: impl FnMut(&mut E, String),
-    ) {
+        default_name: impl Fn(&mut N) -> String,
+        mut accept: impl FnMut(&mut N, String),
+    ) where
+        N: NamedEntries<E>,
+    {
         popup.buffer_needs_prefill_and_focus = custom_popup_above_or_below_widget(
             ui,
             popup_id,
