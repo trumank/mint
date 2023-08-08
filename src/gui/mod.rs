@@ -32,7 +32,6 @@ use crate::{
 use find_string::FindString;
 use log::Log;
 use message::MessageHandle;
-use named_combobox::NamedComboBox;
 use request_counter::{RequestCounter, RequestID};
 
 pub fn gui(args: Option<Vec<String>>) -> Result<()> {
@@ -71,7 +70,6 @@ pub struct App {
     settings_window: Option<WindowSettings>,
     modio_texture_handle: Option<egui::TextureHandle>,
     last_action_status: LastActionStatus,
-    profile_combobox: NamedComboBox,
     available_update: Option<GitHubRelease>,
     open_profiles: HashSet<String>,
 }
@@ -115,7 +113,6 @@ impl App {
             settings_window: None,
             modio_texture_handle: None,
             last_action_status: LastActionStatus::Idle,
-            profile_combobox: named_combobox::NamedComboBox::new(),
             available_update: None,
             open_profiles: Default::default(),
         })
@@ -940,7 +937,7 @@ impl eframe::App for App {
                     self.open_profiles.insert(profiles.active_profile.clone());
                 }
             };
-            if self.profile_combobox.ui(
+            if named_combobox::ui(
                 ui,
                 "profile",
                 self.state.mod_data.deref_mut().deref_mut(),
