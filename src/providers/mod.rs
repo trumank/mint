@@ -94,45 +94,7 @@ impl ModStore {
 
         let cache_metadata_path = cache_path.as_ref().join("cache.json");
 
-        let cache: MaybeVersionedCache = match std::fs::read(&cache_metadata_path) {
-            Ok(buf) => {
-                let mut dyn_value = serde_json::from_slice::<serde_json::Value>(&buf)
-                    .context("failed to deserialize cache metadata into dynamic json value")?;
-                let obj_map = dyn_value
-                    .as_object_mut()
-                    .context("failed to deserialize cache metadata into object map")?;
-                let version = obj_map.remove("version");
-                if let Some(v) = version && let serde_json::Value::String(vs) = v
-                {
-                    match vs.as_str() {
-                        "0.0.0" => {
-                            // HACK: workaround a serde issue relating to flattening with tags
-                            // involving numeric keys in hashmaps, see
-                            // <https://github.com/serde-rs/serde/issues/1183>.
-                            match serde_json::from_slice::<Cache!["0.0.0"]>(&buf) {
-                                Ok(c) => MaybeVersionedCache::Versioned(VersionAnnotatedCache::V0_0_0(c)),
-                                Err(e) => Err(e).context("failed to deserialize cache as v0.0.0")?
-                            }
-                        }
-                        _ => unimplemented!(),
-                    }
-                } else {
-                    // HACK: workaround a serde issue relating to flattening with tags involving
-                    // numeric keys in hashmaps, see <https://github.com/serde-rs/serde/issues/1183>.
-                    match serde_json::from_slice::<HashMap<String, Box<dyn ModProviderCache>>>(&buf) {
-                        Ok(c) => MaybeVersionedCache::Legacy(Cache_v0_0_0 { cache: c }),
-                        Err(e) => Err(e).context("failed to deserialize legacy cache")?
-                    }
-                }
-            }
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => MaybeVersionedCache::default(),
-            Err(e) => Err(e).context("failed to read `cache.json`")?,
-        };
-
-        let cache: VersionAnnotatedCache = match cache {
-            MaybeVersionedCache::Versioned(c) => c,
-            MaybeVersionedCache::Legacy(legacy) => VersionAnnotatedCache::V0_0_0(legacy),
-        };
+        let cache = read_cache_metadata_or_default(&cache_metadata_path)?;
         let cache = ConfigWrapper::new(&cache_metadata_path, cache);
         cache.save().unwrap();
 
@@ -142,9 +104,11 @@ impl ModStore {
             blob_cache: BlobCache::new(cache_path.as_ref().join("blobs")),
         })
     }
+
     pub fn get_provider_factories() -> impl Iterator<Item = &'static ProviderFactory> {
         inventory::iter::<ProviderFactory>()
     }
+
     pub fn add_provider(
         &self,
         provider_factory: &ProviderFactory,
@@ -157,6 +121,7 @@ impl ModStore {
             .insert(provider_factory.id, provider);
         Ok(())
     }
+
     pub async fn add_provider_checked(
         &self,
         provider_factory: &ProviderFactory,
@@ -170,6 +135,7 @@ impl ModStore {
             .insert(provider_factory.id, provider);
         Ok(())
     }
+
     pub fn get_provider(&self, url: &str) -> Result<Arc<dyn ModProvider>> {
         let factory = inventory::iter::<ProviderFactory>()
             .find(|f| (f.can_provide)(url))
@@ -186,6 +152,7 @@ impl ModStore {
             }
         })
     }
+
     pub async fn resolve_mods(
         &self,
         mods: &[ModSpecification],
@@ -225,6 +192,7 @@ impl ModStore {
 
         Ok(mods_map)
     }
+
     pub async fn resolve_mod(
         &self,
         original_spec: ModSpecification,
@@ -244,6 +212,7 @@ impl ModStore {
             };
         }
     }
+
     pub async fn fetch_mods(
         &self,
         mods: &[&ModResolution],
@@ -261,6 +230,7 @@ impl ModStore {
         .try_collect::<Vec<_>>()
         .await
     }
+
     pub async fn fetch_mod(
         &self,
         res: &ModResolution,
@@ -277,21 +247,68 @@ impl ModStore {
             )
             .await
     }
+
     pub fn get_mod_info(&self, spec: &ModSpecification) -> Option<ModInfo> {
         self.get_provider(&spec.url)
             .ok()?
             .get_mod_info(spec, self.cache.clone())
     }
+
     pub fn is_pinned(&self, spec: &ModSpecification) -> bool {
         self.get_provider(&spec.url)
             .unwrap()
             .is_pinned(spec, self.cache.clone())
     }
+
     pub fn get_version_name(&self, spec: &ModSpecification) -> Option<String> {
         self.get_provider(&spec.url)
             .unwrap()
             .get_version_name(spec, self.cache.clone())
     }
+}
+
+fn read_cache_metadata_or_default(cache_metadata_path: &PathBuf) -> Result<VersionAnnotatedCache> {
+    let cache: MaybeVersionedCache = match std::fs::read(cache_metadata_path) {
+        Ok(buf) => {
+            let mut dyn_value = serde_json::from_slice::<serde_json::Value>(&buf)
+                .context("failed to deserialize cache metadata into dynamic json value")?;
+            let obj_map = dyn_value
+                .as_object_mut()
+                .context("failed to deserialize cache metadata into object map")?;
+            let version = obj_map.remove("version");
+            if let Some(v) = version && let serde_json::Value::String(vs) = v
+            {
+                match vs.as_str() {
+                    "0.0.0" => {
+                        // HACK: workaround a serde issue relating to flattening with tags
+                        // involving numeric keys in hashmaps, see
+                        // <https://github.com/serde-rs/serde/issues/1183>.
+                        match serde_json::from_slice::<Cache!["0.0.0"]>(&buf) {
+                            Ok(c) => MaybeVersionedCache::Versioned(VersionAnnotatedCache::V0_0_0(c)),
+                            Err(e) => Err(e).context("failed to deserialize cache as v0.0.0")?
+                        }
+                    }
+                    _ => unimplemented!(),
+                }
+            } else {
+                // HACK: workaround a serde issue relating to flattening with tags involving
+                // numeric keys in hashmaps, see <https://github.com/serde-rs/serde/issues/1183>.
+                match serde_json::from_slice::<HashMap<String, Box<dyn ModProviderCache>>>(&buf) {
+                    Ok(c) => MaybeVersionedCache::Legacy(Cache_v0_0_0 { cache: c }),
+                    Err(e) => Err(e).context("failed to deserialize legacy cache")?
+                }
+            }
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => MaybeVersionedCache::default(),
+        Err(e) => Err(e).context("failed to read `cache.json`")?,
+    };
+
+    let cache: VersionAnnotatedCache = match cache {
+        MaybeVersionedCache::Versioned(c) => c,
+        MaybeVersionedCache::Legacy(legacy) => VersionAnnotatedCache::V0_0_0(legacy),
+    };
+
+    Ok(cache)
 }
 
 pub trait ReadSeek: Read + Seek + Send {}
