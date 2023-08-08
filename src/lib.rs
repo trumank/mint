@@ -1,3 +1,5 @@
+#![feature(let_chains)]
+
 pub mod error;
 pub mod gui;
 pub mod integrate;

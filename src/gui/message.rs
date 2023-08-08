@@ -93,7 +93,7 @@ impl ResolveMods {
         if Some(self.rid) == app.resolve_mod_rid.as_ref().map(|r| r.rid) {
             match self.result {
                 Ok(resolved_mods) => {
-                    let profile = app.state.profiles.get_active_profile_mut();
+                    let profile = app.state.mod_data.get_active_profile_mut();
                     let primary_mods = self
                         .specs
                         .into_iter()
@@ -128,7 +128,7 @@ impl ResolveMods {
                         }
                     }
                     app.resolve_mod.clear();
-                    app.state.profiles.save().unwrap();
+                    app.state.mod_data.save().unwrap();
                     app.last_action_status =
                         LastActionStatus::Success("mods successfully resolved".to_string());
                 }

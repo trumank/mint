@@ -138,7 +138,7 @@ async fn action_integrate(action: ActionIntegrate) -> Result<()> {
         })
         .context("Could not find DRG pak file, please specify manually with the --fsd_pak flag")?;
 
-    let mut state = State::new()?;
+    let mut state = State::init()?;
 
     let mod_specs = action
         .mods
@@ -166,8 +166,8 @@ async fn action_integrate_profile(action: ActionIntegrateProfile) -> Result<()> 
         })
         .context("Could not find DRG pak file, please specify manually with the --fsd_pak flag")?;
 
-    let mut state = State::new()?;
-    let profile = &state.profiles.profiles[&action.profile];
+    let mut state = State::init()?;
+    let profile = &state.mod_data.profiles[&action.profile];
 
     let mod_specs = profile
         .mods
