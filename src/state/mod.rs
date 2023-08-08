@@ -201,53 +201,13 @@ impl State {
 
         let config_path = project_dirs.config_dir().join("config.json");
 
-        let config = match std::fs::read(&config_path) {
-            Ok(buf) => {
-                let config = serde_json::from_slice::<MaybeVersionedConfig>(&buf)
-                    .context("failed to deserialize user config into maybe versioned config")?;
-                match config {
-                    MaybeVersionedConfig::Versioned(v) => v,
-                    MaybeVersionedConfig::Legacy(legacy) => {
-                        VersionAnnotatedConfig::V0_0_0(Config_v0_0_0 {
-                            provider_parameters: legacy.provider_parameters,
-                            drg_pak_path: legacy.drg_pak_path,
-                        })
-                    }
-                }
-            }
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => VersionAnnotatedConfig::default(),
-            Err(e) => Err(e).context("failed to read `config.json`")?,
-        };
+        let config = read_config_or_default(&config_path)?;
         let config = ConfigWrapper::<VersionAnnotatedConfig>::new(&config_path, config);
         config.save().unwrap();
 
         let legacy_mod_profiles_path = project_dirs.config_dir().join("profiles.json");
         let mod_data_path = project_dirs.config_dir().join("mod_data.json");
-        let mod_data = match std::fs::read(&mod_data_path) {
-            Ok(buf) => serde_json::from_slice::<MaybeVersionedModData>(&buf)
-                .context("failed to deserialize existing `mod_data.json`")?,
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-                match std::fs::read(&legacy_mod_profiles_path) {
-                    Ok(buf) => {
-                        let mod_data = serde_json::from_slice::<MaybeVersionedModData>(&buf)
-                            .context("failed to deserialize legacy `profiles.json`")?;
-                        std::fs::remove_file(&legacy_mod_profiles_path)
-                            .context("failed to remove legacy `profiles.json` while migrating")?;
-                        mod_data
-                    }
-                    Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-                        MaybeVersionedModData::default()
-                    }
-                    Err(e) => Err(e).context("failed to read legacy `profiles`.json")?,
-                }
-            }
-            Err(e) => Err(e).context("failed to read `mod_data`.json")?,
-        };
-
-        let mod_data = match mod_data {
-            MaybeVersionedModData::Legacy(legacy) => VersionAnnotatedModData::V0_0_0(legacy),
-            MaybeVersionedModData::Versioned(v) => v,
-        };
+        let mod_data = read_mod_data_or_default(&mod_data_path, legacy_mod_profiles_path)?;
         let mod_data = ConfigWrapper::<VersionAnnotatedModData>::new(mod_data_path, mod_data);
         mod_data.save().unwrap();
 
@@ -260,4 +220,57 @@ impl State {
             store,
         })
     }
+}
+
+fn read_config_or_default(config_path: &PathBuf) -> Result<VersionAnnotatedConfig> {
+    Ok(match std::fs::read(config_path) {
+        Ok(buf) => {
+            let config = serde_json::from_slice::<MaybeVersionedConfig>(&buf)
+                .context("failed to deserialize user config into maybe versioned config")?;
+            match config {
+                MaybeVersionedConfig::Versioned(v) => v,
+                MaybeVersionedConfig::Legacy(legacy) => {
+                    VersionAnnotatedConfig::V0_0_0(Config_v0_0_0 {
+                        provider_parameters: legacy.provider_parameters,
+                        drg_pak_path: legacy.drg_pak_path,
+                    })
+                }
+            }
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => VersionAnnotatedConfig::default(),
+        Err(e) => Err(e).context("failed to read `config.json`")?,
+    })
+}
+
+fn read_mod_data_or_default(
+    mod_data_path: &PathBuf,
+    legacy_mod_profiles_path: PathBuf,
+) -> Result<VersionAnnotatedModData> {
+    let mod_data = match std::fs::read(mod_data_path) {
+        Ok(buf) => serde_json::from_slice::<MaybeVersionedModData>(&buf)
+            .context("failed to deserialize existing `mod_data.json`")?,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            match std::fs::read(&legacy_mod_profiles_path) {
+                Ok(buf) => {
+                    let mod_data = serde_json::from_slice::<MaybeVersionedModData>(&buf)
+                        .context("failed to deserialize legacy `profiles.json`")?;
+                    std::fs::remove_file(&legacy_mod_profiles_path)
+                        .context("failed to remove legacy `profiles.json` while migrating")?;
+                    mod_data
+                }
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                    MaybeVersionedModData::default()
+                }
+                Err(e) => Err(e).context("failed to read legacy `profiles`.json")?,
+            }
+        }
+        Err(e) => Err(e).context("failed to read `mod_data`.json")?,
+    };
+
+    let mod_data = match mod_data {
+        MaybeVersionedModData::Legacy(legacy) => VersionAnnotatedModData::V0_0_0(legacy),
+        MaybeVersionedModData::Versioned(v) => v,
+    };
+
+    Ok(mod_data)
 }
