@@ -21,9 +21,11 @@ impl NamePopup {
     }
 }
 
-#[allow(clippy::len_without_is_empty)]
 pub trait NamedEntries<E> {
     fn len(&self) -> usize;
+    fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
     fn contains(&self, name: &str) -> bool;
     fn select(&mut self, name: String);
     fn selected_name(&self) -> &str;
