@@ -7,7 +7,7 @@ use std::{
     sync::Arc,
 };
 
-use anyhow::{Context, Result};
+use anyhow::{bail, Context, Result};
 use directories::ProjectDirs;
 
 use crate::{
@@ -31,21 +31,221 @@ fn default_true() -> bool {
     true
 }
 
-#[obake::versioned]
-#[obake(version("0.0.0"))]
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
-pub struct ModProfile {
-    #[obake(cfg("0.0.0"))]
+pub struct ModGroup {
     pub mods: Vec<ModConfig>,
 }
 
 #[obake::versioned]
 #[obake(version("0.0.0"))]
+#[obake(version("0.1.0"))]
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+pub struct ModProfile {
+    #[obake(cfg("0.0.0"))]
+    pub mods: Vec<ModConfig>,
+
+    /// A profile can contain ordered individual mods mixed with mod groups.
+    #[obake(cfg("0.1.0"))]
+    pub mods: Vec<ModOrGroup>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(untagged)]
+pub enum ModOrGroup {
+    Group { group_name: String, enabled: bool },
+    Individual(ModConfig),
+}
+
+impl From<ModProfile!["0.0.0"]> for ModProfile!["0.1.0"] {
+    fn from(_legacy: ModProfile!["0.0.0"]) -> Self {
+        // The migration requires `ModData` to handle instead.
+        unimplemented!("migration requires handling from `ModData`")
+    }
+}
+
+#[obake::versioned]
+#[obake(version("0.0.0"))]
+#[obake(version("0.1.0"))]
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ModData {
     pub active_profile: String,
     #[obake(cfg("0.0.0"))]
     pub profiles: BTreeMap<String, ModProfile!["0.0.0"]>,
+    #[obake(cfg("0.1.0"))]
+    pub profiles: BTreeMap<String, ModProfile!["0.1.0"]>,
+    #[obake(cfg("0.1.0"))]
+    pub groups: BTreeMap<String, ModGroup>,
+}
+
+impl ModData!["0.1.0"] {
+    pub fn for_each_mod_predicate<
+        F: FnMut(&ModConfig),
+        G: FnMut(bool /* mod group enabled? */) -> bool,
+        P: FnMut(&ModConfig) -> bool,
+    >(
+        &self,
+        profile: &str,
+        mut f: F,
+        mut g: G,
+        mut p: P,
+    ) {
+        for mod_or_group in &self.profiles.get(profile).unwrap().mods {
+            match mod_or_group {
+                ModOrGroup::Group {
+                    group_name,
+                    enabled,
+                } => {
+                    if g(*enabled) {
+                        for mc in &self.groups.get(group_name).unwrap().mods {
+                            if p(mc) {
+                                f(mc);
+                            }
+                        }
+                    }
+                }
+                ModOrGroup::Individual(mc) => {
+                    if p(mc) {
+                        f(mc);
+                    }
+                }
+            }
+        }
+    }
+
+    pub fn for_each_mod_predicate_mut<
+        F: FnMut(&mut ModConfig),
+        G: FnMut(bool /* mod group enabled? */) -> bool,
+        P: FnMut(&mut ModConfig) -> bool,
+    >(
+        &mut self,
+        profile: &str,
+        mut f: F,
+        mut g: G,
+        mut p: P,
+    ) {
+        for mod_or_group in &mut self.profiles.get_mut(profile).unwrap().mods {
+            match mod_or_group {
+                ModOrGroup::Group {
+                    group_name,
+                    enabled,
+                } => {
+                    if g(*enabled) {
+                        for mc in &mut self.groups.get_mut(group_name).unwrap().mods {
+                            if p(mc) {
+                                f(mc);
+                            }
+                        }
+                    }
+                }
+                ModOrGroup::Individual(mc) => {
+                    if p(mc) {
+                        f(mc);
+                    }
+                }
+            }
+        }
+    }
+
+    pub fn for_each_mod<F: FnMut(&ModConfig)>(&self, profile: &str, f: F) {
+        self.for_each_mod_predicate(profile, f, |_| true, |_| true)
+    }
+
+    pub fn for_each_enabled_mod<F: FnMut(&ModConfig)>(&self, profile: &str, f: F) {
+        self.for_each_mod_predicate(profile, f, std::convert::identity, |mc| mc.enabled)
+    }
+
+    pub fn for_each_mod_mut<F: FnMut(&mut ModConfig)>(&mut self, profile: &str, f: F) {
+        self.for_each_mod_predicate_mut(profile, f, |_| true, |_| true)
+    }
+
+    pub fn any_mod<F: FnMut(&ModConfig, Option<bool> /* mod group enabled? */) -> bool>(
+        &self,
+        profile: &str,
+        mut f: F,
+    ) -> bool {
+        self.profiles.get(profile).unwrap().mods.iter().any(|m| {
+            let f = &mut f;
+            match m {
+                ModOrGroup::Individual(mc) => f(mc, None),
+                ModOrGroup::Group {
+                    group_name,
+                    enabled,
+                } => self
+                    .groups
+                    .get(group_name)
+                    .unwrap()
+                    .mods
+                    .iter()
+                    .any(|mc| f(mc, Some(*enabled))),
+            }
+        })
+    }
+
+    pub fn any_mod_mut<
+        F: FnMut(&mut ModConfig, Option<&mut bool> /* mod group enabled? */) -> bool,
+    >(
+        &mut self,
+        profile: &str,
+        mut f: F,
+    ) -> bool {
+        self.profiles
+            .get_mut(profile)
+            .unwrap()
+            .mods
+            .iter_mut()
+            .any(|m| {
+                let f = &mut f;
+                match m {
+                    ModOrGroup::Individual(mc) => f(mc, None),
+                    ModOrGroup::Group {
+                        group_name,
+                        enabled,
+                    } => self
+                        .groups
+                        .get_mut(group_name)
+                        .unwrap()
+                        .mods
+                        .iter_mut()
+                        .any(|mc| f(mc, Some(enabled))),
+                }
+            })
+    }
+}
+
+impl Default for ModData!["0.1.0"] {
+    fn default() -> Self {
+        Self {
+            active_profile: "default".to_string(),
+            profiles: [("default".to_string(), Default::default())]
+                .into_iter()
+                .collect(),
+            groups: [("default".to_string(), Default::default())]
+                .into_iter()
+                .collect(),
+        }
+    }
+}
+
+impl From<ModData!["0.0.0"]> for ModData!["0.1.0"] {
+    fn from(legacy: ModData!["0.0.0"]) -> Self {
+        let mut new_profiles = Vec::new();
+        for (name, profile) in legacy.profiles {
+            let new_profile = ModProfile_v0_1_0 {
+                mods: profile
+                    .mods
+                    .into_iter()
+                    .map(|c| ModOrGroup::Individual(c))
+                    .collect(),
+            };
+            new_profiles.push((name, new_profile));
+        }
+
+        Self {
+            active_profile: legacy.active_profile,
+            profiles: new_profiles.into_iter().collect(),
+            groups: BTreeMap::default(),
+        }
+    }
 }
 
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
@@ -53,6 +253,8 @@ pub struct ModData {
 pub enum VersionAnnotatedModData {
     #[serde(rename = "0.0.0")]
     V0_0_0(ModData!["0.0.0"]),
+    #[serde(rename = "0.1.0")]
+    V0_1_0(ModData!["0.1.0"]),
 }
 
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
@@ -81,16 +283,17 @@ impl Default for MaybeVersionedModData {
 
 impl Default for VersionAnnotatedModData {
     fn default() -> Self {
-        VersionAnnotatedModData::V0_0_0(Default::default())
+        VersionAnnotatedModData::V0_1_0(Default::default())
     }
 }
 
 impl Deref for VersionAnnotatedModData {
-    type Target = ModData!["0.0.0"];
+    type Target = ModData!["0.1.0"];
 
     fn deref(&self) -> &Self::Target {
         match self {
-            VersionAnnotatedModData::V0_0_0(md) => md,
+            VersionAnnotatedModData::V0_0_0(_) => unreachable!(),
+            VersionAnnotatedModData::V0_1_0(md) => md,
         }
     }
 }
@@ -98,17 +301,18 @@ impl Deref for VersionAnnotatedModData {
 impl DerefMut for VersionAnnotatedModData {
     fn deref_mut(&mut self) -> &mut Self::Target {
         match self {
-            VersionAnnotatedModData::V0_0_0(md) => md,
+            VersionAnnotatedModData::V0_0_0(_) => unreachable!(),
+            VersionAnnotatedModData::V0_1_0(md) => md,
         }
     }
 }
 
-impl ModData!["0.0.0"] {
-    pub fn get_active_profile(&self) -> &ModProfile {
+impl ModData!["0.1.0"] {
+    pub fn get_active_profile(&self) -> &ModProfile!["0.1.0"] {
         &self.profiles[&self.active_profile]
     }
 
-    pub fn get_active_profile_mut(&mut self) -> &mut ModProfile {
+    pub fn get_active_profile_mut(&mut self) -> &mut ModProfile!["0.1.0"] {
         self.profiles.get_mut(&self.active_profile).unwrap()
     }
 
@@ -228,7 +432,10 @@ fn read_config_or_default(config_path: &PathBuf) -> Result<VersionAnnotatedConfi
             let config = serde_json::from_slice::<MaybeVersionedConfig>(&buf)
                 .context("failed to deserialize user config into maybe versioned config")?;
             match config {
-                MaybeVersionedConfig::Versioned(v) => v,
+                MaybeVersionedConfig::Versioned(v) => match v {
+                    VersionAnnotatedConfig::V0_0_0(v) => VersionAnnotatedConfig::V0_0_0(v),
+                    VersionAnnotatedConfig::Unsupported => bail!("unsupported config version"),
+                },
                 MaybeVersionedConfig::Legacy(legacy) => {
                     VersionAnnotatedConfig::V0_0_0(Config_v0_0_0 {
                         provider_parameters: legacy.provider_parameters,
@@ -268,8 +475,11 @@ fn read_mod_data_or_default(
     };
 
     let mod_data = match mod_data {
-        MaybeVersionedModData::Legacy(legacy) => VersionAnnotatedModData::V0_0_0(legacy),
-        MaybeVersionedModData::Versioned(v) => v,
+        MaybeVersionedModData::Legacy(legacy) => VersionAnnotatedModData::V0_1_0(legacy.into()),
+        MaybeVersionedModData::Versioned(v) => match v {
+            VersionAnnotatedModData::V0_0_0(md) => VersionAnnotatedModData::V0_1_0(md.into()),
+            VersionAnnotatedModData::V0_1_0(md) => VersionAnnotatedModData::V0_1_0(md),
+        },
     };
 
     Ok(mod_data)

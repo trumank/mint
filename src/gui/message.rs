@@ -1,3 +1,4 @@
+use std::ops::DerefMut;
 use std::{
     collections::{HashMap, HashSet},
     path::PathBuf,
@@ -11,6 +12,7 @@ use tokio::{
     task::JoinHandle,
 };
 
+use crate::state::{ModData_v0_1_0 as ModData, ModOrGroup};
 use crate::{
     error::IntegrationError,
     providers::{FetchProgress, ModInfo, ModResolution, ModSpecification, ModStore},
@@ -93,7 +95,6 @@ impl ResolveMods {
         if Some(self.rid) == app.resolve_mod_rid.as_ref().map(|r| r.rid) {
             match self.result {
                 Ok(resolved_mods) => {
-                    let profile = app.state.mod_data.get_active_profile_mut();
                     let primary_mods = self
                         .specs
                         .into_iter()
@@ -104,26 +105,40 @@ impl ResolveMods {
                             // if mod is a dependency then check if there is a disabled
                             // mod that satisfies the dependency and enable it. if it
                             // is not a dependency then assume the user explicitly
-                            // wants to add a specific mod version
-                            !profile.mods.iter_mut().any(|m| {
-                                if m.spec.satisfies_dependency(&resolved_spec) {
-                                    m.enabled = true;
-                                    true
-                                } else {
-                                    false
-                                }
-                            })
+                            // wants to add a specific mod version.
+                            let active_profile = app.state.mod_data.active_profile.clone();
+                            !app.state.mod_data.any_mod_mut(
+                                &active_profile,
+                                |mc, mod_group_enabled| {
+                                    if mc.spec.satisfies_dependency(&resolved_spec) {
+                                        mc.enabled = true;
+                                        if let Some(mod_group_enabled) = mod_group_enabled {
+                                            *mod_group_enabled = true;
+                                        }
+                                        true
+                                    } else {
+                                        false
+                                    }
+                                },
+                            )
                         } else {
                             true
                         };
+
                         if add {
-                            profile.mods.insert(
+                            let ModData {
+                                active_profile,
+                                profiles,
+                                ..
+                            } = app.state.mod_data.deref_mut().deref_mut();
+
+                            profiles.get_mut(active_profile).unwrap().mods.insert(
                                 0,
-                                ModConfig {
-                                    spec: info.spec,
+                                ModOrGroup::Individual(ModConfig {
+                                    spec: info.spec.clone(),
                                     required: info.suggested_require,
                                     enabled: true,
-                                },
+                                }),
                             );
                         }
                     }

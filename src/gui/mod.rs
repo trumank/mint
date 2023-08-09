@@ -22,12 +22,13 @@ use tokio::{
     task::JoinHandle,
 };
 
+use crate::state::ModOrGroup;
 use crate::{
     integrate::uninstall,
     is_drg_pak,
     providers::ModioTags,
     providers::{FetchProgress, ModSpecification, ModStore, ProviderFactory},
-    state::{ModConfig, ModData_v0_0_0 as ModData, State},
+    state::{ModConfig, ModData_v0_1_0 as ModData, State},
 };
 use find_string::FindString;
 use log::Log;
@@ -126,9 +127,10 @@ impl App {
         });
     }
 
+    /// TODO: actually implement mod groups; for now we rely on a 1-1 mapping between mod groups
+    /// and profiles for migration.
     fn ui_profile_table(&mut self, ui: &mut egui::Ui, profile: &str) {
-        if let Some(profile) = &mut self.state.mod_data.profiles.get_mut(profile) {
-            let mods = &mut profile.mods;
+        if let Some(profile) = self.state.mod_data.profiles.get_mut(profile) {
             let mut needs_save = false;
             let mut btn_remove = None;
             let mut add_deps = None;
@@ -152,19 +154,31 @@ impl App {
             let mut dnd: egui_dnd::DragDropUi =
                 ui.data(|data| data.get_temp(dnd_id).unwrap_or_default());
 
-            let enabled_specs = mods
+            let enabled_specs = profile
+                .mods
                 .iter()
                 .enumerate()
-                .filter_map(|(i, m)| m.enabled.then_some((i, m.spec.clone())))
+                .filter_map(|(i, m)| match m {
+                    ModOrGroup::Individual(mc) => mc.enabled.then_some((i, mc.spec.clone())),
+                    ModOrGroup::Group { .. } => {
+                        unimplemented!("mod group feature not yet implemented")
+                    }
+                })
                 .collect::<Vec<_>>();
 
-            let mut items = mods
+            let mut items = profile
+                .mods
                 .iter_mut()
                 .enumerate()
-                .map(|(index, item)| DndItem {
-                    id: ui.id().with(index),
-                    index,
-                    item,
+                .map(|(index, item)| match item {
+                    ModOrGroup::Individual(mc) => DndItem {
+                        id: ui.id().with(index),
+                        index,
+                        item: mc,
+                    },
+                    ModOrGroup::Group { .. } => {
+                        unimplemented!("mod group feature not yet implemented")
+                    }
                 })
                 .collect::<Vec<_>>();
 
@@ -343,7 +357,7 @@ impl App {
                             "file" => {
                                 ui.label("📁");
                             }
-                            _ => unimplemented!(),
+                            _ => unimplemented!("unimplemented provider kind"),
                         }
 
                         let res = ui.hyperlink_to(job, &item.item.spec.url);
@@ -460,16 +474,18 @@ impl App {
             ui.data_mut(|data| data.insert_temp(dnd_id, dnd));
 
             if let Some(response) = res.completed {
-                shift_vec(response.from, response.to, mods);
+                shift_vec(response.from, response.to, &mut profile.mods);
             }
 
             if let Some(remove) = btn_remove {
-                mods.remove(remove);
+                profile.mods.remove(remove);
                 needs_save = true;
             }
+
             if let Some(add_deps) = add_deps {
                 message::ResolveMods::send(self, ui.ctx(), add_deps, true);
             }
+
             if needs_save {
                 self.state.mod_data.save().unwrap();
             }
@@ -796,18 +812,19 @@ impl eframe::App for App {
                                     "DRG install not found. Configure it in the settings menu.",
                                 );
                             }
+
+                            let mut mods = Vec::new();
+                            let active_profile = self.state.mod_data.active_profile.clone();
+                            self.state.mod_data.for_each_enabled_mod(&active_profile, |mc| {
+                                mods.push(mc.spec.clone());
+                            });
+
                             if button.clicked() {
                                 self.last_action_status = LastActionStatus::Idle;
                                 self.integrate_rid = Some(message::Integrate::send(
                                     &mut self.request_counter,
                                     self.state.store.clone(),
-                                    self.state
-                                        .mod_data
-                                        .get_active_profile()
-                                        .mods
-                                        .iter()
-                                        .filter_map(|m| m.enabled.then(|| m.spec.clone()))
-                                        .collect(),
+                                    mods,
                                     self.state.config.drg_pak_path.as_ref().unwrap().clone(),
                                     self.tx.clone(),
                                     ctx.clone(),
@@ -825,13 +842,16 @@ impl eframe::App for App {
                             if button.clicked() {
                                 self.last_action_status = LastActionStatus::Idle;
                                 if let Some(pak_path) = &self.state.config.drg_pak_path {
-                                    let mods = self.state
-                                        .mod_data
-                                        .get_active_profile()
-                                        .mods
-                                        .iter()
-                                        .filter_map(|m| m.enabled.then(|| self.state.store.get_mod_info(&m.spec).and_then(|i| i.modio_id)).flatten())
-                                        .collect();
+                                    let mut mods = HashSet::default();
+                                    let active_profile = self.state.mod_data.active_profile.clone();
+                                    self.state.mod_data.for_each_enabled_mod(&active_profile, |mc| {
+                                        if let Some(modio_id) = self.state.store
+                                            .get_mod_info(&mc.spec)
+                                            .and_then(|i| i.modio_id) {
+                                                mods.insert(modio_id);
+                                        }
+                                    });
+
                                     match uninstall(pak_path, mods) {
                                         Ok(()) => {
                                             self.last_action_status =
@@ -854,15 +874,13 @@ impl eframe::App for App {
                             )
                             .clicked()
                         {
-                            let mod_specs = self
-                                .state
-                                .mod_data
-                                .get_active_profile()
-                                .mods
-                                .iter()
-                                .map(|m| m.spec.clone())
-                                .collect::<Vec<_>>();
-                            message::UpdateCache::send(self, mod_specs);
+                            let mut mods = Vec::new();
+                            let active_profile = self.state.mod_data.active_profile.clone();
+                            self.state.mod_data.for_each_mod(&active_profile, |mc| {
+                                mods.push(mc.spec.clone());
+                            });
+
+                            message::UpdateCache::send(self, mods);
                         }
                     },
                 );
@@ -919,24 +937,32 @@ impl eframe::App for App {
         egui::CentralPanel::default().show(ctx, |ui| {
             ui.set_enabled(self.integrate_rid.is_none() && self.update_rid.is_none());
             // profile selection
-            let buttons = |ui: &mut egui::Ui, profiles: &mut ModData| {
+
+            let buttons = |ui: &mut egui::Ui, mod_data: &mut ModData| {
                 if ui
                     .button("📋")
                     .on_hover_text_at_pointer("Copy profile mods")
                     .clicked()
                 {
-                    let mods = Self::build_mod_string(&profiles.get_active_profile().mods);
+                    let mut mods = Vec::new();
+                    let active_profile = mod_data.active_profile.clone();
+                    mod_data.for_each_enabled_mod(&active_profile, |mc| {
+                        mods.push(mc.clone());
+                    });
+                    let mods = Self::build_mod_string(&mods);
                     ui.output_mut(|o| o.copied_text = mods);
                 }
+
                 // TODO find better icon, flesh out multiple-view usage, fix GUI locking
                 if ui
                     .button("pop out")
                     .on_hover_text_at_pointer("pop out")
                     .clicked()
                 {
-                    self.open_profiles.insert(profiles.active_profile.clone());
+                    self.open_profiles.insert(mod_data.active_profile.clone());
                 }
             };
+
             if named_combobox::ui(
                 ui,
                 "profile",
@@ -982,16 +1008,17 @@ impl eframe::App for App {
             let profile = self.state.mod_data.active_profile.clone();
             self.ui_profile(ui, &profile);
 
+            // TODO: actually implement mod groups.
             if let Some(search_string) = &mut self.search_string {
                 let lower = search_string.to_lowercase();
-                let profile = self.state.mod_data.get_active_profile();
-                let any_matches = profile.mods.iter().any(|m| {
+                let any_matches = self.state.mod_data.any_mod(&profile, |mc, _| {
                     self.state
                         .store
-                        .get_mod_info(&m.spec)
+                        .get_mod_info(&mc.spec)
                         .map(|i| i.name.to_lowercase().contains(&lower))
                         .unwrap_or(false)
                 });
+
                 let mut text_edit = egui::TextEdit::singleline(search_string);
                 if !any_matches {
                     text_edit = text_edit.text_color(ui.visuals().error_fg_color);
