@@ -1,10 +1,10 @@
 use std;
 
-use super::{custom_popup_above_or_below_widget, is_committed, ModData};
+use super::{custom_popup_above_or_below_widget, is_committed};
 
 use eframe::egui;
 
-use crate::state::ModProfile;
+use crate::state::{ModData_v0_1_0 as ModData, ModProfile_v0_1_0 as ModProfile};
 
 #[derive(Debug, Clone)]
 struct NamePopup {

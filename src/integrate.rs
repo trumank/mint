@@ -81,11 +81,11 @@ fn uninstall_modio(installation: &DRGInstallation, modio_mods: HashSet<u32>) -> 
         .join("Saved/Config/WindowsNoEditor/GameUserSettings.ini");
     let mut config = ini::Ini::load_from_file(&config_path)?;
 
-    let ignore_keys = HashSet::from([
-        "CurrentModioUserId",
-    ]);
+    let ignore_keys = HashSet::from(["CurrentModioUserId"]);
 
-    config.entry(Some("/Script/FSD.UserGeneratedContent".to_string())).or_insert_with(Default::default);
+    config
+        .entry(Some("/Script/FSD.UserGeneratedContent".to_string()))
+        .or_insert_with(Default::default);
     if let Some(ugc_section) = config.section_mut(Some("/Script/FSD.UserGeneratedContent")) {
         let local_mods = installation
             .root

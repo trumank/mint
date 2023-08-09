@@ -304,7 +304,9 @@ fn read_cache_metadata_or_default(cache_metadata_path: &PathBuf) -> Result<Versi
     };
 
     let cache: VersionAnnotatedCache = match cache {
-        MaybeVersionedCache::Versioned(c) => c,
+        MaybeVersionedCache::Versioned(v) => match v {
+            VersionAnnotatedCache::V0_0_0(v) => VersionAnnotatedCache::V0_0_0(v),
+        },
         MaybeVersionedCache::Legacy(legacy) => VersionAnnotatedCache::V0_0_0(legacy),
     };
 

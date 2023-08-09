@@ -167,18 +167,16 @@ async fn action_integrate_profile(action: ActionIntegrateProfile) -> Result<()> 
         .context("Could not find DRG pak file, please specify manually with the --fsd_pak flag")?;
 
     let mut state = State::init()?;
-    let profile = &state.mod_data.profiles[&action.profile];
 
-    let mod_specs = profile
-        .mods
-        .iter()
-        .filter_map(|config| config.enabled.then(|| config.spec.clone()))
-        .collect::<Vec<_>>();
+    let mut mods = Vec::new();
+    state.mod_data.for_each_mod(&action.profile, |mc| {
+        mods.push(mc.spec.clone());
+    });
 
     resolve_and_integrate_with_provider_init(
         path_game_pak,
         &mut state,
-        &mod_specs,
+        &mods,
         action.update,
         init_provider,
     )
