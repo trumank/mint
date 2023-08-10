@@ -484,3 +484,161 @@ fn read_mod_data_or_default(
 
     Ok(mod_data)
 }
+
+#[cfg(test)]
+mod mod_data_tests {
+    use super::{
+        ModConfig, ModData_v0_1_0 as ModData, ModGroup, ModOrGroup, ModProfile_v0_1_0 as ModProfile,
+    };
+    use crate::providers::ModSpecification;
+
+    #[test]
+    fn test_for_each_mod() {
+        let mod_1 = ModConfig {
+            spec: ModSpecification::new("a".to_string()),
+            required: false,
+            enabled: false,
+        };
+
+        let mod_2 = ModConfig {
+            spec: ModSpecification::new("b".to_string()),
+            required: true,
+            enabled: false,
+        };
+
+        let mod_3 = ModConfig {
+            spec: ModSpecification::new("c".to_string()),
+            required: false,
+            enabled: true,
+        };
+
+        let mod_data = ModData {
+            active_profile: "default".to_string(),
+            profiles: [(
+                "default".to_string(),
+                ModProfile {
+                    mods: vec![
+                        ModOrGroup::Individual(mod_1),
+                        ModOrGroup::Group {
+                            group_name: "mg1".to_string(),
+                            enabled: false,
+                        },
+                    ],
+                },
+            )]
+            .into(),
+            groups: [(
+                "mg1".to_string(),
+                ModGroup {
+                    mods: vec![mod_2, mod_3],
+                },
+            )]
+            .into(),
+        };
+
+        let mut counter = 0;
+        mod_data.for_each_mod("default", |_| {
+            counter += 1;
+        });
+        assert_eq!(counter, 3);
+    }
+
+    #[test]
+    fn test_for_each_enabled_mod() {
+        let mod_1 = ModConfig {
+            spec: ModSpecification::new("a".to_string()),
+            required: false,
+            enabled: false,
+        };
+
+        let mod_2 = ModConfig {
+            spec: ModSpecification::new("b".to_string()),
+            required: true,
+            enabled: false,
+        };
+
+        let mod_3 = ModConfig {
+            spec: ModSpecification::new("c".to_string()),
+            required: false,
+            enabled: true,
+        };
+
+        let mod_data = ModData {
+            active_profile: "default".to_string(),
+            profiles: [(
+                "default".to_string(),
+                ModProfile {
+                    mods: vec![
+                        ModOrGroup::Individual(mod_1),
+                        ModOrGroup::Group {
+                            group_name: "mg1".to_string(),
+                            enabled: true,
+                        },
+                    ],
+                },
+            )]
+            .into(),
+            groups: [(
+                "mg1".to_string(),
+                ModGroup {
+                    mods: vec![mod_2, mod_3],
+                },
+            )]
+            .into(),
+        };
+
+        let mut counter = 0;
+        mod_data.for_each_enabled_mod("default", |_| {
+            counter += 1;
+        });
+        assert_eq!(counter, 1);
+    }
+
+    #[test]
+    fn test_any_mod() {
+        let mod_1 = ModConfig {
+            spec: ModSpecification::new("a".to_string()),
+            required: false,
+            enabled: false,
+        };
+
+        let mod_2 = ModConfig {
+            spec: ModSpecification::new("b".to_string()),
+            required: true,
+            enabled: false,
+        };
+
+        let mod_3 = ModConfig {
+            spec: ModSpecification::new("c".to_string()),
+            required: false,
+            enabled: true,
+        };
+
+        let mod_data = ModData {
+            active_profile: "default".to_string(),
+            profiles: [(
+                "default".to_string(),
+                ModProfile {
+                    mods: vec![
+                        ModOrGroup::Individual(mod_1),
+                        ModOrGroup::Group {
+                            group_name: "mg1".to_string(),
+                            enabled: true,
+                        },
+                    ],
+                },
+            )]
+            .into(),
+            groups: [(
+                "mg1".to_string(),
+                ModGroup {
+                    mods: vec![mod_2, mod_3],
+                },
+            )]
+            .into(),
+        };
+
+        let any_required = mod_data.any_mod("default", |mc, _| mc.required);
+        assert_eq!(any_required, true);
+    }
+}
