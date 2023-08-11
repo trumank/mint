@@ -135,25 +135,6 @@ impl App {
             let mut btn_remove = None;
             let mut add_deps = None;
 
-            use egui_dnd::utils::shift_vec;
-            use egui_dnd::DragDropItem;
-
-            struct DndItem<'item> {
-                id: egui::Id,
-                index: usize,
-                item: &'item mut ModConfig,
-            }
-
-            impl<'item> DragDropItem for DndItem<'item> {
-                fn id(&self) -> egui::Id {
-                    self.id
-                }
-            }
-
-            let dnd_id = ui.id().with("dnd");
-            let mut dnd: egui_dnd::DragDropUi =
-                ui.data(|data| data.get_temp(dnd_id).unwrap_or_default());
-
             let enabled_specs = profile
                 .mods
                 .iter()
@@ -166,35 +147,22 @@ impl App {
                 })
                 .collect::<Vec<_>>();
 
-            let mut items = profile
-                .mods
-                .iter_mut()
-                .enumerate()
-                .map(|(index, item)| match item {
-                    ModOrGroup::Individual(mc) => DndItem {
-                        id: ui.id().with(index),
-                        index,
-                        item: mc,
-                    },
-                    ModOrGroup::Group { .. } => {
-                        unimplemented!("mod group feature not yet implemented")
-                    }
-                })
-                .collect::<Vec<_>>();
-
-            let res = dnd
-            .ui::<DndItem>(ui, items.iter_mut(), |item, ui, handle| {
+            let res = egui_dnd::dnd(ui, ui.id()).show_vec(&mut profile.mods, |ui: &mut egui::Ui, item: &mut ModOrGroup, handle, state| {
                 ui.horizontal(|ui| {
-                    handle.ui(ui, item, |ui| {
+                    let item = match item {
+                        ModOrGroup::Individual(mc) => mc,
+                        ModOrGroup::Group { .. } => unimplemented!("mod group feature not yet implemented"),
+                    };
+                    handle.ui(ui, |ui| {
                         ui.label("☰");
                     });
 
                     if ui.button(" ➖ ").clicked() {
-                        btn_remove = Some(item.index);
+                        btn_remove = Some(state.index);
                     }
 
                     if ui
-                        .add(egui::Checkbox::without_text(&mut item.item.enabled))
+                        .add(egui::Checkbox::without_text(&mut item.enabled))
                         .on_hover_text_at_pointer("enabled?")
                         .changed()
                     {
@@ -203,18 +171,18 @@ impl App {
 
                     /*
                     if ui
-                        .add(egui::Checkbox::without_text(&mut item.item.required))
+                        .add(egui::Checkbox::without_text(&mut item.required))
                         .changed()
                     {
                         needs_save = true;
                     }
                     */
 
-                    let info = self.state.store.get_mod_info(&item.item.spec);
+                    let info = self.state.store.get_mod_info(&item.spec);
 
-                    if item.item.enabled {
+                    if item.enabled {
                         if let Some(req) = &self.integrate_rid {
-                            match req.state.get(&item.item.spec) {
+                            match req.state.get(&item.spec) {
                                 Some(SpecFetchProgress::Progress { progress, size }) => {
                                     ui.add(
                                         egui::ProgressBar::new(*progress as f32 / *size as f32)
@@ -233,16 +201,16 @@ impl App {
                     }
 
                     if let Some(info) = &info {
-                        egui::ComboBox::from_id_source(item.index)
+                        egui::ComboBox::from_id_source(state.index)
                             .selected_text(
                                 self.state
                                     .store
-                                    .get_version_name(&item.item.spec)
+                                    .get_version_name(&item.spec)
                                     .unwrap_or_default(),
                             )
                             .show_ui(ui, |ui| {
                                 ui.selectable_value(
-                                    &mut item.item.spec.url,
+                                    &mut item.spec.url,
                                     info.spec.url.to_string(),
                                     self.state
                                         .store
@@ -251,7 +219,7 @@ impl App {
                                 );
                                 for version in info.versions.iter().rev() {
                                     ui.selectable_value(
-                                        &mut item.item.spec.url,
+                                        &mut item.spec.url,
                                         version.url.to_string(),
                                         self.state
                                             .store
@@ -266,11 +234,11 @@ impl App {
                             .on_hover_text_at_pointer("copy URL")
                             .clicked()
                         {
-                            ui.output_mut(|o| o.copied_text = item.item.spec.url.to_owned());
+                            ui.output_mut(|o| o.copied_text = item.spec.url.to_owned());
                         }
 
                         let is_duplicate = enabled_specs.iter().any(|(i, spec)| {
-                            item.index != *i && info.spec.satisfies_dependency(spec)
+                            state.index != *i && info.spec.satisfies_dependency(spec)
                         });
                         if is_duplicate
                             && ui
@@ -281,7 +249,7 @@ impl App {
                                 .on_hover_text_at_pointer("remove duplicate")
                                 .clicked()
                         {
-                            btn_remove = Some(item.index);
+                            btn_remove = Some(state.index);
                         }
 
                         let missing_deps = info
@@ -360,7 +328,7 @@ impl App {
                             _ => unimplemented!("unimplemented provider kind"),
                         }
 
-                        let res = ui.hyperlink_to(job, &item.item.spec.url);
+                        let res = ui.hyperlink_to(job, &item.spec.url);
                         if is_match && self.scroll_to_match {
                             res.scroll_to_me(None);
                             self.scroll_to_match = false;
@@ -464,17 +432,15 @@ impl App {
                             .on_hover_text_at_pointer("Copy URL")
                             .clicked()
                         {
-                            ui.output_mut(|o| o.copied_text = item.item.spec.url.to_owned());
+                            ui.output_mut(|o| o.copied_text = item.spec.url.to_owned());
                         }
-                        ui.hyperlink(&item.item.spec.url);
+                        ui.hyperlink(&item.spec.url);
                     }
                 });
             });
 
-            ui.data_mut(|data| data.insert_temp(dnd_id, dnd));
-
-            if let Some(response) = res.completed {
-                shift_vec(response.from, response.to, &mut profile.mods);
+            if res.final_update().is_some() {
+                needs_save = true;
             }
 
             if let Some(remove) = btn_remove {

@@ -1233,10 +1233,10 @@ dependencies = [
 [[package]]
 name = "egui_dnd"
 version = "0.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "76b5e31bc4354958b29a1aff9db4c1a15fa63f4cf8e51b8b0edbfcf9e87761de"
+source = "git+https://github.com/lucasmerlin/egui_dnd.git#7d263c4d2fb42b56062fb25f7c7eca091b5be663"
 dependencies = [
  "egui",
+ "web-time",
 ]
 
 [[package]]
@@ -4354,6 +4354,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9b85cbef8c220a6abc02aefd892dfc0fc23afb1c6a426316ec33253a3877249b"
 dependencies = [
  "js-sys",
+ "wasm-bindgen",
+]
+
+[[package]]
+name = "web-time"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "19353897b48e2c4d849a2d73cb0aeb16dc2be4e00c565abfc11eb65a806e47de"
+dependencies = [
+ "js-sys",
+ "once_cell",
  "wasm-bindgen",
 ]
 

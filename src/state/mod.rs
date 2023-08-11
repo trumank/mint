@@ -18,7 +18,7 @@ use crate::{
 use self::config::ConfigWrapper;
 
 /// Mod configuration, holds ModSpecification as well as other metadata
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Hash, serde::Serialize, serde::Deserialize)]
 pub struct ModConfig {
     pub spec: ModSpecification,
     pub required: bool,
@@ -49,7 +49,7 @@ pub struct ModProfile {
     pub mods: Vec<ModOrGroup>,
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Hash, serde::Serialize, serde::Deserialize)]
 #[serde(untagged)]
 pub enum ModOrGroup {
     Group { group_name: String, enabled: bool },

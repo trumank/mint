@@ -12,7 +12,7 @@ dialoguer = "0.10.4"
 directories = "5.0.1"
 eframe = "0.22.0"
 egui-dropdown = { git = "https://github.com/ItsEthra/egui-dropdown" }
-egui_dnd = "0.4.0"
+egui_dnd = { git = "https://github.com/lucasmerlin/egui_dnd.git" }
 egui_extras = "0.22.0"
 futures = "0.3.28"
 hex = "0.4.3"
