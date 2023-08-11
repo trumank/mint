@@ -234,7 +234,7 @@ impl From<ModData!["0.0.0"]> for ModData!["0.1.0"] {
                 mods: profile
                     .mods
                     .into_iter()
-                    .map(|c| ModOrGroup::Individual(c))
+                    .map(ModOrGroup::Individual)
                     .collect(),
             };
             new_profiles.push((name, new_profile));
@@ -639,6 +639,6 @@ mod mod_data_tests {
         };
 
         let any_required = mod_data.any_mod("default", |mc, _| mc.required);
-        assert_eq!(any_required, true);
+        assert!(any_required);
     }
 }
