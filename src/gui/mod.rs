@@ -147,9 +147,9 @@ impl App {
                 })
                 .collect::<Vec<_>>();
 
-            let res = egui_dnd::dnd(ui, ui.id()).show_vec(&mut profile.mods, |ui: &mut egui::Ui, item: &mut ModOrGroup, handle, state| {
+            let res = egui_dnd::dnd(ui, ui.id()).show(profile.mods.iter_mut().enumerate(), |ui: &mut egui::Ui, item: (usize, &mut ModOrGroup), handle, state| {
                 ui.horizontal(|ui| {
-                    let item = match item {
+                    let item = match item.1 {
                         ModOrGroup::Individual(mc) => mc,
                         ModOrGroup::Group { .. } => unimplemented!("mod group feature not yet implemented"),
                     };
@@ -440,6 +440,7 @@ impl App {
             });
 
             if res.final_update().is_some() {
+                res.update_vec(&mut profile.mods);
                 needs_save = true;
             }
 
