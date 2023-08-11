@@ -954,6 +954,7 @@ impl eframe::App for App {
                 }
 
                 // TODO find better icon, flesh out multiple-view usage, fix GUI locking
+                /*
                 if ui
                     .button("pop out")
                     .on_hover_text_at_pointer("pop out")
@@ -961,6 +962,7 @@ impl eframe::App for App {
                 {
                     self.open_profiles.insert(mod_data.active_profile.clone());
                 }
+                */
             };
 
             if named_combobox::ui(
