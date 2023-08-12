@@ -335,7 +335,7 @@ impl App {
                             .. // version ignored
                         }) = &info.modio_tags
                         {
-                            let mut mk_searchable_modio_tag = |tag_str: &str, ui: &mut egui::Ui, color: Option<egui::Color32>| {
+                            let mut mk_searchable_modio_tag = |tag_str: &str, ui: &mut egui::Ui, color: Option<egui::Color32>, hover_str: Option<&str>| {
                                 let text_color = if color.is_some() { Color32::BLACK } else { Color32::GRAY };
                                 let mut job = LayoutJob::default();
                                 let mut is_match = false;
@@ -369,7 +369,11 @@ impl App {
                                     egui::Button::new(job).small().stroke(egui::Stroke::NONE)
                                 };
 
-                                let res = ui.add_enabled(false, button);
+                                let res = if let Some(hover_str) = hover_str {
+                                    ui.add_enabled(false, button).on_disabled_hover_text(hover_str)
+                                } else {
+                                    ui.add_enabled(false, button)
+                                };
 
                                 if is_match && self.scroll_to_match {
                                     res.scroll_to_me(None);
@@ -380,39 +384,39 @@ impl App {
                             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                                 match approval_status {
                                     crate::providers::ApprovalStatus::Verified => {
-                                        mk_searchable_modio_tag("Verified", ui, Some(egui::Color32::LIGHT_GREEN));
+                                        mk_searchable_modio_tag("Verified", ui, Some(egui::Color32::LIGHT_GREEN), Some("Does not contain any gameplay affecting features or changes"));
                                     }
                                     crate::providers::ApprovalStatus::Approved => {
-                                        mk_searchable_modio_tag("Approved", ui, Some(egui::Color32::LIGHT_BLUE));
+                                        mk_searchable_modio_tag("Approved", ui, Some(egui::Color32::LIGHT_BLUE), Some("Contains gameplay affecting features or changes"));
                                     }
                                     crate::providers::ApprovalStatus::Sandbox => {
-                                        mk_searchable_modio_tag("Sandbox", ui, Some(egui::Color32::LIGHT_YELLOW));
+                                        mk_searchable_modio_tag("Sandbox", ui, Some(egui::Color32::LIGHT_YELLOW), Some("Contains significant, possibly progression breaking, changes to gameplay"));
                                     }
                                 }
 
                                 match required_status {
                                     crate::providers::RequiredStatus::RequiredByAll => {
-                                        mk_searchable_modio_tag("RequiredByAll", ui, None);
+                                        mk_searchable_modio_tag("RequiredByAll", ui, Some(egui::Color32::LIGHT_RED), Some("All lobby members must use this mod for it to work correctly!"));
                                     }
                                     crate::providers::RequiredStatus::Optional => {
-                                        mk_searchable_modio_tag("Optional", ui, None);
+                                        mk_searchable_modio_tag("Optional", ui, None, Some("Clients are not required to install this mod to function"));
                                     }
                                 }
 
                                 if *qol {
-                                    mk_searchable_modio_tag("QoL", ui, None);
+                                    mk_searchable_modio_tag("QoL", ui, None, None);
                                 }
                                 if *gameplay {
-                                    mk_searchable_modio_tag("Gameplay", ui, None);
+                                    mk_searchable_modio_tag("Gameplay", ui, None, None);
                                 }
                                 if *audio {
-                                    mk_searchable_modio_tag("Audio", ui, None);
+                                    mk_searchable_modio_tag("Audio", ui, None, None);
                                 }
                                 if *visual {
-                                    mk_searchable_modio_tag("Visual", ui, None);
+                                    mk_searchable_modio_tag("Visual", ui, None, None);
                                 }
                                 if *framework {
-                                    mk_searchable_modio_tag("Framework", ui, None);
+                                    mk_searchable_modio_tag("Framework", ui, None, None);
                                 }
                             });
                         }
