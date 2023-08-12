@@ -99,10 +99,3 @@ closed.**
 
 If you want to go back to the integrated mod support again, you must uninstall the mods installed by
 the integration tool. Then, launch the game normally.
-
-## Sharing your mod profiles
-
-Currently, the tool doesn't implement mod profile sharing. However, you can
-send (parts or the entirety of) your `profiles.json` to other players. This
-file can be found by going to the settings menu and clicking on the config
-dir link.
