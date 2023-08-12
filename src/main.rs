@@ -5,10 +5,12 @@ use std::path::PathBuf;
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use directories::ProjectDirs;
+use drg_mod_integration::resolve_with_provider_init;
 use tracing::{debug, info};
 
 use drg_mod_integration::{
     gui::gui,
+    mod_lint::lint,
     providers::{ModSpecification, ProviderFactory},
     resolve_and_integrate_with_provider_init,
     state::State,
@@ -56,7 +58,7 @@ struct ActionIntegrateProfile {
     #[arg(short, long)]
     update: bool,
 
-    /// Paths of mods to integrate
+    /// Profile to integrate.
     profile: String,
 }
 
@@ -66,11 +68,25 @@ struct ActionLaunch {
     args: Vec<String>,
 }
 
+/// Lint the mod bundle that would be created for a profile.
+#[derive(Parser, Debug)]
+struct ActionLint {
+    /// Path to FSD-WindowsNoEditor.pak (FSD-WinGDK.pak for Microsoft Store version) located
+    /// inside the "Deep Rock Galactic" installation directory under FSD/Content/Paks. Only
+    /// necessary if it cannot be found automatically.
+    #[arg(short, long)]
+    fsd_pak: Option<PathBuf>,
+
+    /// Profile to lint.
+    profile: String,
+}
+
 #[derive(Subcommand, Debug)]
 enum Action {
     Integrate(ActionIntegrate),
     Profile(ActionIntegrateProfile),
     Launch(ActionLaunch),
+    Lint(ActionLint),
 }
 
 #[derive(Parser, Debug)]
@@ -108,6 +124,10 @@ fn main() -> Result<()> {
             gui(Some(action.args))?;
             Ok(())
         }
+        Some(Action::Lint(action)) => rt.block_on(async {
+            action_lint(action).await?;
+            Ok(())
+        }),
         None => {
             std::thread::spawn(move || {
                 rt.block_on(std::future::pending::<()>());
@@ -157,7 +177,8 @@ fn setup_logging() -> Result<WorkerGuard> {
         .fmt_fields(NewType(Pretty::default()))
         .with_ansi(false)
         .with_filter(filter::Targets::new().with_target("drg_mod_integration", Level::DEBUG));
-    let stdout_log = fmt::layer()
+    let stderr_log = fmt::layer()
+        .with_writer(std::io::stderr)
         .compact()
         .with_level(true)
         .with_target(true)
@@ -168,7 +189,7 @@ fn setup_logging() -> Result<WorkerGuard> {
                 .from_env_lossy(),
         );
     let subscriber = tracing_subscriber::registry()
-        .with(stdout_log)
+        .with(stderr_log)
         .with(debug_file_log);
 
     tracing::subscriber::set_global_default(subscriber)?;
@@ -208,7 +229,6 @@ fn init_provider(state: &mut State, url: String, factory: &ProviderFactory) -> R
     state.store.add_provider(factory, params)
 }
 
-#[tracing::instrument]
 async fn action_integrate(action: ActionIntegrate) -> Result<()> {
     let path_game_pak = action
         .fsd_pak
@@ -238,7 +258,6 @@ async fn action_integrate(action: ActionIntegrate) -> Result<()> {
     .await
 }
 
-#[tracing::instrument]
 async fn action_integrate_profile(action: ActionIntegrateProfile) -> Result<()> {
     let path_game_pak = action
         .fsd_pak
@@ -265,4 +284,24 @@ async fn action_integrate_profile(action: ActionIntegrateProfile) -> Result<()> 
         init_provider,
     )
     .await
+}
+
+async fn action_lint(action: ActionLint) -> Result<()> {
+    let mut state = State::init()?;
+
+    let mut mods = Vec::new();
+    state.mod_data.for_each_mod(&action.profile, |mc| {
+        mods.push(mc.spec.clone());
+    });
+
+    let mod_paths = resolve_with_provider_init(&mut state, &mods, init_provider).await?;
+
+    let mods = mods
+        .into_iter()
+        .zip(mod_paths.into_iter())
+        .collect::<Vec<_>>();
+
+    let report = tokio::task::spawn_blocking(move || lint(&state, &mods)).await??;
+    println!("{:#?}", report);
+    Ok(())
 }
