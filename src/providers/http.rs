@@ -4,6 +4,7 @@ use std::{collections::HashMap, sync::Arc};
 use anyhow::{bail, Result};
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc::Sender;
+use tracing::info;
 
 use super::{
     BlobCache, BlobRef, FetchProgress, ModInfo, ModProvider, ModProviderCache, ModResolution,
@@ -122,7 +123,7 @@ impl ModProvider for HttpProvider {
                 }
                 path
             } else {
-                println!("downloading mod {url}...");
+                info!("downloading mod {url}...");
                 let response = self.client.get(url).send().await?.error_for_status()?;
                 let size = response.content_length(); // TODO will be incorrect if compressed
                 if let Some(mime) = response

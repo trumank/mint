@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 use repak::PakWriter;
+use tracing::info;
 
 use crate::providers::{ModInfo, ReadSeek};
 use crate::splice::TrackedStatement;
@@ -39,6 +40,7 @@ use unreal_asset::{
 /// back to the config so they will be disabled when the game is launched again. Since we have
 /// Modio IDs anyway, with just a little more effort we can make the 'uninstall' button work as an
 /// 'install' button for the official integration. Best anti-feature ever.
+#[tracing::instrument(level = "debug", skip(path_pak))]
 pub fn uninstall<P: AsRef<Path>>(path_pak: P, modio_mods: HashSet<u32>) -> Result<()> {
     let installation = DRGInstallation::from_pak_path(path_pak)?;
     let path_mods_pak = installation.paks_path().join("mods_P.pak");
@@ -59,6 +61,7 @@ pub fn uninstall<P: AsRef<Path>>(path_pak: P, modio_mods: HashSet<u32>) -> Resul
     Ok(())
 }
 
+#[tracing::instrument(level = "debug")]
 fn uninstall_modio(installation: &DRGInstallation, modio_mods: HashSet<u32>) -> Result<()> {
     #[derive(Debug, serde::Deserialize)]
     struct ModioState {
@@ -419,7 +422,7 @@ pub fn integrate<P: AsRef<Path>>(path_pak: P, mods: Vec<(ModInfo, PathBuf)>) -> 
 
     mod_pak.write_index()?;
 
-    println!(
+    info!(
         "{} mods installed to {}",
         mods.len(),
         path_mod_pak.display()

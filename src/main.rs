@@ -83,11 +83,14 @@ struct Args {
 fn main() -> Result<()> {
     std::env::set_var("RUST_BACKTRACE", "1");
     let _guard = setup_logging()?;
+    debug!("logging setup complete");
 
     let rt = tokio::runtime::Runtime::new().expect("Unable to create Runtime");
+    debug!("tokio runtime created");
     let _enter = rt.enter();
 
     let args = Args::parse();
+    debug!(?args);
 
     match args.action {
         Some(Action::Integrate(action)) => rt.block_on(async {
@@ -153,9 +156,7 @@ fn setup_logging() -> Result<WorkerGuard> {
         .with_writer(log_file_appender)
         .fmt_fields(NewType(Pretty::default()))
         .with_ansi(false)
-        .with_filter(filter::filter_fn(|metadata| {
-            *metadata.level() <= Level::DEBUG && metadata.target() == "drg_mod_integration"
-        }));
+        .with_filter(filter::Targets::new().with_target("drg_mod_integration", Level::DEBUG));
     let stdout_log = fmt::layer()
         .compact()
         .with_level(true)
@@ -184,8 +185,10 @@ fn setup_logging() -> Result<WorkerGuard> {
     Ok(guard)
 }
 
+#[tracing::instrument(skip(state))]
 fn init_provider(state: &mut State, url: String, factory: &ProviderFactory) -> Result<()> {
-    println!("Initializing provider for {:?}", url);
+    info!("initializing provider for {:?}", url);
+
     let params = state
         .config
         .provider_parameters
@@ -205,6 +208,7 @@ fn init_provider(state: &mut State, url: String, factory: &ProviderFactory) -> R
     state.store.add_provider(factory, params)
 }
 
+#[tracing::instrument]
 async fn action_integrate(action: ActionIntegrate) -> Result<()> {
     let path_game_pak = action
         .fsd_pak
@@ -214,6 +218,7 @@ async fn action_integrate(action: ActionIntegrate) -> Result<()> {
                 .map(DRGInstallation::main_pak)
         })
         .context("Could not find DRG pak file, please specify manually with the --fsd_pak flag")?;
+    debug!(?path_game_pak);
 
     let mut state = State::init()?;
 
@@ -233,6 +238,7 @@ async fn action_integrate(action: ActionIntegrate) -> Result<()> {
     .await
 }
 
+#[tracing::instrument]
 async fn action_integrate_profile(action: ActionIntegrateProfile) -> Result<()> {
     let path_game_pak = action
         .fsd_pak
@@ -242,6 +248,7 @@ async fn action_integrate_profile(action: ActionIntegrateProfile) -> Result<()> 
                 .map(DRGInstallation::main_pak)
         })
         .context("Could not find DRG pak file, please specify manually with the --fsd_pak flag")?;
+    debug!(?path_game_pak);
 
     let mut state = State::init()?;
 

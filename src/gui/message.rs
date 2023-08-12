@@ -11,6 +11,7 @@ use tokio::{
     sync::mpsc::{self, Sender},
     task::JoinHandle,
 };
+use tracing::{error, info};
 
 use crate::state::{ModData_v0_1_0 as ModData, ModOrGroup};
 use crate::{
@@ -155,7 +156,7 @@ impl ResolveMods {
                             LastActionStatus::Failure("no provider".to_string());
                     }
                     Err(e) => {
-                        app.log.println(format!("{:#?}\n{}", e, e.backtrace()));
+                        error!("{:#?}\n{}", e, e.backtrace());
                         app.last_action_status = LastActionStatus::Failure(e.to_string());
                     }
                 },
@@ -197,7 +198,7 @@ impl Integrate {
         if Some(self.rid) == app.integrate_rid.as_ref().map(|r| r.rid) {
             match self.result {
                 Ok(()) => {
-                    app.log.println("Integration complete");
+                    info!("integration complete");
                     app.last_action_status =
                         LastActionStatus::Success("integration complete".to_string());
                 }
@@ -209,7 +210,7 @@ impl Integrate {
                             LastActionStatus::Failure("no provider".to_string());
                     }
                     Err(e) => {
-                        app.log.println(format!("{:#?}\n{}", e, e.backtrace()));
+                        error!("{:#?}\n{}", e, e.backtrace());
                         app.last_action_status = LastActionStatus::Failure(e.to_string());
                     }
                 },
@@ -265,7 +266,7 @@ impl UpdateCache {
         if Some(self.rid) == app.update_rid.as_ref().map(|r| r.rid) {
             match self.result {
                 Ok(()) => {
-                    app.log.println("Cache update complete");
+                    info!("cache update complete");
                     app.last_action_status =
                         LastActionStatus::Success("successfully updated cache".to_string());
                 }
@@ -278,7 +279,7 @@ impl UpdateCache {
                             LastActionStatus::Failure("no provider".to_string());
                     }
                     Err(e) => {
-                        app.log.println(format!("{:#?}", e));
+                        error!("{:#?}\n{}", e, e.backtrace());
                         app.last_action_status = LastActionStatus::Failure(e.to_string());
                     }
                 },

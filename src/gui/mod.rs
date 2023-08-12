@@ -1,5 +1,4 @@
 mod find_string;
-mod log;
 mod message;
 mod named_combobox;
 mod request_counter;
@@ -21,6 +20,7 @@ use tokio::{
     sync::mpsc::{self, Receiver, Sender},
     task::JoinHandle,
 };
+use tracing::{debug, info};
 
 use crate::state::ModOrGroup;
 use crate::{
@@ -31,7 +31,6 @@ use crate::{
     state::{ModConfig, ModData_v0_1_0 as ModData, State},
 };
 use find_string::FindString;
-use log::Log;
 use message::MessageHandle;
 use request_counter::{RequestCounter, RequestID};
 
@@ -57,7 +56,6 @@ pub struct App {
     tx: Sender<message::Message>,
     rx: Receiver<message::Message>,
     state: State,
-    log: Log,
     resolve_mod: String,
     resolve_mod_rid: Option<MessageHandle<()>>,
     integrate_rid: Option<MessageHandle<HashMap<ModSpecification, SpecFetchProgress>>>,
@@ -84,16 +82,9 @@ enum LastActionStatus {
 impl App {
     fn new(args: Option<Vec<String>>) -> Result<Self> {
         let (tx, rx) = mpsc::channel(10);
-        let mut log = Log::default();
         let state = State::init()?;
-        log.println(format!(
-            "config dir: {}",
-            state.project_dirs.config_dir().display()
-        ));
-        log.println(format!(
-            "cache dir: {}",
-            state.project_dirs.cache_dir().display()
-        ));
+        info!("config dir = {}", state.project_dirs.config_dir().display());
+        info!("cache dir = {}", state.project_dirs.cache_dir().display());
 
         Ok(Self {
             args,
@@ -101,7 +92,6 @@ impl App {
             rx,
             request_counter: Default::default(),
             state,
-            log,
             resolve_mod: Default::default(),
             resolve_mod_rid: None,
             integrate_rid: None,
@@ -819,6 +809,7 @@ impl eframe::App for App {
                                         }
                                     });
 
+                                    debug!("uninstalling mods: pak_path = {}", pak_path.display());
                                     match uninstall(pak_path, mods) {
                                         Ok(()) => {
                                             self.last_action_status =
