@@ -737,7 +737,7 @@ impl WindowSettings {
         Self {
             drg_pak_path: path,
             drg_pak_path_err: None,
-            show_debug_console: false,//state.config.show_debug_console.unwrap_or_default(),
+            show_debug_console: state.config.show_debug_console.as_ref().map(|p | p.clone()).unwrap_or_default(),
         }
     }
 }
