@@ -90,13 +90,13 @@ pub fn read_asset<P: AsRef<Path>>(
     let mut out_uexp = Cursor::new(vec![]);
     asset.write_data(&mut out_uasset, Some(&mut out_uexp))?;
     if uasset.get_ref() != out_uasset.get_ref() || uexp.get_ref() != out_uexp.get_ref() {
-        println!(
-            "Binary equality not maintained: {}",
+        error!(
+            "binary equality not maintained: {}",
             path.as_ref().display()
         );
     } else {
-        println!(
-            "Preliminary binary equality check passed {}",
+        info!(
+            "preliminary binary equality check passed {}",
             path.as_ref().display()
         );
     }
@@ -741,7 +741,6 @@ fn resolve_tracked_statements<C: std::io::Read + std::io::Seek>(
 
     inst.into_iter()
         .map(|mut inst| {
-            //println!( "{:?} {} {:#?}", pi, export.get_base_export().object_name.get_content(), mappings.get(&pi));
             let dest = inst.points_to.as_ref().unwrap_or(&inst.origin);
             match &mut inst.ex {
                 // fix jumps into ubergraph
@@ -980,7 +979,7 @@ pub fn find_hooks<'a, C: std::io::Read + std::io::Seek>(
     /*
     for (a, bs) in &jumps {
         for b in bs {
-            println!("{}:{} -> {}:{}", a.0.index, a.1, b.0.index, b.1);
+            trace!("{}:{} -> {}:{}", a.0.index, a.1, b.0.index, b.1);
         }
     }
     */

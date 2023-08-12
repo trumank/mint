@@ -17,11 +17,14 @@ use anyhow::{bail, Context, Result};
 use error::IntegrationError;
 use providers::{ModSpecification, ProviderFactory};
 use state::State;
+use tracing::{info, warn};
 
+#[derive(Debug)]
 pub enum DRGInstallationType {
     Steam,
     Xbox,
 }
+
 impl DRGInstallationType {
     pub fn from_pak_path<P: AsRef<Path>>(pak: P) -> Result<Self> {
         let pak_name = pak
@@ -50,6 +53,7 @@ impl DRGInstallationType {
     }
 }
 
+#[derive(Debug)]
 pub struct DRGInstallation {
     pub root: PathBuf,
     pub installation_type: DRGInstallationType,
@@ -139,6 +143,7 @@ pub fn is_drg_pak<P: AsRef<Path>>(path: P) -> Result<()> {
     Ok(())
 }
 
+#[tracing::instrument(level = "debug", skip(path_game, state))]
 pub async fn resolve_and_integrate<P: AsRef<Path>>(
     path_game: P,
     state: &State,
@@ -163,9 +168,9 @@ pub async fn resolve_and_integrate<P: AsRef<Path>>(
         })
         .collect::<HashSet<_>>();
     if !missing_deps.is_empty() {
-        println!("WARNING: The following dependencies are missing:");
+        warn!("the following dependencies are missing:");
         for d in missing_deps {
-            println!("  {d}");
+            warn!("  {d}");
         }
     }
 
@@ -178,12 +183,13 @@ pub async fn resolve_and_integrate<P: AsRef<Path>>(
         .map(|m| &m.resolution)
         .collect::<Vec<_>>();
 
-    println!("fetching mods...");
+    info!("fetching mods...");
     let paths = state.store.fetch_mods(&urls, update, None).await?;
 
     integrate::integrate(path_game, to_integrate.into_iter().zip(paths).collect())
 }
 
+#[tracing::instrument(level = "debug", skip(path_game, state, init))]
 pub async fn resolve_and_integrate_with_provider_init<P, F>(
     path_game: P,
     state: &mut State,

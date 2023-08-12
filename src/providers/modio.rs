@@ -8,6 +8,7 @@ use reqwest_middleware::{Middleware, Next};
 use serde::{Deserialize, Serialize};
 use task_local_extensions::Extensions;
 use tokio::sync::mpsc::Sender;
+use tracing::info;
 
 use super::{
     ApprovalStatus, BlobCache, BlobRef, FetchProgress, ModInfo, ModProvider, ModProviderCache,
@@ -176,8 +177,8 @@ impl Middleware for LoggingMiddleware {
         next: Next<'_>,
     ) -> reqwest_middleware::Result<Response> {
         loop {
-            println!(
-                "Request started {} {:?}",
+            info!(
+                "request started {} {:?}",
                 self.requests
                     .fetch_add(1, std::sync::atomic::Ordering::Relaxed),
                 req.url().path()
@@ -185,7 +186,7 @@ impl Middleware for LoggingMiddleware {
             let res = next.clone().run(req.try_clone().unwrap(), extensions).await;
             if let Ok(res) = &res {
                 if let Some(retry) = res.headers().get("retry-after") {
-                    println!("retrying after: {}...", retry.to_str().unwrap());
+                    info!("retrying after: {}...", retry.to_str().unwrap());
                     tokio::time::sleep(tokio::time::Duration::from_secs(
                         retry.to_str().unwrap().parse::<u64>().unwrap(),
                     ))
@@ -510,7 +511,7 @@ impl ModProvider for ModioProvider {
                     let size = file.filesize;
                     let download: modio::download::DownloadAction = file.into();
 
-                    println!("downloading mod {url}...");
+                    info!("downloading mod {url}...");
 
                     use futures::stream::TryStreamExt;
                     use tokio::io::AsyncWriteExt;
