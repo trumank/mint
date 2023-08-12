@@ -1,7 +1,11 @@
+use std::fs::File;
+use std::io::BufWriter;
 use std::path::PathBuf;
 
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
+use directories::ProjectDirs;
+use tracing::{debug, info};
 
 use drg_mod_integration::{
     gui::gui,
@@ -10,6 +14,8 @@ use drg_mod_integration::{
     state::State,
     DRGInstallation,
 };
+use tracing_appender::non_blocking::WorkerGuard;
+use tracing_subscriber::filter;
 
 /// Command line integration tool.
 #[derive(Parser, Debug)]
@@ -76,6 +82,8 @@ struct Args {
 
 fn main() -> Result<()> {
     std::env::set_var("RUST_BACKTRACE", "1");
+    let _guard = setup_logging()?;
+
     let rt = tokio::runtime::Runtime::new().expect("Unable to create Runtime");
     let _enter = rt.enter();
 
@@ -105,6 +113,75 @@ fn main() -> Result<()> {
             Ok(())
         }
     }
+}
+
+fn setup_logging() -> Result<WorkerGuard> {
+    use tracing::metadata::LevelFilter;
+    use tracing::Level;
+    use tracing_subscriber::prelude::*;
+    use tracing_subscriber::{
+        field::RecordFields,
+        fmt::{
+            self,
+            format::{Pretty, Writer},
+            FormatFields,
+        },
+        EnvFilter,
+    };
+
+    /// Workaround for <https://github.com/tokio-rs/tracing/issues/1817>.
+    struct NewType(Pretty);
+
+    impl<'writer> FormatFields<'writer> for NewType {
+        fn format_fields<R: RecordFields>(
+            &self,
+            writer: Writer<'writer>,
+            fields: R,
+        ) -> core::fmt::Result {
+            self.0.format_fields(writer, fields)
+        }
+    }
+
+    let project_dirs =
+        ProjectDirs::from("", "", "drg-mod-integration").context("constructing project dirs")?;
+    std::fs::create_dir_all(project_dirs.data_dir())?;
+
+    let f = File::create(project_dirs.data_dir().join("drg-mod-integration.log"))?;
+    let writer = BufWriter::new(f);
+    let (log_file_appender, guard) = tracing_appender::non_blocking(writer);
+    let debug_file_log = fmt::layer()
+        .with_writer(log_file_appender)
+        .fmt_fields(NewType(Pretty::default()))
+        .with_ansi(false)
+        .with_filter(filter::filter_fn(|metadata| {
+            *metadata.level() <= Level::DEBUG && metadata.target() == "drg_mod_integration"
+        }));
+    let stdout_log = fmt::layer()
+        .compact()
+        .with_level(true)
+        .with_target(true)
+        .without_time()
+        .with_filter(
+            EnvFilter::builder()
+                .with_default_directive(LevelFilter::INFO.into())
+                .from_env_lossy(),
+        );
+    let subscriber = tracing_subscriber::registry()
+        .with(stdout_log)
+        .with(debug_file_log);
+
+    tracing::subscriber::set_global_default(subscriber)?;
+
+    debug!("tracing subscriber setup");
+    info!(
+        "writing logs to `{}`",
+        project_dirs
+            .data_dir()
+            .join("drg-mod-integration.log")
+            .display()
+    );
+
+    Ok(guard)
 }
 
 fn init_provider(state: &mut State, url: String, factory: &ProviderFactory) -> Result<()> {
