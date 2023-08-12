@@ -328,6 +328,7 @@ impl ModData!["0.1.0"] {
 pub struct Config {
     pub provider_parameters: HashMap<String, HashMap<String, String>>,
     pub drg_pak_path: Option<PathBuf>,
+    pub show_debug_console: Option<bool>,
 }
 
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
@@ -385,6 +386,7 @@ impl Default for Config!["0.0.0"] {
             drg_pak_path: DRGInstallation::find()
                 .as_ref()
                 .map(DRGInstallation::main_pak),
+            show_debug_console: Some(false),
         }
     }
 }
@@ -440,6 +442,7 @@ fn read_config_or_default(config_path: &PathBuf) -> Result<VersionAnnotatedConfi
                     VersionAnnotatedConfig::V0_0_0(Config_v0_0_0 {
                         provider_parameters: legacy.provider_parameters,
                         drg_pak_path: legacy.drg_pak_path,
+                        show_debug_console: Some(false),
                     })
                 }
             }

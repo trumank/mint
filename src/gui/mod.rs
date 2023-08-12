@@ -3,8 +3,6 @@ mod message;
 mod named_combobox;
 mod request_counter;
 
-//#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")] // hide console window on Windows in release
-
 use std::{
     collections::{HashMap, HashSet},
     ops::DerefMut,
@@ -21,6 +19,9 @@ use tokio::{
     task::JoinHandle,
 };
 use tracing::{debug, info};
+
+#[cfg(windows)]
+use winapi;
 
 use crate::state::ModOrGroup;
 use crate::{
@@ -85,6 +86,12 @@ impl App {
         let state = State::init()?;
         info!("config dir = {}", state.project_dirs.config_dir().display());
         info!("cache dir = {}", state.project_dirs.cache_dir().display());
+
+        info!("show_debug_console: {:?}", state.config.show_debug_console);
+        if !state.config.show_debug_console.unwrap_or_default() {
+            info!("hiding console window");
+            hide_console_window();
+        }
 
         Ok(Self {
             args,
@@ -619,6 +626,13 @@ impl App {
                         });
                         ui.end_row();
 
+                        #[cfg(target_os = "windows")]
+                        {
+                            ui.label("Show debug console:");
+                            ui.checkbox(&mut window.show_debug_console, "");
+                            ui.end_row();
+                        }
+
                         let config_dir = self.state.project_dirs.config_dir();
                         ui.label("Config directory:");
                         if ui.link(config_dir.display().to_string()).clicked() {
@@ -664,7 +678,10 @@ impl App {
                     window.drg_pak_path_err = Some(e.to_string());
                 } else {
                     self.state.config.drg_pak_path = Some(PathBuf::from(
-                        self.settings_window.take().unwrap().drg_pak_path,
+                        self.settings_window.as_ref().unwrap().drg_pak_path.clone(),
+                    ));
+                    self.state.config.show_debug_console = Some(bool::from(
+                        self.settings_window.take().unwrap().show_debug_console,
                     ));
                     self.state.config.save().unwrap();
                 }
@@ -706,6 +723,7 @@ impl WindowProviderParameters {
 struct WindowSettings {
     drg_pak_path: String,
     drg_pak_path_err: Option<String>,
+    show_debug_console: bool,
 }
 
 impl WindowSettings {
@@ -719,6 +737,7 @@ impl WindowSettings {
         Self {
             drg_pak_path: path,
             drg_pak_path_err: None,
+            show_debug_console: false,//state.config.show_debug_console.unwrap_or_default(),
         }
     }
 }
@@ -736,7 +755,6 @@ impl eframe::App for App {
         }
 
         // begin draw
-
         self.show_provider_parameters(ctx);
         self.show_profile_windows(ctx);
         self.show_settings(ctx);
@@ -1043,6 +1061,21 @@ impl eframe::App for App {
 
 fn is_committed(res: &egui::Response) -> bool {
     res.lost_focus() && res.ctx.input(|i| i.key_pressed(egui::Key::Enter))
+}
+
+#[cfg(windows)]
+fn hide_console_window() {
+    use std::ptr;
+    use winapi::um::wincon::GetConsoleWindow;
+    use winapi::um::winuser::{ShowWindow, SW_HIDE};
+
+    let window = unsafe {GetConsoleWindow()};
+    // https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-showwindow
+    if window != ptr::null_mut() {
+        unsafe {
+            ShowWindow(window, SW_HIDE);
+        }
+    }
 }
 
 /// A custom popup which does not automatically close when clicked.
