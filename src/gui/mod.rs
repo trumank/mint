@@ -87,10 +87,10 @@ impl App {
         info!("config dir = {}", state.project_dirs.config_dir().display());
         info!("cache dir = {}", state.project_dirs.cache_dir().display());
 
-        info!("show_debug_console: {:?}", state.config.show_debug_console);
-        if !state.config.show_debug_console.unwrap_or_default() {
-            info!("hiding console window");
-            hide_console_window();
+        #[cfg(target_os = "windows")]
+        {
+            info!("show_debug_console: {:?}", state.config.show_debug_console);
+            toggle_console_window(state.config.show_debug_console.unwrap_or_default());
         }
 
         Ok(Self {
@@ -683,6 +683,12 @@ impl App {
                     self.state.config.show_debug_console = Some(bool::from(
                         self.settings_window.take().unwrap().show_debug_console,
                     ));
+
+                    #[cfg(target_os = "windows")]
+                    {
+                        toggle_console_window(self.state.config.show_debug_console.unwrap_or_default());
+                    }
+
                     self.state.config.save().unwrap();
                 }
             } else if !open {
@@ -1064,16 +1070,20 @@ fn is_committed(res: &egui::Response) -> bool {
 }
 
 #[cfg(windows)]
-fn hide_console_window() {
+fn toggle_console_window(show: bool) {
     use std::ptr;
     use winapi::um::wincon::GetConsoleWindow;
-    use winapi::um::winuser::{ShowWindow, SW_HIDE};
+    use winapi::um::winuser::{ShowWindow, SW_HIDE, SW_SHOW};
 
     let window = unsafe {GetConsoleWindow()};
     // https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-showwindow
     if window != ptr::null_mut() {
         unsafe {
-            ShowWindow(window, SW_HIDE);
+            if show {
+                ShowWindow(window, SW_SHOW);
+            } else {
+                ShowWindow(window, SW_HIDE);
+            }
         }
     }
 }
