@@ -159,6 +159,12 @@ impl App {
                               _group: Option<&str>,
                               state: egui_dnd::ItemState,
                               mc: &mut ModConfig| {
+                if !mc.enabled {
+                    let vis = ui.visuals_mut();
+                    vis.override_text_color = Some(vis.text_color());
+                    vis.hyperlink_color = vis.text_color();
+                }
+
                 if ui
                     .add(egui::Checkbox::without_text(&mut mc.enabled))
                     .on_hover_text_at_pointer("enabled?")
@@ -307,7 +313,11 @@ impl App {
                                     ui.ctx()
                                         .load_texture("modio-logo", image, Default::default())
                                 });
-                            ui.image(texture, [16.0, 16.0]);
+                            let mut img = egui::Image::new(texture, [16.0, 16.0]);
+                            if !mc.enabled {
+                                img = img.tint(Color32::LIGHT_RED);
+                            }
+                            ui.add(img);
                         }
                         "http" => {
                             ui.label("🌐");
