@@ -677,12 +677,14 @@ impl App {
                 if let Err(e) = is_drg_pak(&window.drg_pak_path).context("Is not valid DRG pak") {
                     window.drg_pak_path_err = Some(e.to_string());
                 } else {
+                    let settings_window = self.settings_window.as_ref().unwrap();
                     self.state.config.drg_pak_path = Some(PathBuf::from(
-                        self.settings_window.as_ref().unwrap().drg_pak_path.clone(),
+                        settings_window.drg_pak_path.clone(),
                     ));
-                    self.state.config.show_debug_console = Some(bool::from(
-                        self.settings_window.take().unwrap().show_debug_console,
-                    ));
+                    self.state.config.show_debug_console = Some(
+                        settings_window.show_debug_console
+                    );
+                    self.settings_window.take();
 
                     #[cfg(target_os = "windows")]
                     {
@@ -743,7 +745,7 @@ impl WindowSettings {
         Self {
             drg_pak_path: path,
             drg_pak_path_err: None,
-            show_debug_console: state.config.show_debug_console.as_ref().map(|p | p.clone()).unwrap_or_default(),
+            show_debug_console: state.config.show_debug_console.unwrap_or_default(),
         }
     }
 }
