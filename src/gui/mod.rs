@@ -482,12 +482,20 @@ impl App {
             let res = egui_dnd::dnd(ui, ui.id()).show(
                 profile.mods.iter_mut().enumerate(),
                 |ui, (_index, item), handle, state| {
-                    ui.horizontal(|ui| {
-                        handle.ui(ui, |ui| {
-                            ui.label("☰");
-                        });
+                    let mut frame = egui::Frame::none();
+                    if state.dragged {
+                        frame.fill = ui.visuals().extreme_bg_color
+                    } else if state.index % 2 == 1 {
+                        frame.fill = ui.visuals().faint_bg_color
+                    }
+                    frame.show(ui, |ui| {
+                        ui.horizontal(|ui| {
+                            handle.ui(ui, |ui| {
+                                ui.label("☰");
+                            });
 
-                        ui_item(&mut ctx, ui, item, state);
+                            ui_item(&mut ctx, ui, item, state);
+                        });
                     });
                 },
             );
