@@ -8,6 +8,8 @@ pub mod providers;
 pub mod splice;
 pub mod state;
 
+use std::io::{Cursor, Read};
+use std::str::FromStr;
 use std::{
     collections::HashSet,
     path::{Path, PathBuf},
@@ -16,7 +18,7 @@ use std::{
 use anyhow::{bail, Context, Result};
 
 use error::IntegrationError;
-use providers::{ModSpecification, ProviderFactory};
+use providers::{ModResolution, ModSpecification, ProviderFactory, ReadSeek};
 use state::State;
 use tracing::{info, warn};
 
@@ -144,9 +146,8 @@ pub fn is_drg_pak<P: AsRef<Path>>(path: P) -> Result<()> {
     Ok(())
 }
 
-#[tracing::instrument(level = "debug", skip(path_game, state))]
-pub async fn resolve_and_integrate<P: AsRef<Path>>(
-    path_game: P,
+pub async fn resolve_unordered_and_integrate<P: AsRef<Path>>(
+    game_path: P,
     state: &State,
     mod_specs: &[ModSpecification],
     update: bool,
@@ -187,12 +188,57 @@ pub async fn resolve_and_integrate<P: AsRef<Path>>(
     info!("fetching mods...");
     let paths = state.store.fetch_mods(&urls, update, None).await?;
 
-    integrate::integrate(path_game, to_integrate.into_iter().zip(paths).collect())
+    integrate::integrate(game_path, to_integrate.into_iter().zip(paths).collect())
 }
 
-#[tracing::instrument(level = "debug", skip(path_game, state, init))]
-pub async fn resolve_and_integrate_with_provider_init<P, F>(
-    path_game: P,
+async fn resolve_into_urls<'b>(
+    state: &State,
+    mod_specs: &[ModSpecification],
+) -> Result<Vec<ModResolution>> {
+    let mods = state.store.resolve_mods(mod_specs, false).await?;
+
+    let mods_set = mod_specs
+        .iter()
+        .flat_map(|m| [&mods[m].spec.url, &mods[m].resolution.url])
+        .collect::<HashSet<_>>();
+
+    // TODO need more rebust way of detecting whether dependencies are missing
+    let missing_deps = mod_specs
+        .iter()
+        .flat_map(|m| {
+            mods[m]
+                .suggested_dependencies
+                .iter()
+                .filter_map(|m| (!mods_set.contains(&m.url)).then_some(&m.url))
+        })
+        .collect::<HashSet<_>>();
+    if !missing_deps.is_empty() {
+        warn!("the following dependencies are missing:");
+        for d in missing_deps {
+            warn!("  {d}");
+        }
+    }
+
+    let urls = mod_specs
+        .iter()
+        .map(|u| mods[u].clone())
+        .map(|m| m.resolution)
+        .collect::<Vec<_>>();
+
+    Ok(urls)
+}
+
+pub async fn resolve_ordered(
+    state: &State,
+    mod_specs: &[ModSpecification],
+) -> Result<Vec<PathBuf>> {
+    let urls = resolve_into_urls(state, mod_specs).await?;
+    let urls = urls.iter().collect::<Vec<_>>();
+    state.store.fetch_mods(&urls, false, None).await
+}
+
+pub async fn resolve_unordered_and_integrate_with_provider_init<P, F>(
+    game_path: P,
     state: &mut State,
     mod_specs: &[ModSpecification],
     update: bool,
@@ -203,12 +249,126 @@ where
     F: Fn(&mut State, String, &ProviderFactory) -> Result<()>,
 {
     loop {
-        match resolve_and_integrate(&path_game, state, mod_specs, update).await {
+        match resolve_unordered_and_integrate(&game_path, state, mod_specs, update).await {
             Ok(()) => return Ok(()),
             Err(e) => match e.downcast::<IntegrationError>() {
                 Ok(IntegrationError::NoProvider { url, factory }) => init(state, url, factory)?,
                 Err(e) => return Err(e),
             },
         }
+    }
+}
+
+#[allow(clippy::needless_pass_by_ref_mut)]
+pub async fn resolve_ordered_with_provider_init<F>(
+    state: &mut State,
+    mod_specs: &[ModSpecification],
+    init: F,
+) -> Result<Vec<PathBuf>>
+where
+    F: Fn(&mut State, String, &ProviderFactory) -> Result<()>,
+{
+    loop {
+        match resolve_ordered(state, mod_specs).await {
+            Ok(mod_paths) => return Ok(mod_paths),
+            Err(e) => match e.downcast::<IntegrationError>() {
+                Ok(IntegrationError::NoProvider { url, factory }) => init(state, url, factory)?,
+                Err(e) => return Err(e),
+            },
+        }
+    }
+}
+
+pub(crate) fn get_pak_from_data(mut data: Box<dyn ReadSeek>) -> Result<Box<dyn ReadSeek>> {
+    if let Ok(mut archive) = zip::ZipArchive::new(&mut data) {
+        (0..archive.len())
+            .map(|i| -> Result<Option<Box<dyn ReadSeek>>> {
+                let mut file = archive.by_index(i)?;
+                match file.enclosed_name() {
+                    Some(p) => {
+                        if file.is_file() && p.extension().filter(|e| e == &"pak").is_some() {
+                            let mut buf = vec![];
+                            file.read_to_end(&mut buf)?;
+                            Ok(Some(Box::new(Cursor::new(buf))))
+                        } else {
+                            Ok(None)
+                        }
+                    }
+                    None => Ok(None),
+                }
+            })
+            .find_map(Result::transpose)
+            .context("Zip does not contain pak")?
+    } else {
+        data.rewind()?;
+        Ok(data)
+    }
+}
+
+pub(crate) enum PakOrNotPak {
+    Pak(Box<dyn ReadSeek>),
+    NotPak(Box<dyn ReadSeek>),
+}
+
+pub(crate) enum GetAllFilesFromDataError {
+    EmptyArchive,
+    OnlyNonPakFiles,
+    Other(anyhow::Error),
+}
+
+pub(crate) fn lint_get_all_files_from_data(
+    mut data: Box<dyn ReadSeek>,
+) -> Result<Vec<(PathBuf, PakOrNotPak)>, GetAllFilesFromDataError> {
+    if let Ok(mut archive) = zip::ZipArchive::new(&mut data) {
+        if archive.is_empty() {
+            return Err(GetAllFilesFromDataError::EmptyArchive);
+        }
+
+        let mut files = Vec::new();
+        for i in 0..archive.len() {
+            let mut file = archive
+                .by_index(i)
+                .map_err(|e| GetAllFilesFromDataError::Other(e.into()))?;
+
+            if let Some(p) = file.enclosed_name().map(Path::to_path_buf) {
+                if file.is_file() {
+                    if p.extension().filter(|e| e == &"pak").is_some() {
+                        let mut buf = vec![];
+                        file.read_to_end(&mut buf)
+                            .map_err(|e| GetAllFilesFromDataError::Other(e.into()))?;
+                        files.push((
+                            p.to_path_buf(),
+                            PakOrNotPak::Pak(Box::new(Cursor::new(buf))),
+                        ));
+                    } else {
+                        let mut buf = vec![];
+                        file.read_to_end(&mut buf)
+                            .map_err(|e| GetAllFilesFromDataError::Other(e.into()))?;
+                        files.push((
+                            p.to_path_buf(),
+                            PakOrNotPak::NotPak(Box::new(Cursor::new(buf))),
+                        ));
+                    }
+                }
+            }
+        }
+
+        if files
+            .iter()
+            .filter(|(_, pak_or_not_pak)| matches!(pak_or_not_pak, PakOrNotPak::Pak(..)))
+            .count()
+            >= 1
+        {
+            Ok(files)
+        } else {
+            Err(GetAllFilesFromDataError::OnlyNonPakFiles)
+        }
+    } else {
+        data.rewind()
+            .map_err(|e| GetAllFilesFromDataError::Other(e.into()))?;
+        Ok(vec![(
+            PathBuf::from_str(".").unwrap(),
+            PakOrNotPak::Pak(data),
+        )])
     }
 }

@@ -5,19 +5,16 @@ use std::path::PathBuf;
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use directories::ProjectDirs;
-use drg_mod_integration::resolve_with_provider_init;
 use tracing::{debug, info};
-
-use drg_mod_integration::{
-    gui::gui,
-    mod_lint::lint,
-    providers::{ModSpecification, ProviderFactory},
-    resolve_and_integrate_with_provider_init,
-    state::State,
-    DRGInstallation,
-};
 use tracing_appender::non_blocking::WorkerGuard;
 use tracing_subscriber::filter;
+
+use drg_mod_integration::mod_lint::lint;
+use drg_mod_integration::providers::ProviderFactory;
+use drg_mod_integration::{gui::gui, providers::ModSpecification, state::State, DRGInstallation};
+use drg_mod_integration::{
+    resolve_ordered_with_provider_init, resolve_unordered_and_integrate_with_provider_init,
+};
 
 /// Command line integration tool.
 #[derive(Parser, Debug)]
@@ -248,7 +245,7 @@ async fn action_integrate(action: ActionIntegrate) -> Result<()> {
         .map(ModSpecification::new)
         .collect::<Vec<_>>();
 
-    resolve_and_integrate_with_provider_init(
+    resolve_unordered_and_integrate_with_provider_init(
         path_game_pak,
         &mut state,
         &mod_specs,
@@ -276,7 +273,7 @@ async fn action_integrate_profile(action: ActionIntegrateProfile) -> Result<()> 
         mods.push(mc.spec.clone());
     });
 
-    resolve_and_integrate_with_provider_init(
+    resolve_unordered_and_integrate_with_provider_init(
         path_game_pak,
         &mut state,
         &mods,
@@ -294,14 +291,11 @@ async fn action_lint(action: ActionLint) -> Result<()> {
         mods.push(mc.spec.clone());
     });
 
-    let mod_paths = resolve_with_provider_init(&mut state, &mods, init_provider).await?;
+    let mod_paths = resolve_ordered_with_provider_init(&mut state, &mods, init_provider).await?;
 
-    let mods = mods
-        .into_iter()
-        .zip(mod_paths.into_iter())
-        .collect::<Vec<_>>();
+    let mods = mods.into_iter().zip(mod_paths).collect::<Vec<_>>();
 
-    let report = tokio::task::spawn_blocking(move || lint(&state, &mods)).await??;
+    let report = tokio::task::spawn_blocking(move || lint(&mods)).await??;
     println!("{:#?}", report);
     Ok(())
 }
