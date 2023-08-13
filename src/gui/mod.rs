@@ -568,13 +568,37 @@ impl App {
             }
         };
 
-        egui::ScrollArea::vertical().show(ui, |ui| {
-            if let Some(profile) = profiles.get_mut(profile) {
-                ui_profile(ui, profile);
-            } else {
-                ui.label("no such profile");
-            }
-        });
+        egui::Frame::none()
+            .show(ui, |ui| {
+                egui::ScrollArea::vertical().show(ui, |ui| {
+                    if let Some(profile) = profiles.get_mut(profile) {
+                        ui_profile(ui, profile);
+                    } else {
+                        ui.label("no such profile");
+                    }
+                });
+                ui.allocate_space(ui.available_size());
+            })
+            .response
+            .context_menu(|ui| {
+                if let Some(profile) = profiles.get_mut(profile) {
+                    ui.menu_button("add group", |ui| {
+                        for group in groups.keys() {
+                            if ui.button(group).clicked() {
+                                profile.mods.push(ModOrGroup::Group {
+                                    group_name: group.clone(),
+                                    enabled: true,
+                                });
+                                ctx.needs_save = true;
+                                ui.close_menu();
+                            }
+                        }
+                    });
+                }
+                if ui.button("close").clicked() {
+                    ui.close_menu();
+                }
+            });
 
         if let Some(add_deps) = ctx.add_deps {
             message::ResolveMods::send(self, ui.ctx(), add_deps, true);
