@@ -23,13 +23,14 @@ use tokio::{
 };
 use tracing::{debug, info};
 
-use crate::state::{ModOrGroup, ModProfile};
 use crate::{
     integrate::uninstall,
     is_drg_pak,
-    providers::ModioTags,
-    providers::{FetchProgress, ModSpecification, ModStore, ProviderFactory},
-    state::{ModConfig, ModData_v0_1_0 as ModData, State},
+    providers::{
+        ApprovalStatus, FetchProgress, ModInfo, ModSpecification, ModStore, ModioTags,
+        ProviderFactory, RequiredStatus,
+    },
+    state::{ModConfig, ModData_v0_1_0 as ModData, ModOrGroup, ModProfile, State},
 };
 use find_string::FindString;
 use message::MessageHandle;
@@ -117,11 +118,13 @@ impl App {
 
         struct Ctx {
             needs_save: bool,
+            scroll_to_match: bool,
             btn_remove: Option<usize>,
             add_deps: Option<Vec<ModSpecification>>,
         }
         let mut ctx = Ctx {
             needs_save: false,
+            scroll_to_match: self.scroll_to_match,
             btn_remove: None,
             add_deps: None,
         };
@@ -153,6 +156,143 @@ impl App {
                     }
                 })
                 .collect::<Vec<_>>();
+
+            let ui_mod_tags = |ctx: &mut Ctx, ui: &mut Ui, info: &ModInfo| {
+                if let Some(ModioTags {
+                    qol,
+                    gameplay,
+                    audio,
+                    visual,
+                    framework,
+                    required_status,
+                    approval_status,
+                    versions: _,
+                }) = info.modio_tags.as_ref()
+                {
+                    let mut mk_searchable_modio_tag =
+                        |tag_str: &str,
+                         ui: &mut Ui,
+                         color: Option<egui::Color32>,
+                         hover_str: Option<&str>| {
+                            let text_color = if color.is_some() {
+                                Color32::BLACK
+                            } else {
+                                Color32::GRAY
+                            };
+                            let mut job = LayoutJob::default();
+                            let mut is_match = false;
+                            if let Some(search_string) = &self.search_string {
+                                for (m, chunk) in
+                                    find_string::FindString::new(tag_str, search_string)
+                                {
+                                    let background = if m {
+                                        is_match = true;
+                                        TextFormat {
+                                            background: Color32::YELLOW,
+                                            color: text_color,
+                                            ..Default::default()
+                                        }
+                                    } else {
+                                        TextFormat {
+                                            color: text_color,
+                                            ..Default::default()
+                                        }
+                                    };
+                                    job.append(chunk, 0.0, background);
+                                }
+                            } else {
+                                job.append(
+                                    tag_str,
+                                    0.0,
+                                    TextFormat {
+                                        color: text_color,
+                                        ..Default::default()
+                                    },
+                                );
+                            }
+
+                            let button = if let Some(color) = color {
+                                egui::Button::new(job)
+                                    .small()
+                                    .fill(color)
+                                    .stroke(egui::Stroke::NONE)
+                            } else {
+                                egui::Button::new(job).small().stroke(egui::Stroke::NONE)
+                            };
+
+                            let res = if let Some(hover_str) = hover_str {
+                                ui.add_enabled(false, button)
+                                    .on_disabled_hover_text(hover_str)
+                            } else {
+                                ui.add_enabled(false, button)
+                            };
+
+                            if is_match && self.scroll_to_match {
+                                res.scroll_to_me(None);
+                                ctx.scroll_to_match = false;
+                            }
+                        };
+
+                    match approval_status {
+                        ApprovalStatus::Verified => {
+                            mk_searchable_modio_tag(
+                                "Verified",
+                                ui,
+                                Some(egui::Color32::LIGHT_GREEN),
+                                Some("Does not contain any gameplay affecting features or changes"),
+                            );
+                        }
+                        ApprovalStatus::Approved => {
+                            mk_searchable_modio_tag(
+                                "Approved",
+                                ui,
+                                Some(egui::Color32::LIGHT_BLUE),
+                                Some("Contains gameplay affecting features or changes"),
+                            );
+                        }
+                        ApprovalStatus::Sandbox => {
+                            mk_searchable_modio_tag("Sandbox", ui, Some(egui::Color32::LIGHT_YELLOW), Some("Contains significant, possibly progression breaking, changes to gameplay"));
+                        }
+                    }
+
+                    match required_status {
+                        RequiredStatus::RequiredByAll => {
+                            mk_searchable_modio_tag(
+                                "RequiredByAll",
+                                ui,
+                                Some(egui::Color32::LIGHT_RED),
+                                Some(
+                                    "All lobby members must use this mod for it to work correctly!",
+                                ),
+                            );
+                        }
+                        RequiredStatus::Optional => {
+                            mk_searchable_modio_tag(
+                                "Optional",
+                                ui,
+                                None,
+                                Some("Clients are not required to install this mod to function"),
+                            );
+                        }
+                    }
+
+                    if *qol {
+                        mk_searchable_modio_tag("QoL", ui, None, None);
+                    }
+                    if *gameplay {
+                        mk_searchable_modio_tag("Gameplay", ui, None, None);
+                    }
+                    if *audio {
+                        mk_searchable_modio_tag("Audio", ui, None, None);
+                    }
+                    if *visual {
+                        mk_searchable_modio_tag("Visual", ui, None, None);
+                    }
+                    if *framework {
+                        mk_searchable_modio_tag("Framework", ui, None, None);
+                    }
+                }
+            };
 
             let mut ui_mod = |ctx: &mut Ctx,
                               ui: &mut Ui,
@@ -331,105 +471,12 @@ impl App {
                     let res = ui.hyperlink_to(job, &mc.spec.url);
                     if is_match && self.scroll_to_match {
                         res.scroll_to_me(None);
-                        self.scroll_to_match = false;
+                        ctx.scroll_to_match = false;
                     }
 
-                    if let Some(ModioTags {
-                            qol,
-                            gameplay,
-                            audio,
-                            visual,
-                            framework,
-                            required_status,
-                            approval_status,
-                            .. // version ignored
-                        }) = info.modio_tags.as_ref()
-                        {
-                            let mut mk_searchable_modio_tag = |tag_str: &str, ui: &mut Ui, color: Option<egui::Color32>, hover_str: Option<&str>| {
-                                let text_color = if color.is_some() { Color32::BLACK } else { Color32::GRAY };
-                                let mut job = LayoutJob::default();
-                                let mut is_match = false;
-                                if let Some(search_string) = &self.search_string {
-                                    for (m, chunk) in find_string::FindString::new(tag_str, search_string) {
-                                        let background = if m {
-                                            is_match = true;
-                                            TextFormat {
-                                                background: Color32::YELLOW,
-                                                color: text_color,
-                                                ..Default::default()
-                                            }
-                                        } else {
-                                            TextFormat {
-                                                color: text_color,
-                                                ..Default::default()
-                                            }
-                                        };
-                                        job.append(chunk, 0.0, background);
-                                    }
-                                } else {
-                                    job.append(tag_str, 0.0, TextFormat {
-                                        color: text_color,
-                                        ..Default::default()
-                                    });
-                                }
-
-                                let button = if let Some(color) = color {
-                                    egui::Button::new(job).small().fill(color).stroke(egui::Stroke::NONE)
-                                } else {
-                                    egui::Button::new(job).small().stroke(egui::Stroke::NONE)
-                                };
-
-                                let res = if let Some(hover_str) = hover_str {
-                                    ui.add_enabled(false, button).on_disabled_hover_text(hover_str)
-                                } else {
-                                    ui.add_enabled(false, button)
-                                };
-
-                                if is_match && self.scroll_to_match {
-                                    res.scroll_to_me(None);
-                                    self.scroll_to_match = false;
-                                }
-                            };
-
-                            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                                match approval_status {
-                                    crate::providers::ApprovalStatus::Verified => {
-                                        mk_searchable_modio_tag("Verified", ui, Some(egui::Color32::LIGHT_GREEN), Some("Does not contain any gameplay affecting features or changes"));
-                                    }
-                                    crate::providers::ApprovalStatus::Approved => {
-                                        mk_searchable_modio_tag("Approved", ui, Some(egui::Color32::LIGHT_BLUE), Some("Contains gameplay affecting features or changes"));
-                                    }
-                                    crate::providers::ApprovalStatus::Sandbox => {
-                                        mk_searchable_modio_tag("Sandbox", ui, Some(egui::Color32::LIGHT_YELLOW), Some("Contains significant, possibly progression breaking, changes to gameplay"));
-                                    }
-                                }
-
-                                match required_status {
-                                    crate::providers::RequiredStatus::RequiredByAll => {
-                                        mk_searchable_modio_tag("RequiredByAll", ui, Some(egui::Color32::LIGHT_RED), Some("All lobby members must use this mod for it to work correctly!"));
-                                    }
-                                    crate::providers::RequiredStatus::Optional => {
-                                        mk_searchable_modio_tag("Optional", ui, None, Some("Clients are not required to install this mod to function"));
-                                    }
-                                }
-
-                                if *qol {
-                                    mk_searchable_modio_tag("QoL", ui, None, None);
-                                }
-                                if *gameplay {
-                                    mk_searchable_modio_tag("Gameplay", ui, None, None);
-                                }
-                                if *audio {
-                                    mk_searchable_modio_tag("Audio", ui, None, None);
-                                }
-                                if *visual {
-                                    mk_searchable_modio_tag("Visual", ui, None, None);
-                                }
-                                if *framework {
-                                    mk_searchable_modio_tag("Framework", ui, None, None);
-                                }
-                            });
-                        }
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        ui_mod_tags(ctx, ui, info);
+                    });
                 } else {
                     if ui
                         .button("📋")
@@ -532,6 +579,8 @@ impl App {
         if let Some(add_deps) = ctx.add_deps {
             message::ResolveMods::send(self, ui.ctx(), add_deps, true);
         }
+
+        self.scroll_to_match = ctx.scroll_to_match;
 
         if ctx.needs_save {
             self.state.mod_data.save().unwrap();
