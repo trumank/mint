@@ -253,7 +253,7 @@ async fn action_integrate_profile(action: ActionIntegrateProfile) -> Result<()> 
     let mut state = State::init()?;
 
     let mut mods = Vec::new();
-    state.mod_data.for_each_mod(&action.profile, |mc| {
+    state.mod_data.for_each_enabled_mod(&action.profile, |mc| {
         mods.push(mc.spec.clone());
     });
 
