@@ -5,20 +5,18 @@ edition = "2021"
 repository = "https://github.com/trumank/drg-mod-integration"
 
 [dependencies]
-anyhow = { version = "1.0.71", features = ["backtrace"] }
-async-trait = "0.1.68"
-clap = { version = "4.3.0", features = ["derive"] }
+anyhow = { version = "1.0.72", features = ["backtrace"] }
+async-trait = "0.1.73"
+clap = { version = "4.3.21", features = ["derive"] }
 dialoguer = "0.10.4"
 directories = "5.0.1"
 eframe = "0.22.0"
-egui-dropdown = { git = "https://github.com/ItsEthra/egui-dropdown" }
 egui_dnd = { git = "https://github.com/lucasmerlin/egui_dnd.git" }
-egui_extras = "0.22.0"
 futures = "0.3.28"
 hex = "0.4.3"
-image = { version = "0.24.6", default-features = false, features = ["png"] }
+image = { version = "0.24.7", default-features = false, features = ["png"] }
 indexmap = { version = "2.0.0", features = ["serde"] }
-inventory = "0.3.6"
+inventory = "0.3.11"
 lazy_static = "1.4.0"
 modio = { version = "0.7.1", features = ["rustls-tls"] }
 obake = { version = "1.0.5", features = ["serde"] }
@@ -26,24 +24,23 @@ opener = "0.6.1"
 regex = "1.9.3"
 repak = { git = "https://github.com/trumank/repak.git", version = "0.1.3" }
 reqwest = { version = "0.11.18", features = ["blocking"] }
-reqwest-middleware = "0.2.2"
+reqwest-middleware = "0.2.3"
 rfd = "0.11.4"
 rust-ini = "0.19.0"
 semver = "1.0.18"
-serde = { version = "1.0.163", features = ["derive"] }
-serde_json = "1.0.96"
-sha2 = "0.10.6"
+serde = { version = "1.0.183", features = ["derive"] }
+serde_json = "1.0.104"
+sha2 = "0.10.7"
 steamlocate = "2.0.0-alpha.0"
 task-local-extensions = "0.1.4"
-thiserror = "1.0.40"
-tokio = { version = "1.28.2", features = ["full"] }
+thiserror = "1.0.44"
+tokio = { version = "1.31.0", features = ["full"] }
 tracing = { version = "0.1.37", features = ["attributes"] }
 tracing-appender = "0.2.2"
 tracing-subscriber = { version = "0.3.17", features = ["fmt", "env-filter", "std", "registry"] }
-typetag = "0.2.8"
-uesave = { git = "https://github.com/trumank/uesave-rs.git", version = "0.2.0" }
+typetag = "0.2.12"
 unreal_asset = { git = "https://github.com/AstroTechies/unrealmodding.git", version = "0.1.12" }
-url = "2.3.1"
+url = "2.4.0"
 zip = { version = "0.6.6", default-features = false, features = ["aes-crypto", "deflate", "time"] }
 
 [patch.crates-io]
