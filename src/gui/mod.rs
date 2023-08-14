@@ -851,8 +851,9 @@ impl App {
                                             .show(
                                                 ui,
                                                 |ui| {
-                                                    mods.iter().for_each(|m| {
-                                                        ui.label(&m.url);
+                                                    mods.iter().for_each(|(mod_spec, hash)| {
+                                                        ui.label(RichText::new(format!("Mod {} modifies the asset with hash: ", mod_spec.url)));
+                                                        ui.label(RichText::new(hex::encode(hash)).code());
                                                     });
                                                 },
                                             );

@@ -15,9 +15,16 @@ pub fn test_lint_conflicting_files() {
     let a_spec = ModSpecification {
         url: "A".to_string(),
     };
+    // a\n
+    let a_hash =
+        hex::decode("87428fc522803d31065e7bce3cf03fe475096631e5e07bbd7a0fde60c4cf25c7").unwrap();
+
     let b_spec = ModSpecification {
         url: "B".to_string(),
     };
+    // b\n
+    let b_hash =
+        hex::decode("0263829989b6fd954f72baaf2fc64bc2e2f01d692d4de72986ea808f6e99813f").unwrap();
     let mods = vec![(a_spec.clone(), a_path), (b_spec.clone(), b_path)];
 
     let ModLintReport {
@@ -28,7 +35,7 @@ pub fn test_lint_conflicting_files() {
 
     assert_eq!(
         conflicting_mods.get("fsd/content/a.uexp"),
-        Some(&[a_spec, b_spec].into())
+        Some(&[(a_spec, a_hash), (b_spec, b_hash)].into())
     );
 }
 
