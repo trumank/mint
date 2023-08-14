@@ -83,31 +83,32 @@ unsafe fn patch() {
     );
 
     let pattern = [0x4C, 0x8B, 0xB4, 0x24, 0x48, 0x01, 0x00, 0x00, 0x0F, 0x84];
-    let Some(sig_rva) = scan(memory, &pattern).next() else {
-        return;
-    };
+    let mut scan_iter = scan(memory, &pattern);
+    if let Some(sig_rva) = scan_iter.next() {
+        drop(scan_iter);
 
-    let patch = [0xB8, 0x01, 0x00, 0x00, 0x00];
+        let patch = [0xB8, 0x01, 0x00, 0x00, 0x00];
 
-    let rva = sig_rva + 29;
-    let patch_mem = &mut memory[rva..rva + 5];
+        let rva = sig_rva + 29;
+        let patch_mem = &mut memory[rva..rva + 5];
 
-    let mut old: PAGE_PROTECTION_FLAGS = Default::default();
-    VirtualProtect(
-        patch_mem.as_ptr() as *const c_void,
-        patch_mem.len(),
-        PAGE_EXECUTE_READWRITE,
-        &mut old as *mut _,
-    );
+        let mut old: PAGE_PROTECTION_FLAGS = Default::default();
+        VirtualProtect(
+            patch_mem.as_ptr() as *const c_void,
+            patch_mem.len(),
+            PAGE_EXECUTE_READWRITE,
+            &mut old as *mut _,
+        );
 
-    patch_mem.copy_from_slice(&patch);
+        patch_mem.copy_from_slice(&patch);
 
-    VirtualProtect(
-        patch_mem.as_ptr() as *const c_void,
-        patch_mem.len(),
-        old,
-        &mut old as *mut _,
-    );
+        VirtualProtect(
+            patch_mem.as_ptr() as *const c_void,
+            patch_mem.len(),
+            old,
+            &mut old as *mut _,
+        );
+    }
 
     let pattern = [
         0x48, 0x89, 0x5C, 0x24, 0x10, 0x48, 0x89, 0x6C, 0x24, 0x18, 0x48, 0x89, 0x74, 0x24, 0x20,
