@@ -8,7 +8,7 @@ use tracing::{info, span, trace, Level};
 use crate::providers::ModSpecification;
 use crate::{lint_get_all_files_from_data, open_file, GetAllFilesFromDataError, PakOrNotPak};
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ModLintReport {
     pub conflicting_mods: BTreeMap<String, BTreeSet<ModSpecification>>,
     pub asset_register_bin_mods: BTreeMap<ModSpecification, BTreeSet<String>>,

@@ -12,6 +12,7 @@ use std::{
 };
 
 use anyhow::{anyhow, Context, Result};
+use eframe::egui::{CollapsingHeader, RichText};
 use eframe::{
     egui::{self, FontSelection, Layout, TextFormat, Ui},
     emath::{Align, Align2},
@@ -23,6 +24,7 @@ use tokio::{
 };
 use tracing::{debug, info};
 
+use crate::mod_lint::ModLintReport;
 use crate::{
     integrate::uninstall,
     is_drg_pak,
@@ -73,6 +75,9 @@ pub struct App {
     last_action_status: LastActionStatus,
     available_update: Option<GitHubRelease>,
     open_profiles: HashSet<String>,
+    lint_rid: Option<MessageHandle<()>>,
+    lint_window: Option<WindowLint>,
+    mod_lint_report: Option<ModLintReport>,
 }
 
 enum LastActionStatus {
@@ -108,6 +113,9 @@ impl App {
             last_action_status: LastActionStatus::Idle,
             available_update: None,
             open_profiles: Default::default(),
+            lint_rid: None,
+            lint_window: None,
+            mod_lint_report: None,
         })
     }
 
@@ -809,6 +817,198 @@ impl App {
             }
         }
     }
+
+    fn show_lint_report(&mut self, ctx: &egui::Context) {
+        if self.lint_window.is_some() {
+            let mut open = true;
+            egui::Window::new("Lint Results")
+                .open(&mut open)
+                .resizable(true)
+                .show(ctx, |ui| {
+                    if let Some(report) = &self.mod_lint_report {
+                        let scroll_height =
+                            (ui.available_height() - 30.0).clamp(0.0, f32::INFINITY);
+                        egui::ScrollArea::vertical()
+                            .max_height(scroll_height)
+                            .show(ui, |ui| {
+                                const AMBER: Color32 = Color32::from_rgb(255, 191, 0);
+
+                                if !report.conflicting_mods.is_empty() {
+                                    CollapsingHeader::new(
+                                        RichText::new("⚠ Mods(s) with conflicting asset modifications detected")
+                                            .color(AMBER),
+                                    )
+                                    .default_open(true)
+                                    .show(ui, |ui| {
+                                        report.conflicting_mods.iter().for_each(|(path, mods)| {
+                                            CollapsingHeader::new(
+                                                RichText::new(format!(
+                                                    "⚠ Conflicting modification of asset `{}`",
+                                                    path
+                                                ))
+                                                .color(AMBER),
+                                            )
+                                            .show(
+                                                ui,
+                                                |ui| {
+                                                    mods.iter().for_each(|m| {
+                                                        ui.label(&m.url);
+                                                    });
+                                                },
+                                            );
+                                        });
+                                    });
+                                }
+
+                                if !report.asset_register_bin_mods.is_empty() {
+                                    CollapsingHeader::new(
+                                        RichText::new("ℹ Mod(s) with `AssetRegistry.bin` included detected")
+                                            .color(Color32::LIGHT_BLUE),
+                                    )
+                                    .default_open(true)
+                                    .show(ui, |ui| {
+                                        report.asset_register_bin_mods.iter().for_each(
+                                            |(r#mod, paths)| {
+                                                CollapsingHeader::new(
+                                                    RichText::new(format!(
+                                                    "ℹ {} includes one or more `AssetRegistry.bin`",
+                                                    r#mod.url
+                                                ))
+                                                    .color(Color32::LIGHT_BLUE),
+                                                )
+                                                .show(ui, |ui| {
+                                                    paths.iter().for_each(|path| {
+                                                        ui.label(path);
+                                                    });
+                                                });
+                                            },
+                                        );
+                                    });
+                                }
+
+                                if !report.shader_file_mods.is_empty() {
+                                    CollapsingHeader::new(
+                                        RichText::new(
+                                            "⚠ Mods(s) with shader files included detected",
+                                        )
+                                        .color(AMBER),
+                                    )
+                                    .default_open(true)
+                                    .show(ui, |ui| {
+                                        report.shader_file_mods.iter().for_each(
+                                            |(r#mod, shader_files)| {
+                                                CollapsingHeader::new(
+                                                    RichText::new(format!(
+                                                        "⚠ {} includes one or more shader files",
+                                                        r#mod.url
+                                                    ))
+                                                    .color(AMBER),
+                                                )
+                                                .show(ui, |ui| {
+                                                    shader_files.iter().for_each(|shader_file| {
+                                                        ui.label(shader_file);
+                                                    });
+                                                });
+                                            },
+                                        );
+                                    });
+                                }
+
+                                if !report.outdated_pak_version_mods.is_empty() {
+                                    CollapsingHeader::new(
+                                        RichText::new(
+                                            "⚠ Mod(s) with outdated pak version detected",
+                                        )
+                                        .color(AMBER),
+                                    )
+                                    .default_open(true)
+                                    .show(ui, |ui| {
+                                        report.outdated_pak_version_mods.iter().for_each(
+                                            |(r#mod, version)| {
+                                                ui.label(
+                                                    RichText::new(format!(
+                                                        "⚠ {} includes outdated pak version {}",
+                                                        r#mod.url, version
+                                                    ))
+                                                    .color(AMBER),
+                                                );
+                                            },
+                                        );
+                                    });
+                                }
+
+                                if !report.empty_archive_mods.is_empty() {
+                                    CollapsingHeader::new(
+                                        RichText::new(
+                                            "⚠ Mod(s) with empty archives detected",
+                                        )
+                                        .color(AMBER),
+                                    )
+                                    .default_open(true)
+                                    .show(ui, |ui| {
+                                        report.empty_archive_mods.iter().for_each(|r#mod| {
+                                            ui.label(
+                                                RichText::new(format!(
+                                                    "⚠ {} contains an empty archive",
+                                                    r#mod.url
+                                                ))
+                                                .color(AMBER),
+                                            );
+                                        });
+                                    });
+                                }
+
+                                if !report.archive_with_only_non_pak_files_mods.is_empty() {
+                                    CollapsingHeader::new(
+                                        RichText::new(
+                                            "⚠ Mod(s) with only non-`.pak` files detected",
+                                        )
+                                        .color(AMBER),
+                                    )
+                                    .default_open(true)
+                                    .show(ui, |ui| {
+                                        report.archive_with_only_non_pak_files_mods.iter().for_each(|r#mod| {
+                                            ui.label(
+                                                RichText::new(format!(
+                                                    "⚠ {} contains only non-`.pak` files, perhaps the author forgot to pack it?",
+                                                    r#mod.url
+                                                ))
+                                                .color(AMBER),
+                                            );
+                                        });
+                                    });
+                                }
+
+                                if !report.archive_with_multiple_paks_mods.is_empty() {
+                                    CollapsingHeader::new(
+                                        RichText::new(
+                                            "⚠ Mod(s) with multiple `.pak`s detected",
+                                        )
+                                        .color(AMBER),
+                                    )
+                                    .default_open(true)
+                                    .show(ui, |ui| {
+                                        report.archive_with_multiple_paks_mods.iter().for_each(|r#mod| {
+                                            ui.label(RichText::new(format!(
+                                                "⚠ {} contains multiple `.pak`s, only the first encountered `.pak` will be loaded",
+                                                r#mod.url
+                                            ))
+                                            .color(AMBER));
+                                        });
+                                    });
+                                }
+                            });
+                    } else {
+                        ui.spinner();
+                        ui.label("Lint report generating...");
+                    }
+                });
+            if !open {
+                self.lint_window = None;
+                self.lint_rid = None;
+            }
+        }
+    }
 }
 
 struct WindowProviderParameters {
@@ -859,6 +1059,14 @@ impl WindowSettings {
     }
 }
 
+struct WindowLint;
+
+impl WindowLint {
+    fn new() -> Self {
+        Self {}
+    }
+}
+
 impl eframe::App for App {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         if !self.checked_updates_initially {
@@ -876,12 +1084,14 @@ impl eframe::App for App {
         self.show_provider_parameters(ctx);
         self.show_profile_windows(ctx);
         self.show_settings(ctx);
+        self.show_lint_report(ctx);
 
         egui::TopBottomPanel::bottom("bottom_panel").show(ctx, |ui| {
             ui.with_layout(egui::Layout::right_to_left(Align::TOP), |ui| {
                 ui.add_enabled_ui(
                     self.integrate_rid.is_none()
                         && self.update_rid.is_none()
+                        && self.lint_rid.is_none()
                         && self.state.config.drg_pak_path.is_some(),
                     |ui| {
                         if let Some(args) = &self.args {
@@ -990,6 +1200,22 @@ impl eframe::App for App {
                     }
                     ui.spinner();
                 }
+                if ui.button("Mod lint").on_hover_text("Lint mods in the current profile").clicked() {
+                    let mut mods = Vec::new();
+                    let active_profile = self.state.mod_data.active_profile.clone();
+                    self.state.mod_data.for_each_enabled_mod(&active_profile, |mc| {
+                        mods.push(mc.spec.clone());
+                    });
+
+                    self.lint_rid = Some(message::LintMods::send(
+                        &mut self.request_counter,
+                        self.state.store.clone(),
+                        mods,
+                        self.tx.clone(),
+                        ctx.clone(),
+                    ));
+                    self.lint_window = Some(WindowLint::new());
+                }
                 if ui.button("⚙").on_hover_text("Open settings").clicked() {
                     self.settings_window = Some(WindowSettings::new(&self.state));
                 }
@@ -1029,7 +1255,11 @@ impl eframe::App for App {
             });
         });
         egui::CentralPanel::default().show(ctx, |ui| {
-            ui.set_enabled(self.integrate_rid.is_none() && self.update_rid.is_none());
+            ui.set_enabled(
+                self.integrate_rid.is_none()
+                    && self.update_rid.is_none()
+                    && self.lint_rid.is_none(),
+            );
             // profile selection
 
             let buttons = |ui: &mut Ui, mod_data: &mut ModData| {
@@ -1156,6 +1386,7 @@ impl eframe::App for App {
                         egui::Event::Paste(s) => {
                             if self.integrate_rid.is_none()
                                 && self.update_rid.is_none()
+                                && self.lint_rid.is_none()
                                 && ctx.memory(|m| m.focus().is_none())
                             {
                                 self.resolve_mod = s.trim().to_string();
