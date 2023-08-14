@@ -23,7 +23,7 @@ lazy_static = "1.4.0"
 modio = { version = "0.7.1", features = ["rustls-tls"] }
 obake = { version = "1.0.5", features = ["serde"] }
 opener = "0.6.1"
-regex = "1.8.3"
+regex = "1.9.3"
 repak = { git = "https://github.com/trumank/repak.git", version = "0.1.3" }
 reqwest = { version = "0.11.18", features = ["blocking"] }
 reqwest-middleware = "0.2.2"

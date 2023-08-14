@@ -1,6 +1,6 @@
 use anyhow::Result;
 use unreal_asset::{
-    asset::name_map::NameMap,
+    containers::NameMap,
     engine_version::EngineVersion,
     exports::{Export, ExportBaseTrait},
     fproperty::{

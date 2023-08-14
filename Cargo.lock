@@ -495,9 +495,9 @@ checksum = "bef38d45163c2f1dde094a7dfd33ccf595c92905c8f8f4fdc18d06fb1037718a"
 
 [[package]]
 name = "bitflags"
-version = "2.3.3"
+version = "2.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "630be753d4e58660abd17930c71b647fe46c27ea6b63cc59e1e3851406972e42"
+checksum = "b4682ae6287fcf752ecaabbfcc7b6f9b72aa33933dc23a554d853aea8eea8635"
 
 [[package]]
 name = "bitvec"
@@ -588,7 +588,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6798148dccfbff0fae41c7574d2fa8f1ef3492fba0face179de5d8d447d67b05"
 dependencies = [
  "memchr",
- "regex-automata 0.3.3",
+ "regex-automata 0.3.6",
  "serde",
 ]
 
@@ -2241,6 +2241,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b06a4cde4c0f271a446782e3eff8de789548ce57dbc8eca9292c27f4a42004b4"
 
 [[package]]
+name = "lz4_flex"
+version = "0.11.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3ea9b256699eda7b0387ffbc776dd625e28bde3918446381781245b7a50349d8"
+
+[[package]]
 name = "mach"
 version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3071,13 +3077,13 @@ dependencies = [
 
 [[package]]
 name = "regex"
-version = "1.9.1"
+version = "1.9.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b2eae68fc220f7cf2532e4494aded17545fce192d59cd996e0fe7887f4ceb575"
+checksum = "81bc1d4caf89fac26a70747fe603c130093b53c773888797a6329091246d651a"
 dependencies = [
  "aho-corasick",
  "memchr",
- "regex-automata 0.3.3",
+ "regex-automata 0.3.6",
  "regex-syntax 0.7.4",
 ]
 
@@ -3092,9 +3098,9 @@ dependencies = [
 
 [[package]]
 name = "regex-automata"
-version = "0.3.3"
+version = "0.3.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "39354c10dd07468c2e73926b23bb9c2caca74c5501e38a35da70406f1d923310"
+checksum = "fed1ceff11a1dddaee50c9dc8e4938bd106e9d89ae372f192311e7da498e3b69"
 dependencies = [
  "aho-corasick",
  "memchr",
@@ -3302,7 +3308,7 @@ version = "0.38.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0a962918ea88d644592894bc6dc55acc6c0956488adcebbfb6e273506b7fd6e5"
 dependencies = [
- "bitflags 2.3.3",
+ "bitflags 2.4.0",
  "errno",
  "libc",
  "linux-raw-sys 0.4.3",
@@ -4215,16 +4221,33 @@ checksum = "c0edd1e5b14653f783770bce4a4dabb4a5108a5370a5f5d8cfe8710c361f6c8b"
 [[package]]
 name = "unreal_asset"
 version = "0.1.16"
-source = "git+https://github.com/trumank/unrealmodding?branch=patches#26af84e4c71df1552dd2ceec00bbc09b24574088"
+source = "git+https://github.com/trumank/unrealmodding?branch=patches#359602b2d65f78037166ce80cc852ee4fea8d4d6"
 dependencies = [
- "bitflags 1.3.2",
+ "byteorder",
+ "unreal_asset_base",
+ "unreal_asset_exports",
+ "unreal_asset_kismet",
+ "unreal_asset_proc_macro",
+ "unreal_asset_properties",
+ "unreal_asset_registry",
+ "unreal_helpers",
+]
+
+[[package]]
+name = "unreal_asset_base"
+version = "0.1.16"
+source = "git+https://github.com/trumank/unrealmodding?branch=patches#359602b2d65f78037166ce80cc852ee4fea8d4d6"
+dependencies = [
+ "bitflags 2.4.0",
  "bitvec",
  "brotli",
  "byteorder",
  "enum_dispatch",
+ "flate2",
  "lazy_static",
+ "lz4_flex",
  "naive-cityhash",
- "num_enum 0.5.11",
+ "num_enum 0.6.1",
  "ordered-float",
  "rustc-hash",
  "slab",
@@ -4235,9 +4258,39 @@ dependencies = [
 ]
 
 [[package]]
+name = "unreal_asset_exports"
+version = "0.1.16"
+source = "git+https://github.com/trumank/unrealmodding?branch=patches#359602b2d65f78037166ce80cc852ee4fea8d4d6"
+dependencies = [
+ "bitvec",
+ "byteorder",
+ "enum_dispatch",
+ "num_enum 0.6.1",
+ "ordered-float",
+ "unreal_asset_base",
+ "unreal_asset_kismet",
+ "unreal_asset_proc_macro",
+ "unreal_asset_properties",
+ "unreal_helpers",
+]
+
+[[package]]
+name = "unreal_asset_kismet"
+version = "0.1.16"
+source = "git+https://github.com/trumank/unrealmodding?branch=patches#359602b2d65f78037166ce80cc852ee4fea8d4d6"
+dependencies = [
+ "byteorder",
+ "enum_dispatch",
+ "num_enum 0.6.1",
+ "ordered-float",
+ "unreal_asset_base",
+ "unreal_asset_proc_macro",
+]
+
+[[package]]
 name = "unreal_asset_proc_macro"
 version = "0.1.16"
-source = "git+https://github.com/trumank/unrealmodding?branch=patches#26af84e4c71df1552dd2ceec00bbc09b24574088"
+source = "git+https://github.com/trumank/unrealmodding?branch=patches#359602b2d65f78037166ce80cc852ee4fea8d4d6"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -4245,9 +4298,39 @@ dependencies = [
 ]
 
 [[package]]
+name = "unreal_asset_properties"
+version = "0.1.16"
+source = "git+https://github.com/trumank/unrealmodding?branch=patches#359602b2d65f78037166ce80cc852ee4fea8d4d6"
+dependencies = [
+ "bitvec",
+ "byteorder",
+ "enum_dispatch",
+ "num_enum 0.6.1",
+ "ordered-float",
+ "unreal_asset_base",
+ "unreal_asset_proc_macro",
+ "unreal_helpers",
+]
+
+[[package]]
+name = "unreal_asset_registry"
+version = "0.1.16"
+source = "git+https://github.com/trumank/unrealmodding?branch=patches#359602b2d65f78037166ce80cc852ee4fea8d4d6"
+dependencies = [
+ "bitvec",
+ "byteorder",
+ "lazy_static",
+ "num_enum 0.6.1",
+ "unreal_asset_base",
+ "unreal_asset_exports",
+ "unreal_asset_properties",
+ "unreal_helpers",
+]
+
+[[package]]
 name = "unreal_helpers"
 version = "0.1.16"
-source = "git+https://github.com/trumank/unrealmodding?branch=patches#26af84e4c71df1552dd2ceec00bbc09b24574088"
+source = "git+https://github.com/trumank/unrealmodding?branch=patches#359602b2d65f78037166ce80cc852ee4fea8d4d6"
 dependencies = [
  "bitvec",
  "byteorder",

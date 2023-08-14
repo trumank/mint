@@ -878,9 +878,12 @@ fn inject_init_actors<R: Read + Seek>(
                 name: asset.add_fname("LoadedMods"),
                 ancestry: Ancestry::new(FName::new_dummy("".to_owned(), 0)),
                 struct_type: Some(asset.add_fname("MI_Mod")),
-                struct_guid: Some([
-                    59, 201, 35, 171, 89, 71, 206, 180, 185, 207, 203, 190, 80, 216, 194, 203,
-                ]),
+                struct_guid: Some(
+                    [
+                        59, 201, 35, 171, 89, 71, 206, 180, 185, 207, 203, 190, 80, 216, 194, 203,
+                    ]
+                    .into(),
+                ),
                 property_guid: None,
                 duplication_index: 0,
                 serialize_none: true,
