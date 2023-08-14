@@ -51,6 +51,12 @@ impl DRGInstallationType {
             Self::Xbox => "FSD-WinGDK.pak",
         }
     }
+    pub fn hook_dll_name(&self) -> &'static str {
+        match self {
+            Self::Steam => "x3daudio1_7.dll",
+            Self::Xbox => "d3d9.dll",
+        }
+    }
 }
 
 #[derive(Debug)]

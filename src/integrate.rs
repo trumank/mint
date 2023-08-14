@@ -44,7 +44,9 @@ use unreal_asset::{
 pub fn uninstall<P: AsRef<Path>>(path_pak: P, modio_mods: HashSet<u32>) -> Result<()> {
     let installation = DRGInstallation::from_pak_path(path_pak)?;
     let path_mods_pak = installation.paks_path().join("mods_P.pak");
-    let path_hook_dll = installation.binaries_directory().join("x3daudio1_7.dll");
+    let path_hook_dll = installation
+        .binaries_directory()
+        .join(installation.installation_type.hook_dll_name());
     match std::fs::remove_file(&path_mods_pak) {
         Ok(()) => Ok(()),
         Err(e) if e.kind() == ErrorKind::NotFound => Ok(()),
@@ -136,7 +138,9 @@ fn uninstall_modio(installation: &DRGInstallation, modio_mods: HashSet<u32>) -> 
 pub fn integrate<P: AsRef<Path>>(path_pak: P, mods: Vec<(ModInfo, PathBuf)>) -> Result<()> {
     let installation = DRGInstallation::from_pak_path(&path_pak)?;
     let path_mod_pak = installation.paks_path().join("mods_P.pak");
-    let path_hook_dll = installation.binaries_directory().join("x3daudio1_7.dll");
+    let path_hook_dll = installation
+        .binaries_directory()
+        .join(installation.installation_type.hook_dll_name());
 
     let mut fsd_pak_reader = BufReader::new(open_file(path_pak)?);
     let fsd_pak = repak::PakReader::new_any(&mut fsd_pak_reader, None)?;
@@ -278,7 +282,7 @@ pub fn integrate<P: AsRef<Path>>(path_pak: P, mods: Vec<(ModInfo, PathBuf)>) -> 
         None,
     );
 
-    let hook_dll = include_bytes!(env!("CARGO_CDYLIB_FILE_HOOK_x3daudio1_7"));
+    let hook_dll = include_bytes!(env!("CARGO_CDYLIB_FILE_HOOK_hook"));
     if path_hook_dll
         .metadata()
         .map(|m| m.len() != hook_dll.len() as u64)

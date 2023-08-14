@@ -12,13 +12,21 @@ use windows::{
     },
 };
 
+// x3daudio1_7.dll
 #[no_mangle]
 #[allow(non_snake_case, unused_variables)]
 extern "system" fn X3DAudioCalculate() {}
-
 #[no_mangle]
 #[allow(non_snake_case, unused_variables)]
 extern "system" fn X3DAudioInitialize() {}
+
+// d3d9.dll
+#[no_mangle]
+#[allow(non_snake_case, unused_variables)]
+extern "system" fn D3DPERF_EndEvent() {}
+#[no_mangle]
+#[allow(non_snake_case, unused_variables)]
+extern "system" fn D3DPERF_BeginEvent() {}
 
 #[no_mangle]
 #[allow(non_snake_case, unused_variables)]

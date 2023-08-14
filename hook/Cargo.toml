@@ -4,8 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [lib]
-#target = "x86_64-pc-windows-gnu"
-name = "x3daudio1_7"
+path = "src/lib.rs"
 crate-type = ["cdylib"]
 
 [dependencies]
