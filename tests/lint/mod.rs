@@ -6,7 +6,7 @@ use drg_mod_integration::providers::ModSpecification;
 
 #[test]
 pub fn test_lint_conflicting_files() {
-    let base_path = PathBuf::from_str("test_mod_batches/lints/").unwrap();
+    let base_path = PathBuf::from_str("test_assets/lints/").unwrap();
     assert!(base_path.exists());
     let a_path = base_path.clone().join("A.pak");
     assert!(a_path.exists());
@@ -41,7 +41,7 @@ pub fn test_lint_conflicting_files() {
 
 #[test]
 pub fn test_lint_shader() {
-    let base_path = PathBuf::from_str("test_mod_batches/lints/").unwrap();
+    let base_path = PathBuf::from_str("test_assets/lints/").unwrap();
     assert!(base_path.exists());
     let a_path = base_path.clone().join("A.pak");
     assert!(a_path.exists());
@@ -69,7 +69,7 @@ pub fn test_lint_shader() {
 
 #[test]
 pub fn test_lint_asset_registry_bin() {
-    let base_path = PathBuf::from_str("test_mod_batches/lints/").unwrap();
+    let base_path = PathBuf::from_str("test_assets/lints/").unwrap();
     assert!(base_path.exists());
     let a_path = base_path.clone().join("A.pak");
     assert!(a_path.exists());
@@ -98,7 +98,7 @@ pub fn test_lint_asset_registry_bin() {
 
 #[test]
 pub fn test_lint_outdated_pak_version() {
-    let base_path = PathBuf::from_str("test_mod_batches/lints/").unwrap();
+    let base_path = PathBuf::from_str("test_assets/lints/").unwrap();
     assert!(base_path.exists());
     let outdated_pak_path = base_path.clone().join("outdated_pak_version.pak");
     assert!(outdated_pak_path.exists());
@@ -122,7 +122,7 @@ pub fn test_lint_outdated_pak_version() {
 
 #[test]
 pub fn test_lint_empty_archive() {
-    let base_path = PathBuf::from_str("test_mod_batches/lints/").unwrap();
+    let base_path = PathBuf::from_str("test_assets/lints/").unwrap();
     assert!(base_path.exists());
     let empty_archive_path = base_path.clone().join("empty_archive.zip");
     assert!(empty_archive_path.exists());
@@ -142,7 +142,7 @@ pub fn test_lint_empty_archive() {
 
 #[test]
 pub fn test_lint_only_non_pak_files() {
-    let base_path = PathBuf::from_str("test_mod_batches/lints/").unwrap();
+    let base_path = PathBuf::from_str("test_assets/lints/").unwrap();
     assert!(base_path.exists());
     let a_path = base_path.clone().join("A.pak");
     assert!(a_path.exists());
@@ -171,7 +171,7 @@ pub fn test_lint_only_non_pak_files() {
 
 #[test]
 pub fn test_lint_multi_pak_archive() {
-    let base_path = PathBuf::from_str("test_mod_batches/lints/").unwrap();
+    let base_path = PathBuf::from_str("test_assets/lints/").unwrap();
     assert!(base_path.exists());
     let multiple_paks_archive_path = base_path.clone().join("multiple_paks.zip");
     assert!(multiple_paks_archive_path.exists());
