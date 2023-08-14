@@ -339,7 +339,7 @@ impl FetchProgress {
 /// Whether a mod can be resolved by clients or not
 #[derive(Debug, Clone, Eq, Ord, PartialEq, PartialOrd, Hash)]
 pub enum ResolvableStatus {
-    Unresolvable,
+    Unresolvable(String),
     Resolvable,
 }
 
@@ -420,10 +420,17 @@ impl ModResolution {
             status: ResolvableStatus::Resolvable,
         }
     }
-    fn unresolvable(url: String) -> Self {
+    fn unresolvable(url: String, name: String) -> Self {
         Self {
             url,
-            status: ResolvableStatus::Unresolvable,
+            status: ResolvableStatus::Unresolvable(name),
+        }
+    }
+    /// Used to get the URL if resolvable or just return the mod name if not
+    pub fn get_resolvable_url_or_name(&self) -> &str {
+        match &self.status {
+            ResolvableStatus::Resolvable => &self.url,
+            ResolvableStatus::Unresolvable(name) => name,
         }
     }
 }

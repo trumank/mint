@@ -52,7 +52,12 @@ impl ModProvider for FileProvider {
             name,
             spec: spec.clone(),
             versions: vec![],
-            resolution: ModResolution::unresolvable(path.to_string_lossy().to_string()),
+            resolution: ModResolution::unresolvable(
+                path.to_string_lossy().to_string(),
+                path.file_name()
+                    .map(|p| p.to_string_lossy().to_string())
+                    .unwrap_or_else(|| "unknown".to_string()),
+            ),
             suggested_require: false,
             suggested_dependencies: vec![],
             modio_tags: None,
@@ -93,7 +98,12 @@ impl ModProvider for FileProvider {
             name,
             spec: spec.clone(),
             versions: vec![],
-            resolution: ModResolution::unresolvable(path.to_string_lossy().to_string()),
+            resolution: ModResolution::unresolvable(
+                path.to_string_lossy().to_string(),
+                path.file_name()
+                    .map(|p| p.to_string_lossy().to_string())
+                    .unwrap_or_else(|| "unknown".to_string()),
+            ),
             suggested_require: false,
             suggested_dependencies: vec![],
             modio_tags: None,

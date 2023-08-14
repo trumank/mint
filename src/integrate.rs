@@ -293,62 +293,57 @@ pub fn integrate<P: AsRef<Path>>(path_pak: P, mods: Vec<(ModInfo, PathBuf)>) -> 
 
     let mut added_paths = HashSet::new();
 
-    let mods = mods
-        .into_iter()
-        .map(|(m, path)| {
-            let mut buf = get_pak_from_data(Box::new(BufReader::new(open_file(path)?)))?;
-            let pak = repak::PakReader::new_any(&mut buf, None)?;
+    for (_mod_info, path) in &mods {
+        let mut buf = get_pak_from_data(Box::new(BufReader::new(open_file(path)?)))?;
+        let pak = repak::PakReader::new_any(&mut buf, None)?;
 
-            let mount = Path::new(pak.mount_point());
+        let mount = Path::new(pak.mount_point());
 
-            for p in pak.files() {
-                let j = mount.join(&p);
-                let new_path = j
-                    .strip_prefix("../../../")
-                    .context("prefix does not match")?;
-                let new_path_str = &new_path.to_string_lossy().replace('\\', "/");
-                let lowercase = new_path_str.to_ascii_lowercase();
-                if added_paths.contains(&lowercase) {
+        for p in pak.files() {
+            let j = mount.join(&p);
+            let new_path = j
+                .strip_prefix("../../../")
+                .context("prefix does not match")?;
+            let new_path_str = &new_path.to_string_lossy().replace('\\', "/");
+            let lowercase = new_path_str.to_ascii_lowercase();
+            if added_paths.contains(&lowercase) {
+                continue;
+            }
+
+            if let Some(filename) = new_path.file_name() {
+                if filename == "AssetRegistry.bin" {
                     continue;
                 }
-
-                if let Some(filename) = new_path.file_name() {
-                    if filename == "AssetRegistry.bin" {
-                        continue;
-                    }
-                    if new_path.extension().and_then(std::ffi::OsStr::to_str)
-                        == Some("ushaderbytecode")
-                    {
-                        continue;
-                    }
-                    let lower = filename.to_string_lossy().to_lowercase();
-                    if lower == "initspacerig.uasset" {
-                        init_spacerig_assets.insert(format_soft_class(new_path));
-                    }
-                    if lower == "initcave.uasset" {
-                        init_cave_assets.insert(format_soft_class(new_path));
-                    }
+                if new_path.extension().and_then(std::ffi::OsStr::to_str) == Some("ushaderbytecode")
+                {
+                    continue;
                 }
-
-                let file_data = pak.get(&p, &mut buf)?;
-                if let Some(raw) = new_path_str
-                    .strip_suffix(".uasset")
-                    .and_then(|path| deferred_assets.get_mut(path))
-                {
-                    raw.uasset = Some(file_data);
-                } else if let Some(raw) = new_path_str
-                    .strip_suffix(".uexp")
-                    .and_then(|path| deferred_assets.get_mut(path))
-                {
-                    raw.uexp = Some(file_data);
-                } else {
-                    write_file(&mut mod_pak, &file_data, new_path_str)?;
-                    added_paths.insert(lowercase);
+                let lower = filename.to_string_lossy().to_lowercase();
+                if lower == "initspacerig.uasset" {
+                    init_spacerig_assets.insert(format_soft_class(new_path));
+                }
+                if lower == "initcave.uasset" {
+                    init_cave_assets.insert(format_soft_class(new_path));
                 }
             }
-            Ok(m.resolution.url) // TODO don't leak paths of local mods to clients
-        })
-        .collect::<Result<Vec<String>>>()?;
+
+            let file_data = pak.get(&p, &mut buf)?;
+            if let Some(raw) = new_path_str
+                .strip_suffix(".uasset")
+                .and_then(|path| deferred_assets.get_mut(path))
+            {
+                raw.uasset = Some(file_data);
+            } else if let Some(raw) = new_path_str
+                .strip_suffix(".uexp")
+                .and_then(|path| deferred_assets.get_mut(path))
+            {
+                raw.uexp = Some(file_data);
+            } else {
+                write_file(&mut mod_pak, &file_data, new_path_str)?;
+                added_paths.insert(lowercase);
+            }
+        }
+    }
 
     {
         let mut pcb_asset = deferred_assets[&pcb_path].parse()?;
@@ -408,7 +403,7 @@ pub fn integrate<P: AsRef<Path>>(path_pak: P, mods: Vec<(ModInfo, PathBuf)>) -> 
         &mut int_asset,
         init_spacerig_assets,
         init_cave_assets,
-        &[], //&mods,
+        &mods,
     );
 
     let mut int_out = (Cursor::new(vec![]), Cursor::new(vec![]));
@@ -858,7 +853,7 @@ fn inject_init_actors<R: Read + Seek>(
     asset: &mut Asset<R>,
     init_spacerig: HashSet<String>,
     init_cave: HashSet<String>,
-    mods: &[String],
+    mods: &[(ModInfo, PathBuf)],
 ) {
     let init_spacerig_fnames = init_spacerig
         .into_iter()
@@ -873,7 +868,7 @@ fn inject_init_actors<R: Read + Seek>(
 
     let structs = mods
         .iter()
-        .map(|m| {
+        .map(|(mod_info, _path)| {
             StructProperty {
                 name: asset.add_fname("LoadedMods"),
                 ancestry: Ancestry::new(FName::new_dummy("".to_owned(), 0)),
@@ -893,7 +888,7 @@ fn inject_init_actors<R: Read + Seek>(
                         ancestry: ancestry.clone(),
                         property_guid: None,
                         duplication_index: 0,
-                        value: Some(m.to_owned()),
+                        value: Some(mod_info.resolution.get_resolvable_url_or_name().to_string()),
                     }
                     .into(),
                     StrProperty {
