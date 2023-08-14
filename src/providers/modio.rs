@@ -211,6 +211,10 @@ impl ModProvider for ModioProvider {
         use modio::filter::{Eq, In};
         use modio::mods::filters::{Id, NameId, Visible};
 
+        if spec.url.contains("?preview=") {
+            return Err(anyhow!("Preview mod links cannot be added directly, please subscribe to the mod on mod.io and and then use the non-preview link."));
+        };
+
         let url = &spec.url;
         let captures = RE_MOD.captures(url).context("invalid modio URL {url}")?;
 
