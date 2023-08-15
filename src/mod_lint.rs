@@ -9,6 +9,12 @@ use tracing::{info, span, trace, Level};
 use crate::providers::ModSpecification;
 use crate::{lint_get_all_files_from_data, open_file, GetAllFilesFromDataError, PakOrNotPak};
 
+#[derive(Debug, Copy, Clone, PartialEq)]
+pub enum SplitUasset {
+    MissingUasset,
+    MissingUexp,
+}
+
 #[derive(Debug, Clone)]
 pub struct ModLintReport {
     pub conflicting_mods: BTreeMap<String, BTreeSet<(ModSpecification, Vec<u8>)>>,
@@ -19,6 +25,7 @@ pub struct ModLintReport {
     pub archive_with_only_non_pak_files_mods: BTreeSet<ModSpecification>,
     pub archive_with_multiple_paks_mods: BTreeSet<ModSpecification>,
     pub non_asset_file_mods: BTreeMap<ModSpecification, BTreeSet<String>>,
+    pub split_uasset_uexp_mods: BTreeMap<ModSpecification, BTreeMap<String, SplitUasset>>,
 }
 
 pub fn lint(mods: &[(ModSpecification, PathBuf)]) -> Result<ModLintReport> {
@@ -36,6 +43,8 @@ pub fn lint(mods: &[(ModSpecification, PathBuf)]) -> Result<ModLintReport> {
     let mut empty_archive_mods = BTreeSet::new();
     let mut archive_with_multiple_paks_mods = BTreeSet::new();
     let mut non_asset_file_mods = BTreeMap::new();
+    let mut path_extensions_map: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+    let mut split_uasset_uexp_mods = BTreeMap::new();
 
     for (mod_spec, mod_pak_path) in mods {
         trace!(?mod_spec, ?mod_pak_path);
@@ -95,10 +104,7 @@ pub fn lint(mods: &[(ModSpecification, PathBuf)]) -> Result<ModLintReport> {
                 || lowercase.ends_with("assetregistry.bin")
                 || lowercase.ends_with(".ushaderbytecode"))
             {
-                trace!(
-                    "file is not known unreal asset: `{}`",
-                    lowercase
-                );
+                trace!("file is not known unreal asset: `{}`", lowercase);
                 non_asset_file_mods
                     .entry(mod_spec.clone())
                     .and_modify(|files: &mut BTreeSet<String>| {
@@ -106,6 +112,27 @@ pub fn lint(mods: &[(ModSpecification, PathBuf)]) -> Result<ModLintReport> {
                     })
                     .or_insert_with(|| [lowercase.clone()].into());
             }
+
+            let path_without_ext = if let Some(path_without_ext) = p.rsplit('.').nth(1) {
+                path_without_ext.to_string()
+            } else {
+                p.clone()
+            };
+
+            path_extensions_map
+                .entry(path_without_ext.clone())
+                .and_modify(|extensions| {
+                    if let Some(ext) = p.rsplit('.').next() {
+                        extensions.insert(ext.to_string());
+                    }
+                })
+                .or_insert_with(|| {
+                    if let Some(ext) = p.rsplit('.').next() {
+                        [ext.to_string()].into()
+                    } else {
+                        BTreeSet::default()
+                    }
+                });
 
             let mut buf = vec![];
             let mut writer = Cursor::new(&mut buf);
@@ -146,6 +173,52 @@ pub fn lint(mods: &[(ModSpecification, PathBuf)]) -> Result<ModLintReport> {
                 }
             }
         }
+
+        path_extensions_map
+            .iter()
+            .for_each(|(path_without_ext, exts)| {
+                match (exts.contains("uasset"), exts.contains("uexp")) {
+                    (true, false) => {
+                        split_uasset_uexp_mods
+                            .entry(mod_spec.clone())
+                            .and_modify(
+                                |mismatched_pairs_map: &mut BTreeMap<String, SplitUasset>| {
+                                    mismatched_pairs_map.insert(
+                                        format!("{path_without_ext}.uasset"),
+                                        SplitUasset::MissingUexp,
+                                    );
+                                },
+                            )
+                            .or_insert_with(|| {
+                                [(
+                                    format!("{path_without_ext}.uasset"),
+                                    SplitUasset::MissingUexp,
+                                )]
+                                .into()
+                            });
+                    }
+                    (false, true) => {
+                        split_uasset_uexp_mods
+                            .entry(mod_spec.clone())
+                            .and_modify(
+                                |mismatched_pairs_map: &mut BTreeMap<String, SplitUasset>| {
+                                    mismatched_pairs_map.insert(
+                                        format!("{path_without_ext}.uexp"),
+                                        SplitUasset::MissingUasset,
+                                    );
+                                },
+                            )
+                            .or_insert_with(|| {
+                                [(
+                                    format!("{path_without_ext}.uexp"),
+                                    SplitUasset::MissingUasset,
+                                )]
+                                .into()
+                            });
+                    }
+                    _ => {}
+                }
+            });
     }
 
     const CONFLICTING_MODS_LINT_WHITELIST: [&str; 1] = ["fsd/content/_interop"];
@@ -189,5 +262,6 @@ pub fn lint(mods: &[(ModSpecification, PathBuf)]) -> Result<ModLintReport> {
         archive_with_only_non_pak_files_mods,
         archive_with_multiple_paks_mods,
         non_asset_file_mods,
+        split_uasset_uexp_mods,
     })
 }

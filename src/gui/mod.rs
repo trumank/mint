@@ -24,7 +24,7 @@ use tokio::{
 };
 use tracing::{debug, info};
 
-use crate::mod_lint::ModLintReport;
+use crate::mod_lint::{ModLintReport, SplitUasset};
 use crate::{
     integrate::uninstall,
     is_drg_pak,
@@ -1019,6 +1019,41 @@ impl App {
                                             .show(ui, |ui| {
                                                 files.iter().for_each(|file| {
                                                     ui.label(file);
+                                                });
+                                            });
+                                        });
+                                    });
+                                }
+
+                                if !report.split_uasset_uexp_mods.is_empty() {
+                                    CollapsingHeader::new(
+                                        RichText::new(
+                                            "⚠ Mod(s) with mismatched uasset/uexp pairs detected",
+                                        )
+                                        .color(AMBER),
+                                    )
+                                    .default_open(true)
+                                    .show(ui, |ui| {
+                                        report.split_uasset_uexp_mods.iter().for_each(|(r#mod, split_pairs)| {
+                                            CollapsingHeader::new(
+                                                RichText::new(format!(
+                                                    "⚠ {} includes one or more mismatched uasset/uexp pairs",
+                                                    r#mod.url
+                                                ))
+                                                .color(AMBER),
+                                            )
+                                            .show(ui, |ui| {
+                                                split_pairs.iter().for_each(|(path, kind)| {
+                                                    let issue_text = match kind {
+                                                        SplitUasset::MissingUasset => {
+                                                            format!("`{path}.uexp` missing matching .uasset file")
+                                                        },
+                                                        SplitUasset::MissingUexp => {
+                                                            format!("`{path}.uasset` missing matching .uexp file")
+                                                        },
+                                                    };
+
+                                                    ui.label(RichText::new(issue_text).color(AMBER));
                                                 });
                                             });
                                         });

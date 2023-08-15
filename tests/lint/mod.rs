@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 use std::str::FromStr;
 
-use drg_mod_integration::mod_lint::ModLintReport;
+use drg_mod_integration::mod_lint::{ModLintReport, SplitUasset};
 use drg_mod_integration::providers::ModSpecification;
 
 #[test]
@@ -213,5 +213,43 @@ pub fn test_lint_non_asset_files() {
     assert_eq!(
         non_asset_file_mods.get(&non_asset_files_spec),
         Some(&["never_gonna_let_you_down.txt".to_string()].into())
+    );
+}
+
+#[test]
+pub fn test_lint_split_uasset_uexp_pairs() {
+    let base_path = PathBuf::from_str("test_assets/lints/").unwrap();
+    assert!(base_path.exists());
+    let split_uasset_uexp_pak_path = base_path.clone().join("split_uasset_uexp.pak");
+    assert!(split_uasset_uexp_pak_path.exists());
+
+    let split_uasset_uexp_spec = ModSpecification {
+        url: "split_uasset_uexp".to_string(),
+    };
+
+    let mods = vec![(split_uasset_uexp_spec.clone(), split_uasset_uexp_pak_path)];
+
+    let ModLintReport {
+        split_uasset_uexp_mods,
+        ..
+    } = drg_mod_integration::mod_lint::lint(&mods).unwrap();
+
+    println!("{:#?}", split_uasset_uexp_mods);
+
+    assert_eq!(
+        split_uasset_uexp_mods.get(&split_uasset_uexp_spec),
+        Some(
+            &[
+                (
+                    "missing_uasset/a.uexp".to_string(),
+                    SplitUasset::MissingUasset
+                ),
+                (
+                    "missing_uexp/b.uasset".to_string(),
+                    SplitUasset::MissingUexp
+                )
+            ]
+            .into()
+        )
     );
 }
