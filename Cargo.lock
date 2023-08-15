@@ -1845,6 +1845,7 @@ dependencies = [
 name = "hook"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "memchr",
  "retour",
  "winapi",
