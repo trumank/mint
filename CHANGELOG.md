@@ -4,6 +4,8 @@
 
 ## [Unreleased] - ReleaseDate
 
+- Microsoft Store: Fix mods being unable to write custom save files
+
 ## [0.2.9] - 2023-08-11
 
 - Update `egui_dnd` which makes dragging and re-ordering mods significantly smoother
