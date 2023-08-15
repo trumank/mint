@@ -998,6 +998,32 @@ impl App {
                                         });
                                     });
                                 }
+
+                                if !report.non_asset_file_mods.is_empty() {
+                                    CollapsingHeader::new(
+                                        RichText::new(
+                                            "⚠ Mod(s) with non-asset files detected",
+                                        )
+                                        .color(AMBER),
+                                    )
+                                    .default_open(true)
+                                    .show(ui, |ui| {
+                                        report.non_asset_file_mods.iter().for_each(|(r#mod, files)| {
+                                            CollapsingHeader::new(
+                                                RichText::new(format!(
+                                                    "⚠ {} includes one or more non-asset files",
+                                                    r#mod.url
+                                                ))
+                                                .color(AMBER),
+                                            )
+                                            .show(ui, |ui| {
+                                                files.iter().for_each(|file| {
+                                                    ui.label(file);
+                                                });
+                                            });
+                                        });
+                                    });
+                                }
                             });
                     } else {
                         ui.spinner();

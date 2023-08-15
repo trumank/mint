@@ -189,3 +189,29 @@ pub fn test_lint_multi_pak_archive() {
 
     assert!(archive_with_multiple_paks_mods.contains(&multiple_paks_spec));
 }
+
+#[test]
+pub fn test_lint_non_asset_files() {
+    let base_path = PathBuf::from_str("test_assets/lints/").unwrap();
+    assert!(base_path.exists());
+    let non_asset_files_pak_path = base_path.clone().join("non_asset_files.pak");
+    assert!(non_asset_files_pak_path.exists());
+
+    let non_asset_files_spec = ModSpecification {
+        url: "non_asset_files_pak".to_string(),
+    };
+
+    let mods = vec![(non_asset_files_spec.clone(), non_asset_files_pak_path)];
+
+    let ModLintReport {
+        non_asset_file_mods,
+        ..
+    } = drg_mod_integration::mod_lint::lint(&mods).unwrap();
+
+    println!("{:#?}", non_asset_file_mods);
+
+    assert_eq!(
+        non_asset_file_mods.get(&non_asset_files_spec),
+        Some(&["never_gonna_let_you_down.txt".to_string()].into())
+    );
+}

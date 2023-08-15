@@ -18,6 +18,7 @@ pub struct ModLintReport {
     pub empty_archive_mods: BTreeSet<ModSpecification>,
     pub archive_with_only_non_pak_files_mods: BTreeSet<ModSpecification>,
     pub archive_with_multiple_paks_mods: BTreeSet<ModSpecification>,
+    pub non_asset_file_mods: BTreeMap<ModSpecification, BTreeSet<String>>,
 }
 
 pub fn lint(mods: &[(ModSpecification, PathBuf)]) -> Result<ModLintReport> {
@@ -34,6 +35,7 @@ pub fn lint(mods: &[(ModSpecification, PathBuf)]) -> Result<ModLintReport> {
     let mut archive_with_only_non_pak_files_mods = BTreeSet::new();
     let mut empty_archive_mods = BTreeSet::new();
     let mut archive_with_multiple_paks_mods = BTreeSet::new();
+    let mut non_asset_file_mods = BTreeMap::new();
 
     for (mod_spec, mod_pak_path) in mods {
         trace!(?mod_spec, ?mod_pak_path);
@@ -83,6 +85,27 @@ pub fn lint(mods: &[(ModSpecification, PathBuf)]) -> Result<ModLintReport> {
                 .context("prefix does not match")?;
             let new_path_str = &new_path.to_string_lossy().replace('\\', "/");
             let lowercase = new_path_str.to_ascii_lowercase();
+
+            // Note that including ushaderbytecode is handled by the specific shader-inclusion lint,
+            // so we avoid duplicating diagnostics here.
+            if !(lowercase.ends_with(".uexp")
+                || lowercase.ends_with(".uasset")
+                || lowercase.ends_with(".ubulk")
+                || lowercase.ends_with(".ufont")
+                || lowercase.ends_with("assetregistry.bin")
+                || lowercase.ends_with(".ushaderbytecode"))
+            {
+                trace!(
+                    "file is not known unreal asset: `{}`",
+                    lowercase
+                );
+                non_asset_file_mods
+                    .entry(mod_spec.clone())
+                    .and_modify(|files: &mut BTreeSet<String>| {
+                        files.insert(lowercase.clone());
+                    })
+                    .or_insert_with(|| [lowercase.clone()].into());
+            }
 
             let mut buf = vec![];
             let mut writer = Cursor::new(&mut buf);
@@ -165,5 +188,6 @@ pub fn lint(mods: &[(ModSpecification, PathBuf)]) -> Result<ModLintReport> {
         empty_archive_mods,
         archive_with_only_non_pak_files_mods,
         archive_with_multiple_paks_mods,
+        non_asset_file_mods,
     })
 }
