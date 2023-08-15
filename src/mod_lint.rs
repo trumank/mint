@@ -156,6 +156,7 @@ pub fn lint<P: AsRef<Path>>(
                 || lowercase.ends_with(".uasset")
                 || lowercase.ends_with(".ubulk")
                 || lowercase.ends_with(".ufont")
+                || lowercase.ends_with(".locres")
                 || lowercase.ends_with("assetregistry.bin")
                 || lowercase.ends_with(".ushaderbytecode"))
             {

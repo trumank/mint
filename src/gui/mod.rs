@@ -1046,10 +1046,10 @@ impl App {
                                                 split_pairs.iter().for_each(|(path, kind)| {
                                                     let issue_text = match kind {
                                                         SplitUasset::MissingUasset => {
-                                                            format!("`{path}.uexp` missing matching .uasset file")
+                                                            format!("`{path}` missing matching .uasset file")
                                                         },
                                                         SplitUasset::MissingUexp => {
-                                                            format!("`{path}.uasset` missing matching .uexp file")
+                                                            format!("`{path}` missing matching .uexp file")
                                                         },
                                                     };
 
