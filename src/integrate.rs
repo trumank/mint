@@ -8,9 +8,9 @@ use anyhow::{Context, Result};
 use repak::PakWriter;
 use tracing::info;
 
-use crate::providers::{ModInfo, ReadSeek};
+use crate::providers::ModInfo;
 use crate::splice::TrackedStatement;
-use crate::{open_file, splice, DRGInstallation};
+use crate::{get_pak_from_data, open_file, splice, DRGInstallation};
 
 use unreal_asset::{
     exports::ExportBaseTrait,
@@ -150,6 +150,7 @@ pub fn integrate<P: AsRef<Path>>(path_pak: P, mods: Vec<(ModInfo, PathBuf)>) -> 
         name: &'a OsStr,
         children: HashMap<OsString, Dir<'a>>,
     }
+
     let paths = fsd_pak
         .files()
         .into_iter()
@@ -428,32 +429,6 @@ pub fn integrate<P: AsRef<Path>>(path_pak: P, mods: Vec<(ModInfo, PathBuf)>) -> 
     );
 
     Ok(())
-}
-
-fn get_pak_from_data(mut data: Box<dyn ReadSeek>) -> Result<Box<dyn ReadSeek>> {
-    if let Ok(mut archive) = zip::ZipArchive::new(&mut data) {
-        (0..archive.len())
-            .map(|i| -> Result<Option<Box<dyn ReadSeek>>> {
-                let mut file = archive.by_index(i)?;
-                match file.enclosed_name() {
-                    Some(p) => {
-                        if file.is_file() && p.extension().filter(|e| e == &"pak").is_some() {
-                            let mut buf = vec![];
-                            file.read_to_end(&mut buf)?;
-                            Ok(Some(Box::new(Cursor::new(buf))))
-                        } else {
-                            Ok(None)
-                        }
-                    }
-                    None => Ok(None),
-                }
-            })
-            .find_map(|e| e.transpose())
-            .context("Zip does not contain pak")?
-    } else {
-        data.rewind()?;
-        Ok(data)
-    }
 }
 
 type ImportChain<'a> = Vec<Import<'a>>;

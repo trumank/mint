@@ -13,6 +13,7 @@ use tokio::{
 };
 use tracing::{error, info};
 
+use crate::mod_lint::ModLintReport;
 use crate::state::{ModData_v0_1_0 as ModData, ModOrGroup};
 use crate::{
     error::IntegrationError,
@@ -39,6 +40,7 @@ pub enum Message {
     FetchModProgress(FetchModProgress),
     UpdateCache(UpdateCache),
     CheckUpdates(CheckUpdates),
+    LintMods(LintMods),
 }
 
 impl Message {
@@ -49,6 +51,7 @@ impl Message {
             Self::FetchModProgress(msg) => msg.receive(app),
             Self::UpdateCache(msg) => msg.receive(app),
             Self::CheckUpdates(msg) => msg.receive(app),
+            Self::LintMods(msg) => msg.receive(app),
         }
     }
 }
@@ -398,4 +401,108 @@ async fn integrate_async(
     .await??;
 
     Ok(())
+}
+
+#[derive(Debug)]
+pub struct LintMods {
+    rid: RequestID,
+    result: Result<ModLintReport>,
+}
+
+impl LintMods {
+    pub fn send(
+        rc: &mut RequestCounter,
+        store: Arc<ModStore>,
+        mods: Vec<ModSpecification>,
+        tx: Sender<Message>,
+        ctx: egui::Context,
+    ) -> MessageHandle<()> {
+        let rid = rc.next();
+        MessageHandle {
+            rid,
+            handle: tokio::task::spawn(async move {
+                let res = resolve_async_ordered(store, ctx.clone(), mods, rid, tx.clone()).await;
+                tx.send(Message::LintMods(LintMods { rid, result: res }))
+                    .await
+                    .unwrap();
+                ctx.request_repaint();
+            }),
+            state: Default::default(),
+        }
+    }
+    fn receive(self, app: &mut App) {
+        if Some(self.rid) == app.lint_rid.as_ref().map(|r| r.rid) {
+            match self.result {
+                Ok(report) => {
+                    info!("lint mod report complete");
+                    app.mod_lint_report = Some(report);
+                    app.last_action_status =
+                        LastActionStatus::Success("lint mod report complete".to_string());
+                }
+                Err(e) => match e.downcast::<IntegrationError>() {
+                    Ok(IntegrationError::NoProvider { url: _, factory }) => {
+                        app.window_provider_parameters =
+                            Some(WindowProviderParameters::new(factory, &app.state));
+                        app.last_action_status =
+                            LastActionStatus::Failure("no provider".to_string());
+                    }
+                    Err(e) => {
+                        error!("{:#?}\n{}", e, e.backtrace());
+                        app.last_action_status = LastActionStatus::Failure(e.to_string());
+                    }
+                },
+            }
+            app.integrate_rid = None;
+        }
+    }
+}
+
+async fn resolve_async_ordered(
+    store: Arc<ModStore>,
+    ctx: egui::Context,
+    mod_specs: Vec<ModSpecification>,
+    rid: RequestID,
+    message_tx: Sender<Message>,
+) -> Result<ModLintReport> {
+    let update = false;
+
+    let mods = store.resolve_mods(&mod_specs, update).await?;
+
+    let to_integrate = mod_specs
+        .iter()
+        .map(|u| mods[u].clone())
+        .collect::<Vec<_>>();
+    let res_map: HashMap<ModResolution, ModSpecification> = mods
+        .iter()
+        .map(|(spec, info)| (info.resolution.clone(), spec.clone()))
+        .collect();
+    let urls = to_integrate
+        .iter()
+        .map(|m| &m.resolution)
+        .collect::<Vec<&ModResolution>>();
+
+    let (tx, mut rx) = mpsc::channel::<FetchProgress>(10);
+
+    tokio::spawn(async move {
+        while let Some(progress) = rx.recv().await {
+            if let Some(spec) = res_map.get(progress.resolution()) {
+                message_tx
+                    .send(Message::FetchModProgress(FetchModProgress {
+                        rid,
+                        spec: spec.clone(),
+                        progress: progress.into(),
+                    }))
+                    .await
+                    .unwrap();
+                ctx.request_repaint();
+            }
+        }
+    });
+
+    let paths = store.fetch_mods_ordered(&urls, update, Some(tx)).await?;
+
+    tokio::task::spawn_blocking(|| {
+        crate::mod_lint::lint(&mod_specs.into_iter().zip(paths).collect::<Vec<_>>())
+    })
+    .await?
 }

@@ -231,6 +231,24 @@ impl ModStore {
         .await
     }
 
+    pub async fn fetch_mods_ordered(
+        &self,
+        mods: &[&ModResolution],
+        update: bool,
+        tx: Option<Sender<FetchProgress>>,
+    ) -> Result<Vec<PathBuf>> {
+        use futures::stream::{self, StreamExt, TryStreamExt};
+
+        stream::iter(
+            mods.iter()
+                .map(|res| self.fetch_mod(res, update, tx.clone())),
+        )
+        .boxed() // without this the future becomes !Send https://github.com/rust-lang/rust/issues/104382
+        .buffered(5)
+        .try_collect::<Vec<_>>()
+        .await
+    }
+
     pub async fn fetch_mod(
         &self,
         res: &ModResolution,
@@ -391,7 +409,9 @@ pub enum ModResponse {
 }
 
 /// Points to a mod, optionally a specific version
-#[derive(Debug, Clone, Hash, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Debug, Clone, Hash, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
+)]
 pub struct ModSpecification {
     pub url: String,
 }
