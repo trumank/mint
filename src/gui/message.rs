@@ -1,3 +1,4 @@
+use std::collections::BTreeSet;
 use std::ops::DerefMut;
 use std::{
     collections::{HashMap, HashSet},
@@ -13,7 +14,7 @@ use tokio::{
 };
 use tracing::{error, info};
 
-use crate::mod_lint::ModLintReport;
+use crate::mod_lints::{LintId, LintReport};
 use crate::state::{ModData_v0_1_0 as ModData, ModOrGroup};
 use crate::{
     error::IntegrationError,
@@ -406,7 +407,7 @@ async fn integrate_async(
 #[derive(Debug)]
 pub struct LintMods {
     rid: RequestID,
-    result: Result<ModLintReport>,
+    result: Result<LintReport>,
 }
 
 impl LintMods {
@@ -463,7 +464,7 @@ async fn resolve_async_ordered(
     mod_specs: Vec<ModSpecification>,
     rid: RequestID,
     message_tx: Sender<Message>,
-) -> Result<ModLintReport> {
+) -> Result<LintReport> {
     let update = false;
 
     let mods = store.resolve_mods(&mod_specs, update).await?;
@@ -502,7 +503,17 @@ async fn resolve_async_ordered(
     let paths = store.fetch_mods_ordered(&urls, update, Some(tx)).await?;
 
     tokio::task::spawn_blocking(|| {
-        crate::mod_lint::lint(&mod_specs.into_iter().zip(paths).collect::<Vec<_>>())
+        crate::mod_lints::run_lints(
+            &BTreeSet::from([
+                LintId::ARCHIVE_WITH_ONLY_NON_PAK_FILES,
+                LintId::ASSET_REGISTRY_BIN,
+                LintId::CONFLICTING,
+                LintId::EMPTY_ARCHIVE,
+                LintId::OUTDATED_PAK_VERSION,
+                LintId::SHADER_FILES,
+            ]),
+            BTreeSet::from_iter(mod_specs.into_iter().zip(paths)),
+        )
     })
     .await?
 }

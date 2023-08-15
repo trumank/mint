@@ -1,3 +1,4 @@
+use std::collections::BTreeSet;
 use std::fs::File;
 use std::io::BufWriter;
 use std::path::PathBuf;
@@ -9,7 +10,7 @@ use tracing::{debug, info};
 use tracing_appender::non_blocking::WorkerGuard;
 use tracing_subscriber::filter;
 
-use drg_mod_integration::mod_lint::lint;
+use drg_mod_integration::mod_lints::{run_lints, LintId};
 use drg_mod_integration::providers::ProviderFactory;
 use drg_mod_integration::{gui::gui, providers::ModSpecification, state::State, DRGInstallation};
 use drg_mod_integration::{
@@ -293,9 +294,20 @@ async fn action_lint(action: ActionLint) -> Result<()> {
 
     let mod_paths = resolve_ordered_with_provider_init(&mut state, &mods, init_provider).await?;
 
-    let mods = mods.into_iter().zip(mod_paths).collect::<Vec<_>>();
-
-    let report = tokio::task::spawn_blocking(move || lint(&mods)).await??;
+    let report = tokio::task::spawn_blocking(move || {
+        run_lints(
+            &BTreeSet::from([
+                LintId::ARCHIVE_WITH_ONLY_NON_PAK_FILES,
+                LintId::ASSET_REGISTRY_BIN,
+                LintId::CONFLICTING,
+                LintId::EMPTY_ARCHIVE,
+                LintId::OUTDATED_PAK_VERSION,
+                LintId::SHADER_FILES,
+            ]),
+            BTreeSet::from_iter(mods.into_iter().zip(mod_paths)),
+        )
+    })
+    .await??;
     println!("{:#?}", report);
     Ok(())
 }

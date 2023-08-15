@@ -3,7 +3,7 @@
 pub mod error;
 pub mod gui;
 pub mod integrate;
-pub mod mod_lint;
+pub mod mod_lints;
 pub mod providers;
 pub mod splice;
 pub mod state;
