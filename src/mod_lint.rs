@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::io::{BufReader, Cursor};
 use std::path::{Path, PathBuf};
 
-use anyhow::{Context, Result};
+use anyhow::{bail, Context, Result};
 use sha2::{Digest, Sha256};
 use tracing::{info, span, trace, Level};
 
@@ -26,15 +26,20 @@ pub struct ModLintReport {
     pub archive_with_multiple_paks_mods: BTreeSet<ModSpecification>,
     pub non_asset_file_mods: BTreeMap<ModSpecification, BTreeSet<String>>,
     pub split_uasset_uexp_mods: BTreeMap<ModSpecification, BTreeMap<String, SplitUasset>>,
+    pub unmodified_base_game_assets: BTreeMap<ModSpecification, BTreeSet<String>>,
 }
 
-pub fn lint(mods: &[(ModSpecification, PathBuf)]) -> Result<ModLintReport> {
+pub fn lint<P: AsRef<Path>>(
+    reference_pak_path: P,
+    mods: &[(ModSpecification, PathBuf)],
+) -> Result<ModLintReport> {
     trace!(?mods);
     let span = span!(Level::TRACE, "mod_lint");
     let _enter = span.enter();
 
     info!(target: "mod_lint", "beginning mods lint");
 
+    let mut base_game_asset_hashes: BTreeMap<String, Vec<u8>> = BTreeMap::new();
     let mut per_path_modifiers = BTreeMap::new();
     let mut asset_register_bin_mods = BTreeMap::new();
     let mut shader_file_mods = BTreeMap::new();
@@ -45,6 +50,56 @@ pub fn lint(mods: &[(ModSpecification, PathBuf)]) -> Result<ModLintReport> {
     let mut non_asset_file_mods = BTreeMap::new();
     let mut path_extensions_map: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
     let mut split_uasset_uexp_mods = BTreeMap::new();
+    let mut unmodified_base_game_assets = BTreeMap::new();
+
+    let mut reference_pak_buf = match lint_get_all_files_from_data(Box::new(BufReader::new(
+        open_file(reference_pak_path)?,
+    ))) {
+        Ok(mut bufs) => {
+            if bufs.len() != 1 {
+                bail!("reference pak path is an unexpected archive containing more than one file");
+            }
+
+            let (_, pak_or_non_pak) = bufs.remove(0);
+            match pak_or_non_pak {
+                PakOrNotPak::Pak(pak) => pak,
+                PakOrNotPak::NotPak(_) => {
+                    bail!("first file in reference pak acrhive contains a non-pak")
+                }
+            }
+        }
+        Err(e) => match e {
+            GetAllFilesFromDataError::EmptyArchive | GetAllFilesFromDataError::OnlyNonPakFiles => {
+                bail!("invalid reference pak");
+            }
+            GetAllFilesFromDataError::Other(e) => return Err(e),
+        },
+    };
+
+    let reference_pak_reader = repak::PakReader::new_any(&mut reference_pak_buf, None)?;
+    for p in reference_pak_reader.files() {
+        if !p.starts_with("FSD") {
+            continue;
+        }
+
+        trace!("hashing reference pak path: `{}`", p);
+        let mount = Path::new(reference_pak_reader.mount_point());
+        let j = mount.join(&p);
+        let new_path = j
+            .strip_prefix("../../../")
+            .context("prefix does not match")?;
+        let new_path_str = &new_path.to_string_lossy().replace('\\', "/");
+        let lowercase = new_path_str.to_ascii_lowercase();
+
+        let mut buf = vec![];
+        let mut writer = Cursor::new(&mut buf);
+        reference_pak_reader.read_file(&p, &mut reference_pak_buf, &mut writer)?;
+        let mut hasher = Sha256::new();
+        hasher.update(&buf);
+        let hash = hasher.finalize().to_vec();
+
+        base_game_asset_hashes.insert(lowercase, hash);
+    }
 
     for (mod_spec, mod_pak_path) in mods {
         trace!(?mod_spec, ?mod_pak_path);
@@ -137,9 +192,6 @@ pub fn lint(mods: &[(ModSpecification, PathBuf)]) -> Result<ModLintReport> {
             let mut buf = vec![];
             let mut writer = Cursor::new(&mut buf);
             pak.read_file(&p, &mut pak_bufs[0].1, &mut writer)?;
-
-            trace!("pak read okay");
-
             let mut hasher = Sha256::new();
             trace!("buf.len() = {}", buf.len());
             hasher.update(&buf);
@@ -151,7 +203,17 @@ pub fn lint(mods: &[(ModSpecification, PathBuf)]) -> Result<ModLintReport> {
                 .and_modify(|modifiers: &mut BTreeSet<(ModSpecification, Vec<u8>)>| {
                     modifiers.insert((mod_spec.clone(), hash.clone()));
                 })
-                .or_insert_with(|| [(mod_spec.clone(), hash)].into());
+                .or_insert_with(|| [(mod_spec.clone(), hash.clone())].into());
+
+            if let Some(base_game_asset_hash) = base_game_asset_hashes.get(&lowercase)
+                && base_game_asset_hash == &hash
+            {
+                unmodified_base_game_assets.entry(mod_spec.clone())
+                    .and_modify(|files: &mut BTreeSet<String>| {
+                        files.insert(lowercase.clone());
+                    })
+                    .or_insert_with(|| [lowercase.clone()].into());
+            }
 
             if let Some(filename) = new_path.file_name() {
                 if filename == "AssetRegistry.bin" {
@@ -263,5 +325,6 @@ pub fn lint(mods: &[(ModSpecification, PathBuf)]) -> Result<ModLintReport> {
         archive_with_multiple_paks_mods,
         non_asset_file_mods,
         split_uasset_uexp_mods,
+        unmodified_base_game_assets,
     })
 }

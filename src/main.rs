@@ -284,6 +284,16 @@ async fn action_integrate_profile(action: ActionIntegrateProfile) -> Result<()> 
 }
 
 async fn action_lint(action: ActionLint) -> Result<()> {
+    let path_game_pak = action
+        .fsd_pak
+        .or_else(|| {
+            DRGInstallation::find()
+                .as_ref()
+                .map(DRGInstallation::main_pak)
+        })
+        .context("Could not find DRG pak file, please specify manually with the --fsd_pak flag")?;
+    debug!(?path_game_pak);
+
     let mut state = State::init()?;
 
     let mut mods = Vec::new();
@@ -295,7 +305,7 @@ async fn action_lint(action: ActionLint) -> Result<()> {
 
     let mods = mods.into_iter().zip(mod_paths).collect::<Vec<_>>();
 
-    let report = tokio::task::spawn_blocking(move || lint(&mods)).await??;
+    let report = tokio::task::spawn_blocking(move || lint(&path_game_pak, &mods)).await??;
     println!("{:#?}", report);
     Ok(())
 }

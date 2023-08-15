@@ -8,6 +8,8 @@ use drg_mod_integration::providers::ModSpecification;
 pub fn test_lint_conflicting_files() {
     let base_path = PathBuf::from_str("test_assets/lints/").unwrap();
     assert!(base_path.exists());
+    let reference_pak = base_path.clone().join("reference.pak");
+    assert!(reference_pak.exists());
     let a_path = base_path.clone().join("A.pak");
     assert!(a_path.exists());
     let b_path = base_path.clone().join("B.pak");
@@ -29,7 +31,7 @@ pub fn test_lint_conflicting_files() {
 
     let ModLintReport {
         conflicting_mods, ..
-    } = drg_mod_integration::mod_lint::lint(&mods).unwrap();
+    } = drg_mod_integration::mod_lint::lint(&reference_pak, &mods).unwrap();
 
     println!("{:#?}", conflicting_mods);
 
@@ -43,6 +45,8 @@ pub fn test_lint_conflicting_files() {
 pub fn test_lint_shader() {
     let base_path = PathBuf::from_str("test_assets/lints/").unwrap();
     assert!(base_path.exists());
+    let reference_pak = base_path.clone().join("reference.pak");
+    assert!(reference_pak.exists());
     let a_path = base_path.clone().join("A.pak");
     assert!(a_path.exists());
     let b_path = base_path.clone().join("B.pak");
@@ -57,7 +61,7 @@ pub fn test_lint_shader() {
 
     let ModLintReport {
         shader_file_mods, ..
-    } = drg_mod_integration::mod_lint::lint(&mods).unwrap();
+    } = drg_mod_integration::mod_lint::lint(&reference_pak, &mods).unwrap();
 
     println!("{:#?}", shader_file_mods);
 
@@ -71,6 +75,8 @@ pub fn test_lint_shader() {
 pub fn test_lint_asset_registry_bin() {
     let base_path = PathBuf::from_str("test_assets/lints/").unwrap();
     assert!(base_path.exists());
+    let reference_pak = base_path.clone().join("reference.pak");
+    assert!(reference_pak.exists());
     let a_path = base_path.clone().join("A.pak");
     assert!(a_path.exists());
     let b_path = base_path.clone().join("B.pak");
@@ -86,7 +92,7 @@ pub fn test_lint_asset_registry_bin() {
     let ModLintReport {
         asset_register_bin_mods,
         ..
-    } = drg_mod_integration::mod_lint::lint(&mods).unwrap();
+    } = drg_mod_integration::mod_lint::lint(&reference_pak, &mods).unwrap();
 
     println!("{:#?}", asset_register_bin_mods);
 
@@ -100,6 +106,8 @@ pub fn test_lint_asset_registry_bin() {
 pub fn test_lint_outdated_pak_version() {
     let base_path = PathBuf::from_str("test_assets/lints/").unwrap();
     assert!(base_path.exists());
+    let reference_pak = base_path.clone().join("reference.pak");
+    assert!(reference_pak.exists());
     let outdated_pak_path = base_path.clone().join("outdated_pak_version.pak");
     assert!(outdated_pak_path.exists());
     let outdated_spec = ModSpecification {
@@ -110,7 +118,7 @@ pub fn test_lint_outdated_pak_version() {
     let ModLintReport {
         outdated_pak_version_mods,
         ..
-    } = drg_mod_integration::mod_lint::lint(&mods).unwrap();
+    } = drg_mod_integration::mod_lint::lint(&reference_pak, &mods).unwrap();
 
     println!("{:#?}", outdated_pak_version_mods);
 
@@ -124,6 +132,8 @@ pub fn test_lint_outdated_pak_version() {
 pub fn test_lint_empty_archive() {
     let base_path = PathBuf::from_str("test_assets/lints/").unwrap();
     assert!(base_path.exists());
+    let reference_pak = base_path.clone().join("reference.pak");
+    assert!(reference_pak.exists());
     let empty_archive_path = base_path.clone().join("empty_archive.zip");
     assert!(empty_archive_path.exists());
     let empty_archive_spec = ModSpecification {
@@ -133,7 +143,7 @@ pub fn test_lint_empty_archive() {
 
     let ModLintReport {
         empty_archive_mods, ..
-    } = drg_mod_integration::mod_lint::lint(&mods).unwrap();
+    } = drg_mod_integration::mod_lint::lint(&reference_pak, &mods).unwrap();
 
     println!("{:#?}", empty_archive_mods);
 
@@ -144,6 +154,8 @@ pub fn test_lint_empty_archive() {
 pub fn test_lint_only_non_pak_files() {
     let base_path = PathBuf::from_str("test_assets/lints/").unwrap();
     assert!(base_path.exists());
+    let reference_pak = base_path.clone().join("reference.pak");
+    assert!(reference_pak.exists());
     let a_path = base_path.clone().join("A.pak");
     assert!(a_path.exists());
     let only_non_pak_path = base_path.clone().join("only_non_pak_files.zip");
@@ -162,7 +174,7 @@ pub fn test_lint_only_non_pak_files() {
     let ModLintReport {
         archive_with_only_non_pak_files_mods,
         ..
-    } = drg_mod_integration::mod_lint::lint(&mods).unwrap();
+    } = drg_mod_integration::mod_lint::lint(&reference_pak, &mods).unwrap();
 
     println!("{:#?}", archive_with_only_non_pak_files_mods);
 
@@ -173,6 +185,8 @@ pub fn test_lint_only_non_pak_files() {
 pub fn test_lint_multi_pak_archive() {
     let base_path = PathBuf::from_str("test_assets/lints/").unwrap();
     assert!(base_path.exists());
+    let reference_pak = base_path.clone().join("reference.pak");
+    assert!(reference_pak.exists());
     let multiple_paks_archive_path = base_path.clone().join("multiple_paks.zip");
     assert!(multiple_paks_archive_path.exists());
     let multiple_paks_spec = ModSpecification {
@@ -183,7 +197,7 @@ pub fn test_lint_multi_pak_archive() {
     let ModLintReport {
         archive_with_multiple_paks_mods,
         ..
-    } = drg_mod_integration::mod_lint::lint(&mods).unwrap();
+    } = drg_mod_integration::mod_lint::lint(&reference_pak, &mods).unwrap();
 
     println!("{:#?}", archive_with_multiple_paks_mods);
 
@@ -194,6 +208,8 @@ pub fn test_lint_multi_pak_archive() {
 pub fn test_lint_non_asset_files() {
     let base_path = PathBuf::from_str("test_assets/lints/").unwrap();
     assert!(base_path.exists());
+    let reference_pak = base_path.clone().join("reference.pak");
+    assert!(reference_pak.exists());
     let non_asset_files_pak_path = base_path.clone().join("non_asset_files.pak");
     assert!(non_asset_files_pak_path.exists());
 
@@ -206,7 +222,7 @@ pub fn test_lint_non_asset_files() {
     let ModLintReport {
         non_asset_file_mods,
         ..
-    } = drg_mod_integration::mod_lint::lint(&mods).unwrap();
+    } = drg_mod_integration::mod_lint::lint(&reference_pak, &mods).unwrap();
 
     println!("{:#?}", non_asset_file_mods);
 
@@ -220,6 +236,8 @@ pub fn test_lint_non_asset_files() {
 pub fn test_lint_split_uasset_uexp_pairs() {
     let base_path = PathBuf::from_str("test_assets/lints/").unwrap();
     assert!(base_path.exists());
+    let reference_pak = base_path.clone().join("reference.pak");
+    assert!(reference_pak.exists());
     let split_uasset_uexp_pak_path = base_path.clone().join("split_uasset_uexp.pak");
     assert!(split_uasset_uexp_pak_path.exists());
 
@@ -232,7 +250,7 @@ pub fn test_lint_split_uasset_uexp_pairs() {
     let ModLintReport {
         split_uasset_uexp_mods,
         ..
-    } = drg_mod_integration::mod_lint::lint(&mods).unwrap();
+    } = drg_mod_integration::mod_lint::lint(&reference_pak, &mods).unwrap();
 
     println!("{:#?}", split_uasset_uexp_mods);
 
@@ -251,5 +269,36 @@ pub fn test_lint_split_uasset_uexp_pairs() {
             ]
             .into()
         )
+    );
+}
+
+#[test]
+pub fn test_lint_unmodified_base_game_assets() {
+    let base_path = PathBuf::from_str("test_assets/lints/").unwrap();
+    assert!(base_path.exists());
+    let reference_pak = base_path.clone().join("reference.pak");
+    assert!(reference_pak.exists());
+    let unmodified_game_asset_pak = base_path.clone().join("unmodified_game_asset.pak");
+    assert!(unmodified_game_asset_pak.exists());
+
+    let unmodified_game_asset_spec = ModSpecification {
+        url: "unmodified_game_asset".to_string(),
+    };
+
+    let mods = vec![(
+        unmodified_game_asset_spec.clone(),
+        unmodified_game_asset_pak.clone(),
+    )];
+
+    let ModLintReport {
+        unmodified_base_game_assets,
+        ..
+    } = drg_mod_integration::mod_lint::lint(&reference_pak, &mods).unwrap();
+
+    println!("{:#?}", unmodified_base_game_assets);
+
+    assert_eq!(
+        unmodified_base_game_assets.get(&unmodified_game_asset_spec),
+        Some(&["fsd/a.uasset".to_string(), "fsd/a.uexp".to_string()].into())
     );
 }

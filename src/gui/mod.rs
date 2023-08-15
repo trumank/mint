@@ -1059,6 +1059,32 @@ impl App {
                                         });
                                     });
                                 }
+
+                                if !report.unmodified_base_game_assets.is_empty() {
+                                    CollapsingHeader::new(
+                                        RichText::new(
+                                            "⚠ Mod(s) with unmodified base game assets detected",
+                                        )
+                                        .color(AMBER),
+                                    )
+                                    .default_open(true)
+                                    .show(ui, |ui| {
+                                        report.unmodified_base_game_assets.iter().for_each(|(r#mod, assets)| {
+                                            CollapsingHeader::new(
+                                                RichText::new(format!(
+                                                    "⚠ {} includes one or more unmodified base game assets",
+                                                    r#mod.url
+                                                ))
+                                                .color(AMBER),
+                                            )
+                                            .show(ui, |ui| {
+                                                assets.iter().for_each(|asset| {
+                                                    ui.label(asset);
+                                                });
+                                            });
+                                        });
+                                    });
+                                }
                             });
                     } else {
                         ui.spinner();
@@ -1262,22 +1288,34 @@ impl eframe::App for App {
                     }
                     ui.spinner();
                 }
-                if ui.button("Mod lint").on_hover_text("Lint mods in the current profile").clicked() {
-                    let mut mods = Vec::new();
-                    let active_profile = self.state.mod_data.active_profile.clone();
-                    self.state.mod_data.for_each_enabled_mod(&active_profile, |mc| {
-                        mods.push(mc.spec.clone());
-                    });
 
-                    self.lint_rid = Some(message::LintMods::send(
-                        &mut self.request_counter,
-                        self.state.store.clone(),
-                        mods,
-                        self.tx.clone(),
-                        ctx.clone(),
-                    ));
-                    self.lint_window = Some(WindowLint::new());
-                }
+                ui.add_enabled_ui(self.state.config.drg_pak_path.is_some(), |ui| {
+                    let mut button = ui.button("Lint mods");
+                    if self.state.config.drg_pak_path.is_none() {
+                        button = button.on_disabled_hover_text(
+                            "DRG install not found. Configure it in the settings menu.",
+                        );
+                    }
+
+                    if button.on_hover_text("Lint mods in the current profile").clicked() {
+                        let mut mods = Vec::new();
+                        let active_profile = self.state.mod_data.active_profile.clone();
+                        self.state.mod_data.for_each_enabled_mod(&active_profile, |mc| {
+                            mods.push(mc.spec.clone());
+                        });
+
+                        self.lint_rid = Some(message::LintMods::send(
+                            &mut self.request_counter,
+                            self.state.store.clone(),
+                            mods,
+                            self.state.config.drg_pak_path.as_ref().unwrap().clone(),
+                            self.tx.clone(),
+                            ctx.clone(),
+                        ));
+                        self.lint_window = Some(WindowLint::new());
+                    }
+                });
+
                 if ui.button("⚙").on_hover_text("Open settings").clicked() {
                     self.settings_window = Some(WindowSettings::new(&self.state));
                 }

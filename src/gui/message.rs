@@ -414,19 +414,31 @@ impl LintMods {
         rc: &mut RequestCounter,
         store: Arc<ModStore>,
         mods: Vec<ModSpecification>,
+        reference_pak_path: PathBuf,
         tx: Sender<Message>,
         ctx: egui::Context,
     ) -> MessageHandle<()> {
         let rid = rc.next();
+
+        let handle = tokio::spawn(async move {
+            let res = resolve_async_ordered(
+                store,
+                ctx.clone(),
+                mods,
+                reference_pak_path.clone(),
+                rid,
+                tx.clone(),
+            )
+            .await;
+            tx.send(Message::LintMods(LintMods { rid, result: res }))
+                .await
+                .unwrap();
+            ctx.request_repaint();
+        });
+
         MessageHandle {
             rid,
-            handle: tokio::task::spawn(async move {
-                let res = resolve_async_ordered(store, ctx.clone(), mods, rid, tx.clone()).await;
-                tx.send(Message::LintMods(LintMods { rid, result: res }))
-                    .await
-                    .unwrap();
-                ctx.request_repaint();
-            }),
+            handle,
             state: Default::default(),
         }
     }
@@ -461,6 +473,7 @@ async fn resolve_async_ordered(
     store: Arc<ModStore>,
     ctx: egui::Context,
     mod_specs: Vec<ModSpecification>,
+    reference_pak_path: PathBuf,
     rid: RequestID,
     message_tx: Sender<Message>,
 ) -> Result<ModLintReport> {
@@ -502,7 +515,10 @@ async fn resolve_async_ordered(
     let paths = store.fetch_mods_ordered(&urls, update, Some(tx)).await?;
 
     tokio::task::spawn_blocking(|| {
-        crate::mod_lint::lint(&mod_specs.into_iter().zip(paths).collect::<Vec<_>>())
+        crate::mod_lint::lint(
+            reference_pak_path,
+            &mod_specs.into_iter().zip(paths).collect::<Vec<_>>(),
+        )
     })
     .await?
 }
