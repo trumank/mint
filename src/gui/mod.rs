@@ -333,7 +333,7 @@ impl App {
                 }
 
                 if ui
-                    .add(egui::Checkbox::without_text(&mut mc.enabled))
+                    .add(toggle_switch(&mut mc.enabled))
                     .on_hover_text_at_pointer("enabled?")
                     .changed()
                 {
@@ -537,7 +537,7 @@ impl App {
                             enabled,
                         } => {
                             if ui
-                                .add(egui::Checkbox::without_text(enabled))
+                                .add(toggle_switch(enabled))
                                 .on_hover_text_at_pointer("enabled?")
                                 .changed()
                             {
