@@ -851,7 +851,7 @@ impl App {
 
             egui::Window::new("Toggle lints")
                 .open(&mut open)
-                .resizable(true)
+                .resizable(false)
                 .show(ctx, |ui| {
                     egui::ScrollArea::vertical().show(ui, |ui| {
                         egui::Grid::new("lints-toggle-grid").show(ui, |ui| {
