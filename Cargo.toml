@@ -18,7 +18,7 @@ image = { version = "0.24.7", default-features = false, features = ["png"] }
 indexmap = { version = "2.0.0", features = ["serde"] }
 inventory = "0.3.11"
 lazy_static = "1.4.0"
-modio = { version = "0.7.1", features = ["rustls-tls"] }
+modio = { git = "https://github.com/trumank/modio-rs.git", branch = "dev", features = ["rustls-tls"] }
 obake = { version = "1.0.5", features = ["serde"] }
 opener = "0.6.1"
 regex = "1.9.3"
@@ -39,14 +39,9 @@ tracing = { version = "0.1.37", features = ["attributes"] }
 tracing-appender = "0.2.2"
 tracing-subscriber = { version = "0.3.17", features = ["fmt", "env-filter", "std", "registry"] }
 typetag = "0.2.12"
-unreal_asset = { git = "https://github.com/AstroTechies/unrealmodding.git", version = "0.1.12" }
+unreal_asset = { git = "https://github.com/trumank/unrealmodding", branch = "patches" }
 url = "2.4.0"
 zip = { version = "0.6.6", default-features = false, features = ["aes-crypto", "deflate", "time"] }
-
-[patch.crates-io]
-modio = { git = "https://github.com/trumank/modio-rs.git", branch = "dev" }
-[patch.'https://github.com/AstroTechies/unrealmodding']
-unreal_asset = { git = "https://github.com/trumank/unrealmodding", branch = "patches" }
 
 [target.'cfg(target_env = "msvc")'.dependencies]
 hook = { path = "hook", version = "0.1.0", artifact = "cdylib", target = "x86_64-pc-windows-msvc"}
