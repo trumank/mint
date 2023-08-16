@@ -38,7 +38,7 @@ extern "system" fn DllMain(dll_module: HMODULE, call_reason: u32, _: *mut ()) ->
     unsafe {
         match call_reason {
             DLL_PROCESS_ATTACH => {
-                patch().ok();
+                std::thread::spawn(|| patch().ok());
             }
             DLL_PROCESS_DETACH => (),
             _ => (),
@@ -69,11 +69,6 @@ impl DRGInstallationType {
             _ => bail!("unrecognized exe file name: {exe_name}"),
         })
     }
-}
-
-fn scan<'a>(data: &'a [u8], pattern: &'a [u8]) -> impl Iterator<Item = usize> + 'a {
-    memchr::memchr_iter(pattern[0], &data[0..data.len() - pattern.len() - 1])
-        .filter(move |&i| &data[i..i + pattern.len()] == pattern)
 }
 
 unsafe fn patch() -> Result<()> {
@@ -109,37 +104,53 @@ unsafe fn patch() -> Result<()> {
         mod_info.SizeOfImage as usize,
     );
 
-    let pattern = [
-        0x48, 0x89, 0x5C, 0x24, 0x10, 0x48, 0x89, 0x6C, 0x24, 0x18, 0x48, 0x89, 0x74, 0x24, 0x20,
-        0x57, 0x41, 0x56, 0x41, 0x57, 0x48, 0x83, 0xEC, 0x30, 0x45, 0x33, 0xFF, 0x4C, 0x8B, 0xF2,
-        0x48, 0x8B, 0xD9, 0x44, 0x89, 0x7C, 0x24, 0x50, 0x41, 0x8B, 0xFF,
-    ];
+    #[derive(Debug, Clone, Copy, Eq, PartialEq)]
+    enum Sig {
+        GetServerName,
+        Disable,
+        SaveGameToSlot,
+        LoadGameFromMemory,
+        LoadGameFromSlot,
+    }
 
-    {
-        let mut server_name_scan = scan(memory, &pattern);
-        if let Some(rva) = server_name_scan.next() {
-            let address = module_addr.add(rva);
+    let patterns = [
+        (Sig::GetServerName, "48 89 5C 24 10 48 89 6C 24 18 48 89 74 24 20 57 41 56 41 57 48 83 EC 30 45 33 FF 4C 8B F2 48 8B D9 44 89 7C 24 50 41 8B FF"),
+        (Sig::Disable, "4C 8B B4 24 48 01 00 00 0F 84"),
+        (Sig::SaveGameToSlot, "48 89 5c 24 08 48 89 74 24 10 57 48 83 ec 40 48 8b da 33 f6 48 8d 54 24 30 48 89 74 24 30 48 89 74 24 38 41 8b f8"),
+        (Sig::LoadGameFromMemory, "40 55 48 8d ac 24 00 ff ff ff 48 81 ec 00 02 00 00 83 79 08 00"),
+        (Sig::LoadGameFromSlot, "48 8b c4 55 57 48 8d a8 d8 fe ff ff 48 81 ec 18 02 00 00"),
+    ].iter().map(|(name, pattern)| Ok((name, patternsleuth_scanner::Pattern::new(pattern)?))).collect::<Result<Vec<_>>>()?;
+    let pattern_refs = patterns
+        .iter()
+        .map(|(name, pattern)| (name, pattern))
+        .collect::<Vec<_>>();
 
-            Resize16 = Some(std::mem::transmute(address.add(53 + 4).offset(
-                i32::from_le_bytes(memory[rva + 53..rva + 53 + 4].try_into().unwrap()) as isize,
-            )));
+    let results = patternsleuth_scanner::scan_memchr_lookup(&pattern_refs, 0, memory);
 
-            let target: FnGetServerName = std::mem::transmute(address);
-            GetServerName
-                .initialize(target, get_server_name_detour)?
-                .enable()?;
-        }
+    let get_sig = |sig: Sig| {
+        results
+            .iter()
+            .find_map(|(s, addr)| (***s == sig).then_some(*addr))
+    };
+
+    if let Some(rva) = get_sig(Sig::GetServerName) {
+        let address = module_addr.add(rva);
+
+        Resize16 = Some(std::mem::transmute(address.add(53 + 4).offset(
+            i32::from_le_bytes(memory[rva + 53..rva + 53 + 4].try_into().unwrap()) as isize,
+        )));
+
+        let target: FnGetServerName = std::mem::transmute(address);
+        GetServerName
+            .initialize(target, get_server_name_detour)?
+            .enable()?;
     }
 
     if matches!(installation_type, DRGInstallationType::Steam) {
-        let pattern = [0x4C, 0x8B, 0xB4, 0x24, 0x48, 0x01, 0x00, 0x00, 0x0F, 0x84];
-        let mut scan_iter = scan(memory, &pattern);
-        if let Some(sig_rva) = scan_iter.next() {
-            drop(scan_iter);
-
+        if let Some(rva) = get_sig(Sig::Disable) {
             let patch = [0xB8, 0x01, 0x00, 0x00, 0x00];
 
-            let rva = sig_rva + 29;
+            let rva = rva + 29;
             let patch_mem = &mut memory[rva..rva + 5];
 
             let mut old: PAGE_PROTECTION_FLAGS = Default::default();
@@ -173,15 +184,7 @@ unsafe fn patch() -> Result<()> {
                 .join("SaveGames"),
         );
 
-        // SaveGameToSlot
-        let pattern = [
-            0x48, 0x89, 0x5c, 0x24, 0x08, 0x48, 0x89, 0x74, 0x24, 0x10, 0x57, 0x48, 0x83, 0xec,
-            0x40, 0x48, 0x8b, 0xda, 0x33, 0xf6, 0x48, 0x8d, 0x54, 0x24, 0x30, 0x48, 0x89, 0x74,
-            0x24, 0x30, 0x48, 0x89, 0x74, 0x24, 0x38, 0x41, 0x8b, 0xf8,
-        ];
-
-        let mut scan_iter = scan(memory, &pattern);
-        if let Some(rva) = scan_iter.next() {
+        if let Some(rva) = get_sig(Sig::SaveGameToSlot) {
             let address = module_addr.add(rva);
 
             SaveGameToMemory = Some(std::mem::transmute(address.add(39 + 4).offset(
@@ -194,24 +197,11 @@ unsafe fn patch() -> Result<()> {
                 .enable()?;
         }
 
-        // LoadGameFromMemory
-        let pattern = [
-            0x40, 0x55, 0x48, 0x8d, 0xac, 0x24, 0x00, 0xff, 0xff, 0xff, 0x48, 0x81, 0xec, 0x00,
-            0x02, 0x00, 0x00, 0x83, 0x79, 0x08, 0x00,
-        ];
-        let mut scan_iter = scan(memory, &pattern);
-        if let Some(rva) = scan_iter.next() {
+        if let Some(rva) = get_sig(Sig::LoadGameFromMemory) {
             let address = module_addr.add(rva);
-
             LoadGameFromMemory = Some(std::mem::transmute(address));
 
-            // LoadGameFromSlot
-            let pattern = [
-                0x48, 0x8b, 0xc4, 0x55, 0x57, 0x48, 0x8d, 0xa8, 0xd8, 0xfe, 0xff, 0xff, 0x48, 0x81,
-                0xec, 0x18, 0x02, 0x00, 0x00,
-            ];
-            let mut scan_iter = scan(memory, &pattern);
-            if let Some(rva) = scan_iter.next() {
+            if let Some(rva) = get_sig(Sig::LoadGameFromSlot) {
                 let address = module_addr.add(rva);
 
                 let target: FnLoadGameFromSlot = std::mem::transmute(address);
