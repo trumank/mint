@@ -141,6 +141,10 @@ pub struct LintId {
 }
 
 impl LintId {
+    pub fn to_name_lower(&self) -> String {
+        self.name.to_ascii_lowercase()
+    }
+
     pub const CONFLICTING: Self = LintId {
         name: "conflicting",
     };

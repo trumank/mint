@@ -1156,6 +1156,7 @@ dependencies = [
  "directories",
  "eframe",
  "egui_dnd",
+ "egui_extras",
  "futures",
  "hex",
  "hook",
@@ -1263,6 +1264,16 @@ source = "git+https://github.com/lucasmerlin/egui_dnd.git#6b1433c0d2e2bf66321244
 dependencies = [
  "egui",
  "web-time",
+]
+
+[[package]]
+name = "egui_extras"
+version = "0.22.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9278f4337b526f0d57e5375e5a7340a311fa6ee8f9fcc75721ac50af13face02"
+dependencies = [
+ "egui",
+ "serde",
 ]
 
 [[package]]

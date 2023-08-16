@@ -2,9 +2,11 @@ mod find_string;
 mod message;
 mod named_combobox;
 mod request_counter;
+mod toggle_switch;
 
 //#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")] // hide console window on Windows in release
 
+use std::collections::{BTreeMap, BTreeSet};
 use std::{
     collections::{HashMap, HashSet},
     ops::DerefMut,
@@ -22,9 +24,9 @@ use tokio::{
     sync::mpsc::{self, Receiver, Sender},
     task::JoinHandle,
 };
-use tracing::{debug, info};
+use tracing::{debug, info, trace};
 
-use crate::mod_lints::LintReport;
+use crate::mod_lints::{LintId, LintReport};
 use crate::{
     integrate::uninstall,
     is_drg_pak,
@@ -37,6 +39,8 @@ use crate::{
 use find_string::FindString;
 use message::MessageHandle;
 use request_counter::{RequestCounter, RequestID};
+
+use self::toggle_switch::toggle_switch;
 
 pub fn gui(args: Option<Vec<String>>) -> Result<()> {
     let options = eframe::NativeOptions {
@@ -76,8 +80,21 @@ pub struct App {
     available_update: Option<GitHubRelease>,
     open_profiles: HashSet<String>,
     lint_rid: Option<MessageHandle<()>>,
-    lint_window: Option<WindowLint>,
-    mod_lint_report: Option<LintReport>,
+    lint_report_window: Option<WindowLintReport>,
+    lint_report: Option<LintReport>,
+    lints_toggle_window: Option<WindowLintsToggle>,
+    lint_options: LintOptions,
+}
+
+#[derive(Default)]
+struct LintOptions {
+    archive_with_multiple_paks: bool,
+    archive_with_only_non_pak_files: bool,
+    asset_register_bin: bool,
+    conflicting: bool,
+    empty_archive: bool,
+    outdated_pak_version: bool,
+    shader_files: bool,
 }
 
 enum LastActionStatus {
@@ -114,8 +131,10 @@ impl App {
             available_update: None,
             open_profiles: Default::default(),
             lint_rid: None,
-            lint_window: None,
-            mod_lint_report: None,
+            lint_report_window: None,
+            lint_report: None,
+            lints_toggle_window: None,
+            lint_options: LintOptions::default(),
         })
     }
 
@@ -824,14 +843,120 @@ impl App {
         }
     }
 
-    fn show_lint_report(&mut self, ctx: &egui::Context) {
-        if self.lint_window.is_some() {
+    fn show_lints_toggle(&mut self, ctx: &egui::Context) {
+        if let Some(lints_toggle) = &self.lints_toggle_window {
             let mut open = true;
-            egui::Window::new("Lint Results")
+
+            let mods = lints_toggle.mods.clone();
+
+            egui::Window::new("Toggle lints")
                 .open(&mut open)
                 .resizable(true)
                 .show(ctx, |ui| {
-                    if let Some(report) = &self.mod_lint_report {
+                    egui::ScrollArea::vertical().show(ui, |ui| {
+                        egui::Grid::new("lints-toggle-grid").show(ui, |ui| {
+                            ui.heading("Lint");
+                            ui.heading("Enabled?");
+                            ui.end_row();
+
+                            ui.label("Archive with multiple paks");
+                            ui.add(toggle_switch(
+                                &mut self.lint_options.archive_with_multiple_paks,
+                            ));
+                            ui.end_row();
+
+                            ui.label("Archive with only non-pak files");
+                            ui.add(toggle_switch(
+                                &mut self.lint_options.archive_with_only_non_pak_files,
+                            ));
+                            ui.end_row();
+
+                            ui.label("Mods containing AssetRegister.bin");
+                            ui.add(toggle_switch(&mut self.lint_options.asset_register_bin));
+                            ui.end_row();
+
+                            ui.label("Mods containing conflicting files");
+                            ui.add(toggle_switch(&mut self.lint_options.conflicting));
+                            ui.end_row();
+
+                            ui.label("Mods containing empty archives");
+                            ui.add(toggle_switch(&mut self.lint_options.empty_archive));
+                            ui.end_row();
+
+                            ui.label("Mods containing oudated pak version");
+                            ui.add(toggle_switch(&mut self.lint_options.outdated_pak_version));
+                            ui.end_row();
+
+                            ui.label("Mods containing shader files");
+                            ui.add(toggle_switch(&mut self.lint_options.shader_files));
+                            ui.end_row();
+                        });
+                    });
+
+                    ui.horizontal(|ui| {
+                        if ui.button("Cancel").clicked() {
+                            self.lints_toggle_window = None;
+                        }
+
+                        if ui.button("Generate report").clicked() {
+                            let lint_options = BTreeMap::from([
+                                (
+                                    LintId::ARCHIVE_WITH_MULTIPLE_PAKS,
+                                    self.lint_options.archive_with_multiple_paks,
+                                ),
+                                (
+                                    LintId::ARCHIVE_WITH_ONLY_NON_PAK_FILES,
+                                    self.lint_options.archive_with_only_non_pak_files,
+                                ),
+                                (
+                                    LintId::ASSET_REGISTRY_BIN,
+                                    self.lint_options.asset_register_bin,
+                                ),
+                                (LintId::CONFLICTING, self.lint_options.conflicting),
+                                (LintId::EMPTY_ARCHIVE, self.lint_options.empty_archive),
+                                (
+                                    LintId::OUTDATED_PAK_VERSION,
+                                    self.lint_options.outdated_pak_version,
+                                ),
+                                (LintId::SHADER_FILES, self.lint_options.shader_files),
+                            ]);
+
+                            trace!(?lint_options);
+
+                            self.lint_report = None;
+                            self.lint_rid = Some(message::LintMods::send(
+                                &mut self.request_counter,
+                                self.state.store.clone(),
+                                mods,
+                                BTreeSet::from_iter(
+                                    lint_options
+                                        .into_iter()
+                                        .filter_map(|(lint, enabled)| enabled.then_some(lint)),
+                                ),
+                                self.tx.clone(),
+                                ctx.clone(),
+                            ));
+
+                            self.lint_report_window = Some(WindowLintReport);
+                        }
+                    });
+                });
+
+            if !open {
+                self.lints_toggle_window = None;
+            }
+        }
+    }
+
+    fn show_lint_report(&mut self, ctx: &egui::Context) {
+        if self.lint_report_window.is_some() {
+            let mut open = true;
+
+            egui::Window::new("Lint results")
+                .open(&mut open)
+                .resizable(true)
+                .show(ctx, |ui| {
+                    if let Some(report) = &self.lint_report {
                         let scroll_height =
                             (ui.available_height() - 30.0).clamp(0.0, f32::INFINITY);
                         egui::ScrollArea::vertical()
@@ -1023,8 +1148,9 @@ impl App {
                         ui.label("Lint report generating...");
                     }
                 });
+
             if !open {
-                self.lint_window = None;
+                self.lint_report_window = None;
                 self.lint_rid = None;
             }
         }
@@ -1079,12 +1205,10 @@ impl WindowSettings {
     }
 }
 
-struct WindowLint;
+struct WindowLintReport;
 
-impl WindowLint {
-    fn new() -> Self {
-        Self {}
-    }
+struct WindowLintsToggle {
+    mods: Vec<ModSpecification>,
 }
 
 impl eframe::App for App {
@@ -1104,6 +1228,7 @@ impl eframe::App for App {
         self.show_provider_parameters(ctx);
         self.show_profile_windows(ctx);
         self.show_settings(ctx);
+        self.show_lints_toggle(ctx);
         self.show_lint_report(ctx);
 
         egui::TopBottomPanel::bottom("bottom_panel").show(ctx, |ui| {
@@ -1220,21 +1345,13 @@ impl eframe::App for App {
                     }
                     ui.spinner();
                 }
-                if ui.button("Mod lint").on_hover_text("Lint mods in the current profile").clicked() {
+                if ui.button("Lint mods").on_hover_text("Lint mods in the current profile").clicked() {
                     let mut mods = Vec::new();
                     let active_profile = self.state.mod_data.active_profile.clone();
                     self.state.mod_data.for_each_enabled_mod(&active_profile, |mc| {
                         mods.push(mc.spec.clone());
                     });
-
-                    self.lint_rid = Some(message::LintMods::send(
-                        &mut self.request_counter,
-                        self.state.store.clone(),
-                        mods,
-                        self.tx.clone(),
-                        ctx.clone(),
-                    ));
-                    self.lint_window = Some(WindowLint::new());
+                    self.lints_toggle_window = Some(WindowLintsToggle { mods });
                 }
                 if ui.button("⚙").on_hover_text("Open settings").clicked() {
                     self.settings_window = Some(WindowSettings::new(&self.state));
