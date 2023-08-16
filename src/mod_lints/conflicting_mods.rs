@@ -1,6 +1,7 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 
 use anyhow::Result;
+use indexmap::IndexSet;
 
 use crate::providers::ModSpecification;
 
@@ -12,7 +13,7 @@ pub struct ConflictingModsLint;
 const CONFLICTING_MODS_LINT_WHITELIST: [&str; 1] = ["fsd/content/_interop"];
 
 impl Lint for ConflictingModsLint {
-    type Output = BTreeMap<String, BTreeSet<ModSpecification>>;
+    type Output = BTreeMap<String, IndexSet<ModSpecification>>;
 
     fn check_mods(&mut self, lcx: &LintCtxt) -> Result<Self::Output> {
         let mut per_path_modifiers = BTreeMap::new();
@@ -21,7 +22,7 @@ impl Lint for ConflictingModsLint {
             |mod_spec, _, _, normalized_path| {
                 per_path_modifiers
                     .entry(normalized_path)
-                    .and_modify(|modifiers: &mut BTreeSet<ModSpecification>| {
+                    .and_modify(|modifiers: &mut IndexSet<ModSpecification>| {
                         modifiers.insert(mod_spec.clone());
                     })
                     .or_insert_with(|| [mod_spec.clone()].into());
@@ -42,7 +43,7 @@ impl Lint for ConflictingModsLint {
                 true
             })
             .filter(|(_, modifiers)| modifiers.len() > 1)
-            .collect::<BTreeMap<String, BTreeSet<ModSpecification>>>();
+            .collect::<BTreeMap<String, IndexSet<ModSpecification>>>();
 
         Ok(conflicting_mods)
     }
