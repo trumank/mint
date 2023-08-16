@@ -415,19 +415,39 @@ impl LintMods {
         rc: &mut RequestCounter,
         store: Arc<ModStore>,
         mods: Vec<ModSpecification>,
+        enabled_lints: BTreeSet<LintId>,
         tx: Sender<Message>,
         ctx: egui::Context,
     ) -> MessageHandle<()> {
         let rid = rc.next();
+
+        let handle = tokio::task::spawn(async move {
+            let paths_res =
+                resolve_async_ordered(store, ctx.clone(), mods.clone(), rid, tx.clone()).await;
+            let mod_path_pairs_res =
+                paths_res.map(|paths| mods.into_iter().zip(paths).collect::<Vec<_>>());
+
+            let report_res = match mod_path_pairs_res {
+                Ok(pairs) => tokio::task::spawn_blocking(move || {
+                    crate::mod_lints::run_lints(&enabled_lints, BTreeSet::from_iter(pairs))
+                })
+                .await
+                .unwrap(),
+                Err(e) => Err(e),
+            };
+
+            tx.send(Message::LintMods(LintMods {
+                rid,
+                result: report_res,
+            }))
+            .await
+            .unwrap();
+            ctx.request_repaint();
+        });
+
         MessageHandle {
             rid,
-            handle: tokio::task::spawn(async move {
-                let res = resolve_async_ordered(store, ctx.clone(), mods, rid, tx.clone()).await;
-                tx.send(Message::LintMods(LintMods { rid, result: res }))
-                    .await
-                    .unwrap();
-                ctx.request_repaint();
-            }),
+            handle,
             state: Default::default(),
         }
     }
@@ -436,7 +456,7 @@ impl LintMods {
             match self.result {
                 Ok(report) => {
                     info!("lint mod report complete");
-                    app.mod_lint_report = Some(report);
+                    app.lint_report = Some(report);
                     app.last_action_status =
                         LastActionStatus::Success("lint mod report complete".to_string());
                 }
@@ -464,7 +484,7 @@ async fn resolve_async_ordered(
     mod_specs: Vec<ModSpecification>,
     rid: RequestID,
     message_tx: Sender<Message>,
-) -> Result<LintReport> {
+) -> Result<Vec<PathBuf>> {
     let update = false;
 
     let mods = store.resolve_mods(&mod_specs, update).await?;
@@ -500,20 +520,5 @@ async fn resolve_async_ordered(
         }
     });
 
-    let paths = store.fetch_mods_ordered(&urls, update, Some(tx)).await?;
-
-    tokio::task::spawn_blocking(|| {
-        crate::mod_lints::run_lints(
-            &BTreeSet::from([
-                LintId::ARCHIVE_WITH_ONLY_NON_PAK_FILES,
-                LintId::ASSET_REGISTRY_BIN,
-                LintId::CONFLICTING,
-                LintId::EMPTY_ARCHIVE,
-                LintId::OUTDATED_PAK_VERSION,
-                LintId::SHADER_FILES,
-            ]),
-            BTreeSet::from_iter(mod_specs.into_iter().zip(paths)),
-        )
-    })
-    .await?
+    store.fetch_mods_ordered(&urls, update, Some(tx)).await
 }

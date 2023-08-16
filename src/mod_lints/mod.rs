@@ -11,6 +11,7 @@ use std::io::BufReader;
 use std::path::PathBuf;
 
 use anyhow::{Context, Result};
+use indexmap::IndexSet;
 use repak::PakReader;
 use tracing::trace;
 
@@ -141,6 +142,10 @@ pub struct LintId {
 }
 
 impl LintId {
+    pub fn to_name_lower(&self) -> String {
+        self.name.to_ascii_lowercase()
+    }
+
     pub const CONFLICTING: Self = LintId {
         name: "conflicting",
     };
@@ -166,7 +171,7 @@ impl LintId {
 
 #[derive(Default, Debug)]
 pub struct LintReport {
-    pub conflicting_mods: Option<BTreeMap<String, BTreeSet<ModSpecification>>>,
+    pub conflicting_mods: Option<BTreeMap<String, IndexSet<ModSpecification>>>,
     pub asset_register_bin_mods: Option<BTreeMap<ModSpecification, BTreeSet<String>>>,
     pub shader_file_mods: Option<BTreeMap<ModSpecification, BTreeSet<String>>>,
     pub outdated_pak_version_mods: Option<BTreeMap<ModSpecification, repak::Version>>,
