@@ -95,6 +95,7 @@ struct LintOptions {
     empty_archive: bool,
     outdated_pak_version: bool,
     shader_files: bool,
+    non_asset_files: bool,
 }
 
 enum LastActionStatus {
@@ -890,6 +891,10 @@ impl App {
                             ui.label("Mods containing shader files");
                             ui.add(toggle_switch(&mut self.lint_options.shader_files));
                             ui.end_row();
+
+                            ui.label("Mods containing non-asset files");
+                            ui.add(toggle_switch(&mut self.lint_options.non_asset_files));
+                            ui.end_row();
                         });
                     });
 
@@ -919,6 +924,7 @@ impl App {
                                     self.lint_options.outdated_pak_version,
                                 ),
                                 (LintId::SHADER_FILES, self.lint_options.shader_files),
+                                (LintId::NON_ASSET_FILES, self.lint_options.non_asset_files),
                             ]);
 
                             trace!(?lint_options);
@@ -1138,6 +1144,34 @@ impl App {
                                                     r#mod.url
                                                 ))
                                                 .color(AMBER));
+                                            });
+                                        });
+                                    }
+                                }
+
+                                if let Some(non_asset_file_mods) = &report.non_asset_file_mods {
+                                    if !non_asset_file_mods.is_empty() {
+                                        CollapsingHeader::new(
+                                            RichText::new(
+                                                "⚠ Mod(s) with non-asset files detected",
+                                            )
+                                            .color(AMBER),
+                                        )
+                                        .default_open(true)
+                                        .show(ui, |ui| {
+                                            non_asset_file_mods.iter().for_each(|(r#mod, files)| {
+                                                CollapsingHeader::new(
+                                                    RichText::new(format!(
+                                                        "⚠ {} includes non-asset files",
+                                                        r#mod.url
+                                                    ))
+                                                    .color(AMBER),
+                                                )
+                                                .show(ui, |ui| {
+                                                    files.iter().for_each(|file| {
+                                                        ui.label(file);
+                                                    });
+                                                });
                                             });
                                         });
                                     }
