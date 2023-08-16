@@ -6,6 +6,7 @@ mod empty_archive;
 mod non_asset_files;
 mod outdated_pak_version;
 mod shader_files;
+mod split_asset_pairs;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::io::BufReader;
@@ -24,9 +25,11 @@ use self::archive_multiple_paks::ArchiveMultiplePaksLint;
 use self::archive_only_non_pak_files::ArchiveOnlyNonPakFilesLint;
 use self::asset_register_bin::AssetRegisterBinLint;
 use self::empty_archive::EmptyArchiveLint;
-use self::non_asset_files::NonAssetFiles;
+use self::non_asset_files::NonAssetFilesLint;
 use self::outdated_pak_version::OutdatedPakVersionLint;
 use self::shader_files::ShaderFilesLint;
+pub use self::split_asset_pairs::SplitAssetPair;
+use self::split_asset_pairs::SplitAssetPairsLint;
 
 pub struct LintCtxt {
     mods: BTreeSet<(ModSpecification, PathBuf)>,
@@ -165,6 +168,9 @@ impl LintId {
     pub const NON_ASSET_FILES: Self = LintId {
         name: "non_asset_files",
     };
+    pub const SPLIT_ASSET_PAIRS: Self = LintId {
+        name: "split_asset_pairs",
+    };
 }
 
 #[derive(Default, Debug)]
@@ -177,6 +183,8 @@ pub struct LintReport {
     pub archive_with_only_non_pak_files_mods: Option<BTreeSet<ModSpecification>>,
     pub archive_with_multiple_paks_mods: Option<BTreeSet<ModSpecification>>,
     pub non_asset_file_mods: Option<BTreeMap<ModSpecification, BTreeSet<String>>>,
+    pub split_asset_pairs_mods:
+        Option<BTreeMap<ModSpecification, BTreeMap<String, SplitAssetPair>>>,
 }
 
 pub fn run_lints(
@@ -217,8 +225,12 @@ pub fn run_lints(
                 lint_report.archive_with_multiple_paks_mods = Some(res);
             }
             LintId::NON_ASSET_FILES => {
-                let res = NonAssetFiles.check_mods(&lint_ctxt)?;
+                let res = NonAssetFilesLint.check_mods(&lint_ctxt)?;
                 lint_report.non_asset_file_mods = Some(res);
+            }
+            LintId::SPLIT_ASSET_PAIRS => {
+                let res = SplitAssetPairsLint.check_mods(&lint_ctxt)?;
+                lint_report.split_asset_pairs_mods = Some(res);
             }
             _ => unimplemented!(),
         }
