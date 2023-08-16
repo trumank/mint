@@ -389,40 +389,46 @@ impl App {
                         ui.output_mut(|o| o.copied_text = mc.spec.url.to_owned());
                     }
 
-                    let is_duplicate = enabled_specs.iter().any(|(i, spec)| {
-                        Some(state.index) != *i && info.spec.satisfies_dependency(spec)
-                    });
-                    if is_duplicate
-                        && ui
-                            .button(
-                                egui::RichText::new("\u{26A0}").color(ui.visuals().warn_fg_color),
-                            )
-                            .on_hover_text_at_pointer("remove duplicate")
-                            .clicked()
-                    {
-                        ctx.btn_remove = Some(state.index);
-                    }
-
-                    let missing_deps = info
-                        .suggested_dependencies
-                        .iter()
-                        .filter(|d| !enabled_specs.iter().any(|(_, s)| s.satisfies_dependency(d)))
-                        .collect::<Vec<_>>();
-
-                    if !missing_deps.is_empty() {
-                        let mut msg = "Add missing dependencies:".to_string();
-                        for dep in &missing_deps {
-                            msg.push('\n');
-                            msg.push_str(&dep.url);
-                        }
-                        if ui
-                            .button(
-                                egui::RichText::new("\u{26A0}").color(ui.visuals().warn_fg_color),
-                            )
-                            .on_hover_text(msg)
-                            .clicked()
+                    if mc.enabled {
+                        let is_duplicate = enabled_specs.iter().any(|(i, spec)| {
+                            Some(state.index) != *i && info.spec.satisfies_dependency(spec)
+                        });
+                        if is_duplicate
+                            && ui
+                                .button(
+                                    egui::RichText::new("\u{26A0}")
+                                        .color(ui.visuals().warn_fg_color),
+                                )
+                                .on_hover_text_at_pointer("remove duplicate")
+                                .clicked()
                         {
-                            ctx.add_deps = Some(missing_deps.into_iter().cloned().collect());
+                            ctx.btn_remove = Some(state.index);
+                        }
+
+                        let missing_deps = info
+                            .suggested_dependencies
+                            .iter()
+                            .filter(|d| {
+                                !enabled_specs.iter().any(|(_, s)| s.satisfies_dependency(d))
+                            })
+                            .collect::<Vec<_>>();
+
+                        if !missing_deps.is_empty() {
+                            let mut msg = "Add missing dependencies:".to_string();
+                            for dep in &missing_deps {
+                                msg.push('\n');
+                                msg.push_str(&dep.url);
+                            }
+                            if ui
+                                .button(
+                                    egui::RichText::new("\u{26A0}")
+                                        .color(ui.visuals().warn_fg_color),
+                                )
+                                .on_hover_text(msg)
+                                .clicked()
+                            {
+                                ctx.add_deps = Some(missing_deps.into_iter().cloned().collect());
+                            }
                         }
                     }
 
