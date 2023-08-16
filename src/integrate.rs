@@ -361,7 +361,7 @@ pub fn integrate<P: AsRef<Path>>(path_pak: P, mods: Vec<(ModInfo, PathBuf)>) -> 
         write_asset(&mut mod_pak, asset, patch_path)?;
     }
 
-    let mut int_pak_reader = Cursor::new(include_bytes!("../integration.pak"));
+    let mut int_pak_reader = Cursor::new(include_bytes!("../assets/integration.pak"));
     let int_pak = repak::PakReader::new_any(&mut int_pak_reader, None)?;
 
     let mount = Path::new(int_pak.mount_point());
