@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 use std::str::FromStr;
 
-use drg_mod_integration::mod_lints::{LintId, LintReport};
+use drg_mod_integration::mod_lints::{LintId, LintReport, SplitAssetPair};
 use drg_mod_integration::providers::ModSpecification;
 
 #[test]
@@ -229,5 +229,42 @@ pub fn test_lint_non_asset_files() {
     assert_eq!(
         non_asset_file_mods.unwrap().get(&non_asset_files_spec),
         Some(&["never_gonna_give_you_up.txt".to_string()].into())
+    );
+}
+
+#[test]
+pub fn test_lint_split_asset_pairs() {
+    let base_path = PathBuf::from_str("test_assets/lints/").unwrap();
+    assert!(base_path.exists());
+    let split_asset_pairs_path = base_path.clone().join("split_asset_pairs.pak");
+    assert!(split_asset_pairs_path.exists());
+    let split_asset_pairs_spec = ModSpecification {
+        url: "mismatched_asset_pairs".to_string(),
+    };
+    let mods = [(split_asset_pairs_spec.clone(), split_asset_pairs_path)];
+
+    let LintReport {
+        split_asset_pairs_mods,
+        ..
+    } = drg_mod_integration::mod_lints::run_lints(&[LintId::SPLIT_ASSET_PAIRS].into(), mods.into())
+        .unwrap();
+
+    println!("{:#?}", split_asset_pairs_mods);
+
+    assert_eq!(
+        split_asset_pairs_mods.unwrap().get(&split_asset_pairs_spec),
+        Some(
+            &[
+                (
+                    "missing_uasset/a.uexp".to_string(),
+                    SplitAssetPair::MissingUasset
+                ),
+                (
+                    "missing_uexp/b.uasset".to_string(),
+                    SplitAssetPair::MissingUexp
+                )
+            ]
+            .into()
+        )
     );
 }

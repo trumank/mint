@@ -7,7 +7,7 @@ use crate::providers::ModSpecification;
 use super::{Lint, LintCtxt};
 
 #[derive(Default)]
-pub struct NonAssetFiles;
+pub struct NonAssetFilesLint;
 
 const ENDS_WITH_WHITE_LIST: [&str; 7] = [
     ".uexp",
@@ -19,7 +19,7 @@ const ENDS_WITH_WHITE_LIST: [&str; 7] = [
     "assetregistry.bin",
 ];
 
-impl Lint for NonAssetFiles {
+impl Lint for NonAssetFilesLint {
     type Output = BTreeMap<ModSpecification, BTreeSet<String>>;
 
     fn check_mods(&mut self, lcx: &LintCtxt) -> Result<Self::Output> {

@@ -26,7 +26,7 @@ use tokio::{
 };
 use tracing::{debug, info, trace};
 
-use crate::mod_lints::{LintId, LintReport};
+use crate::mod_lints::{LintId, LintReport, SplitAssetPair};
 use crate::{
     integrate::uninstall,
     is_drg_pak,
@@ -96,6 +96,7 @@ struct LintOptions {
     outdated_pak_version: bool,
     shader_files: bool,
     non_asset_files: bool,
+    split_asset_pairs: bool,
 }
 
 enum LastActionStatus {
@@ -895,6 +896,10 @@ impl App {
                             ui.label("Mods containing non-asset files");
                             ui.add(toggle_switch(&mut self.lint_options.non_asset_files));
                             ui.end_row();
+
+                            ui.label("Mods containing split {uexp, uasset} pairs");
+                            ui.add(toggle_switch(&mut self.lint_options.split_asset_pairs));
+                            ui.end_row();
                         });
                     });
 
@@ -925,6 +930,10 @@ impl App {
                                 ),
                                 (LintId::SHADER_FILES, self.lint_options.shader_files),
                                 (LintId::NON_ASSET_FILES, self.lint_options.non_asset_files),
+                                (
+                                    LintId::SPLIT_ASSET_PAIRS,
+                                    self.lint_options.split_asset_pairs,
+                                ),
                             ]);
 
                             trace!(?lint_options);
@@ -1170,6 +1179,41 @@ impl App {
                                                 .show(ui, |ui| {
                                                     files.iter().for_each(|file| {
                                                         ui.label(file);
+                                                    });
+                                                });
+                                            });
+                                        });
+                                    }
+                                }
+
+                                if let Some(split_asset_pairs_mods) = &report.split_asset_pairs_mods {
+                                    if !split_asset_pairs_mods.is_empty() {
+                                        CollapsingHeader::new(
+                                            RichText::new(
+                                                "⚠ Mod(s) with split {uexp, uasset} pairs detected",
+                                            )
+                                            .color(AMBER),
+                                        )
+                                        .default_open(true)
+                                        .show(ui, |ui| {
+                                            split_asset_pairs_mods.iter().for_each(|(r#mod, files)| {
+                                                CollapsingHeader::new(
+                                                    RichText::new(format!(
+                                                        "⚠ {} includes split {{uexp, uasset}} pairs",
+                                                        r#mod.url
+                                                    ))
+                                                    .color(AMBER),
+                                                )
+                                                .show(ui, |ui| {
+                                                    files.iter().for_each(|(file, kind)| {
+                                                        match kind {
+                                                            SplitAssetPair::MissingUasset => {
+                                                                ui.label(format!("`{file}` missing matching .uasset file"));
+                                                            },
+                                                            SplitAssetPair::MissingUexp => {
+                                                                ui.label(format!("`{file}` missing matching .uexp file"));
+                                                            }
+                                                        }
                                                     });
                                                 });
                                             });
