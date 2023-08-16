@@ -1185,6 +1185,7 @@ dependencies = [
  "tracing-appender",
  "tracing-subscriber",
  "typetag",
+ "uasset_utils",
  "unreal_asset",
  "url",
  "zip",
@@ -4211,6 +4212,15 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.28",
+]
+
+[[package]]
+name = "uasset_utils"
+version = "0.1.0"
+source = "git+https://github.com/trumank/uasset_utils#c6e7975277f051a0cb33513c8896b190410ffc8a"
+dependencies = [
+ "anyhow",
+ "unreal_asset",
 ]
 
 [[package]]

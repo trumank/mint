@@ -7,10 +7,12 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 use repak::PakWriter;
 use tracing::info;
+use uasset_utils::splice::{
+    extract_tracked_statements, inject_tracked_statements, walk, AssetVersion, TrackedStatement,
+};
 
 use crate::providers::ModInfo;
-use crate::splice::TrackedStatement;
-use crate::{get_pak_from_data, open_file, splice, DRGInstallation};
+use crate::{get_pak_from_data, open_file, DRGInstallation};
 
 use unreal_asset::{
     exports::ExportBaseTrait,
@@ -950,8 +952,8 @@ fn inject_init_actors<R: Read + Seek>(
 }
 
 fn patch<C: Seek + Read>(asset: &mut Asset<C>) -> Result<()> {
-    let ver = splice::AssetVersion::new_from(asset);
-    let mut statements = splice::extract_tracked_statements(asset, ver, &None);
+    let ver = AssetVersion::new_from(asset);
+    let mut statements = extract_tracked_statements(asset, ver, &None);
 
     let find_function = |name| {
         asset
@@ -971,7 +973,7 @@ fn patch<C: Seek + Read>(asset: &mut Asset<C>) -> Result<()> {
         is_modded_sandbox: Option<PackageIndex>,
         mut statement: TrackedStatement,
     ) -> Option<TrackedStatement> {
-        splice::walk(&mut statement.ex, &|ex| {
+        walk(&mut statement.ex, &|ex| {
             if let KismetExpression::ExCallMath(f) = ex {
                 if Some(f.stack_node) == is_modded || Some(f.stack_node) == is_modded_sandbox {
                     *ex = ExFalse::default().into()
@@ -990,6 +992,6 @@ fn patch<C: Seek + Read>(asset: &mut Asset<C>) -> Result<()> {
             .filter_map(|s| patch_ismodded(is_modded, is_modded_sandbox, s))
             .collect();
     }
-    splice::inject_tracked_statements(asset, ver, statements);
+    inject_tracked_statements(asset, ver, statements);
     Ok(())
 }

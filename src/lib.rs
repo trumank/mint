@@ -5,7 +5,6 @@ pub mod gui;
 pub mod integrate;
 pub mod mod_lints;
 pub mod providers;
-pub mod splice;
 pub mod state;
 
 use std::io::{Cursor, Read};
