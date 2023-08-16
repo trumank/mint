@@ -3,6 +3,7 @@ mod archive_only_non_pak_files;
 mod asset_register_bin;
 mod conflicting_mods;
 mod empty_archive;
+mod non_asset_files;
 mod outdated_pak_version;
 mod shader_files;
 
@@ -23,6 +24,7 @@ use self::archive_multiple_paks::ArchiveMultiplePaksLint;
 use self::archive_only_non_pak_files::ArchiveOnlyNonPakFilesLint;
 use self::asset_register_bin::AssetRegisterBinLint;
 use self::empty_archive::EmptyArchiveLint;
+use self::non_asset_files::NonAssetFiles;
 use self::outdated_pak_version::OutdatedPakVersionLint;
 use self::shader_files::ShaderFilesLint;
 
@@ -92,16 +94,9 @@ impl LintCtxt {
         Ok(())
     }
 
-    pub fn for_each_mod_file<F, EmptyArchiveHandler, OnlyNonPakFilesHandler>(
-        &self,
-        mut f: F,
-        empty_archive_handler: Option<EmptyArchiveHandler>,
-        only_non_pak_files_handler: Option<OnlyNonPakFilesHandler>,
-    ) -> Result<()>
+    pub fn for_each_mod_file<F>(&self, mut f: F) -> Result<()>
     where
         F: FnMut(ModSpecification, &PakReader, PathBuf, String) -> Result<()>,
-        EmptyArchiveHandler: FnMut(ModSpecification),
-        OnlyNonPakFilesHandler: FnMut(ModSpecification),
     {
         self.for_each_mod(
             |mod_spec, pak_reader| {
@@ -123,8 +118,8 @@ impl LintCtxt {
 
                 Ok(())
             },
-            empty_archive_handler,
-            only_non_pak_files_handler,
+            None::<fn(ModSpecification)>,
+            None::<fn(ModSpecification)>,
             None::<fn(ModSpecification)>,
         )
     }
@@ -167,6 +162,9 @@ impl LintId {
     pub const ARCHIVE_WITH_MULTIPLE_PAKS: Self = LintId {
         name: "archive_with_multiple_paks",
     };
+    pub const NON_ASSET_FILES: Self = LintId {
+        name: "non_asset_files",
+    };
 }
 
 #[derive(Default, Debug)]
@@ -178,6 +176,7 @@ pub struct LintReport {
     pub empty_archive_mods: Option<BTreeSet<ModSpecification>>,
     pub archive_with_only_non_pak_files_mods: Option<BTreeSet<ModSpecification>>,
     pub archive_with_multiple_paks_mods: Option<BTreeSet<ModSpecification>>,
+    pub non_asset_file_mods: Option<BTreeMap<ModSpecification, BTreeSet<String>>>,
 }
 
 pub fn run_lints(
@@ -216,6 +215,10 @@ pub fn run_lints(
             LintId::ARCHIVE_WITH_MULTIPLE_PAKS => {
                 let res = ArchiveMultiplePaksLint.check_mods(&lint_ctxt)?;
                 lint_report.archive_with_multiple_paks_mods = Some(res);
+            }
+            LintId::NON_ASSET_FILES => {
+                let res = NonAssetFiles.check_mods(&lint_ctxt)?;
+                lint_report.non_asset_file_mods = Some(res);
             }
             _ => unimplemented!(),
         }

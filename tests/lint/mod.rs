@@ -206,3 +206,28 @@ pub fn test_lint_multi_pak_archive() {
         .unwrap()
         .contains(&multiple_paks_spec));
 }
+
+#[test]
+pub fn test_lint_non_asset_files() {
+    let base_path = PathBuf::from_str("test_assets/lints/").unwrap();
+    assert!(base_path.exists());
+    let non_asset_files_path = base_path.clone().join("non_asset_files.pak");
+    assert!(non_asset_files_path.exists());
+    let non_asset_files_spec = ModSpecification {
+        url: "non_asset_files".to_string(),
+    };
+    let mods = [(non_asset_files_spec.clone(), non_asset_files_path)];
+
+    let LintReport {
+        non_asset_file_mods,
+        ..
+    } = drg_mod_integration::mod_lints::run_lints(&[LintId::NON_ASSET_FILES].into(), mods.into())
+        .unwrap();
+
+    println!("{:#?}", non_asset_file_mods);
+
+    assert_eq!(
+        non_asset_file_mods.unwrap().get(&non_asset_files_spec),
+        Some(&["never_gonna_give_you_up.txt".to_string()].into())
+    );
+}

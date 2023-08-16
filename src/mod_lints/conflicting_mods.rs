@@ -18,19 +18,15 @@ impl Lint for ConflictingModsLint {
     fn check_mods(&mut self, lcx: &LintCtxt) -> Result<Self::Output> {
         let mut per_path_modifiers = BTreeMap::new();
 
-        lcx.for_each_mod_file(
-            |mod_spec, _, _, normalized_path| {
-                per_path_modifiers
-                    .entry(normalized_path)
-                    .and_modify(|modifiers: &mut IndexSet<ModSpecification>| {
-                        modifiers.insert(mod_spec.clone());
-                    })
-                    .or_insert_with(|| [mod_spec.clone()].into());
-                Ok(())
-            },
-            None::<fn(ModSpecification)>,
-            None::<fn(ModSpecification)>,
-        )?;
+        lcx.for_each_mod_file(|mod_spec, _, _, normalized_path| {
+            per_path_modifiers
+                .entry(normalized_path)
+                .and_modify(|modifiers: &mut IndexSet<ModSpecification>| {
+                    modifiers.insert(mod_spec.clone());
+                })
+                .or_insert_with(|| [mod_spec.clone()].into());
+            Ok(())
+        })?;
 
         let conflicting_mods = per_path_modifiers
             .into_iter()
