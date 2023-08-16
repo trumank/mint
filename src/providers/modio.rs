@@ -8,7 +8,7 @@ use reqwest_middleware::{Middleware, Next};
 use serde::{Deserialize, Serialize};
 use task_local_extensions::Extensions;
 use tokio::sync::mpsc::Sender;
-use tracing::info;
+use tracing::{info, warn};
 
 use super::{
     ApprovalStatus, BlobCache, BlobRef, FetchProgress, ModInfo, ModProvider, ModProviderCache,
@@ -324,8 +324,13 @@ impl ModProvider for ModioProvider {
 
                 let deps = dep_ids
                     .iter()
-                    .map(|id| {
-                        format_spec(name_map.get(id).expect("dependency ID missing"), *id, None)
+                    .filter_map(|id| {
+                        if let Some(name) = name_map.get(id) {
+                            Some(format_spec(name, *id, None))
+                        } else {
+                            warn!("dependency ID missing from name_map: {id}");
+                            None
+                        }
                     })
                     .collect();
 
