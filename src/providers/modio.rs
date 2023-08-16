@@ -2,7 +2,7 @@ use std::collections::{BTreeSet, HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use anyhow::{anyhow, Context, Result};
+use anyhow::{anyhow, bail, Context, Result};
 use reqwest::{Request, Response};
 use reqwest_middleware::{Middleware, Next};
 use serde::{Deserialize, Serialize};
@@ -212,7 +212,7 @@ impl ModProvider for ModioProvider {
         use modio::mods::filters::{Id, NameId, Visible};
 
         if spec.url.contains("?preview=") {
-            return Err(anyhow!("Preview mod links cannot be added directly, please subscribe to the mod on mod.io and and then use the non-preview link."));
+            bail!("Preview mod links cannot be added directly, please subscribe to the mod on mod.io and and then use the non-preview link.");
         };
 
         let url = &spec.url;
