@@ -15,7 +15,7 @@ impl Lint for ArchiveMultiplePaksLint {
     fn check_mods(&mut self, lcx: &LintCtxt) -> Result<Self::Output> {
         let mut archive_multiple_paks_mods = BTreeSet::new();
         lcx.for_each_mod(
-            |_, _| Ok(()),
+            |_, _, _| Ok(()),
             None::<fn(ModSpecification)>,
             None::<fn(ModSpecification)>,
             Some(|mod_spec| {

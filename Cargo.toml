@@ -22,6 +22,8 @@ lazy_static = "1.4.0"
 modio = { git = "https://github.com/trumank/modio-rs.git", branch = "dev", features = ["rustls-tls"] }
 obake = { version = "1.0.5", features = ["serde"] }
 opener = "0.6.1"
+path-slash = "0.2.1"
+rayon = "1.7.0"
 regex = "1.9.3"
 repak = { git = "https://github.com/trumank/repak.git", version = "0.1.3" }
 reqwest = { version = "0.11.18", features = ["blocking"] }

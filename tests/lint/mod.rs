@@ -23,7 +23,7 @@ pub fn test_lint_conflicting_files() {
 
     let LintReport {
         conflicting_mods, ..
-    } = drg_mod_integration::mod_lints::run_lints(&[LintId::CONFLICTING].into(), mods.into())
+    } = drg_mod_integration::mod_lints::run_lints(&[LintId::CONFLICTING].into(), mods.into(), None)
         .unwrap();
 
     println!("{:#?}", conflicting_mods);
@@ -52,8 +52,12 @@ pub fn test_lint_shader() {
 
     let LintReport {
         shader_file_mods, ..
-    } = drg_mod_integration::mod_lints::run_lints(&[LintId::SHADER_FILES].into(), mods.into())
-        .unwrap();
+    } = drg_mod_integration::mod_lints::run_lints(
+        &[LintId::SHADER_FILES].into(),
+        mods.into(),
+        None,
+    )
+    .unwrap();
 
     println!("{:#?}", shader_file_mods);
 
@@ -85,6 +89,7 @@ pub fn test_lint_asset_registry_bin() {
     } = drg_mod_integration::mod_lints::run_lints(
         &[LintId::ASSET_REGISTRY_BIN].into(),
         mods.into(),
+        None,
     )
     .unwrap();
 
@@ -113,6 +118,7 @@ pub fn test_lint_outdated_pak_version() {
     } = drg_mod_integration::mod_lints::run_lints(
         &[LintId::OUTDATED_PAK_VERSION].into(),
         mods.into(),
+        None,
     )
     .unwrap();
 
@@ -137,8 +143,12 @@ pub fn test_lint_empty_archive() {
 
     let LintReport {
         empty_archive_mods, ..
-    } = drg_mod_integration::mod_lints::run_lints(&[LintId::EMPTY_ARCHIVE].into(), mods.into())
-        .unwrap();
+    } = drg_mod_integration::mod_lints::run_lints(
+        &[LintId::EMPTY_ARCHIVE].into(),
+        mods.into(),
+        None,
+    )
+    .unwrap();
 
     println!("{:#?}", empty_archive_mods);
 
@@ -170,6 +180,7 @@ pub fn test_lint_only_non_pak_files() {
     } = drg_mod_integration::mod_lints::run_lints(
         &[LintId::ARCHIVE_WITH_ONLY_NON_PAK_FILES].into(),
         mods.into(),
+        None,
     )
     .unwrap();
 
@@ -197,6 +208,7 @@ pub fn test_lint_multi_pak_archive() {
     } = drg_mod_integration::mod_lints::run_lints(
         &[LintId::ARCHIVE_WITH_MULTIPLE_PAKS].into(),
         mods.into(),
+        None,
     )
     .unwrap();
 
@@ -221,8 +233,12 @@ pub fn test_lint_non_asset_files() {
     let LintReport {
         non_asset_file_mods,
         ..
-    } = drg_mod_integration::mod_lints::run_lints(&[LintId::NON_ASSET_FILES].into(), mods.into())
-        .unwrap();
+    } = drg_mod_integration::mod_lints::run_lints(
+        &[LintId::NON_ASSET_FILES].into(),
+        mods.into(),
+        None,
+    )
+    .unwrap();
 
     println!("{:#?}", non_asset_file_mods);
 
@@ -239,15 +255,19 @@ pub fn test_lint_split_asset_pairs() {
     let split_asset_pairs_path = base_path.clone().join("split_asset_pairs.pak");
     assert!(split_asset_pairs_path.exists());
     let split_asset_pairs_spec = ModSpecification {
-        url: "mismatched_asset_pairs".to_string(),
+        url: "split_asset_pairs".to_string(),
     };
     let mods = [(split_asset_pairs_spec.clone(), split_asset_pairs_path)];
 
     let LintReport {
         split_asset_pairs_mods,
         ..
-    } = drg_mod_integration::mod_lints::run_lints(&[LintId::SPLIT_ASSET_PAIRS].into(), mods.into())
-        .unwrap();
+    } = drg_mod_integration::mod_lints::run_lints(
+        &[LintId::SPLIT_ASSET_PAIRS].into(),
+        mods.into(),
+        None,
+    )
+    .unwrap();
 
     println!("{:#?}", split_asset_pairs_mods);
 
@@ -266,5 +286,41 @@ pub fn test_lint_split_asset_pairs() {
             ]
             .into()
         )
+    );
+}
+
+#[test]
+pub fn test_lint_unmodified_game_assets() {
+    let base_path = PathBuf::from_str("test_assets/lints/").unwrap();
+    assert!(base_path.exists());
+    let reference_pak_path = base_path.clone().join("reference.pak");
+    assert!(reference_pak_path.exists());
+    let unmodified_game_assets_path = base_path.clone().join("unmodified_game_assets.pak");
+    assert!(unmodified_game_assets_path.exists());
+    let unmodified_game_assets_spec = ModSpecification {
+        url: "unmodified_game_assets".to_string(),
+    };
+    let mods = [(
+        unmodified_game_assets_spec.clone(),
+        unmodified_game_assets_path,
+    )];
+
+    let LintReport {
+        unmodified_game_assets_mods,
+        ..
+    } = drg_mod_integration::mod_lints::run_lints(
+        &[LintId::UNMODIFIED_GAME_ASSETS].into(),
+        mods.into(),
+        Some(reference_pak_path),
+    )
+    .unwrap();
+
+    println!("{:#?}", unmodified_game_assets_mods);
+
+    assert_eq!(
+        unmodified_game_assets_mods
+            .unwrap()
+            .get(&unmodified_game_assets_spec),
+        Some(&["a.uexp".to_string(), "a.uasset".to_string()].into())
     );
 }
