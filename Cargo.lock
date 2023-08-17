@@ -1157,7 +1157,6 @@ dependencies = [
  "eframe",
  "egui_commonmark",
  "egui_dnd",
- "egui_extras",
  "futures",
  "hex",
  "hook",
@@ -1280,16 +1279,6 @@ source = "git+https://github.com/lucasmerlin/egui_dnd.git#6b1433c0d2e2bf66321244
 dependencies = [
  "egui",
  "web-time",
-]
-
-[[package]]
-name = "egui_extras"
-version = "0.22.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9278f4337b526f0d57e5375e5a7340a311fa6ee8f9fcc75721ac50af13face02"
-dependencies = [
- "egui",
- "serde",
 ]
 
 [[package]]
@@ -2904,7 +2893,7 @@ checksum = "1e91099d4268b0e11973f036e885d652fb0b21fedcf69738c627f94db6a44f42"
 [[package]]
 name = "patternsleuth_scanner"
 version = "0.1.0"
-source = "git+https://github.com/trumank/patternsleuth#a69d95690ffa61c8fc38e26838f5e53ab0be698f"
+source = "git+https://github.com/trumank/patternsleuth#a84c3ac3d657188daad28c7daf8e2d61e79c793d"
 dependencies = [
  "anyhow",
  "memchr",

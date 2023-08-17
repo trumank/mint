@@ -13,7 +13,6 @@ directories = "5.0.1"
 eframe = "0.22.0"
 egui_commonmark = "0.7.4"
 egui_dnd = { git = "https://github.com/lucasmerlin/egui_dnd.git" }
-egui_extras = "0.22.0"
 futures = "0.3.28"
 hex = "0.4.3"
 image = { version = "0.24.7", default-features = false, features = ["png"] }
