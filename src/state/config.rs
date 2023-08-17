@@ -1,10 +1,9 @@
+use std::io::Write;
 use std::path::{Path, PathBuf};
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 
 use serde::{de::DeserializeOwned, Serialize};
-
-use crate::write_file;
 
 /// Wrapper around an object that is read from a file on init and written on drop
 pub struct ConfigWrapper<C: Default + Serialize + DeserializeOwned> {
@@ -19,8 +18,23 @@ impl<C: Default + Serialize + DeserializeOwned> ConfigWrapper<C> {
             path: path.as_ref().to_path_buf(),
         }
     }
+
+    /// Try our best to ensure that the config written is complete to protect against partial
+    /// or broken config writes if the tool crashes or is killed.
+    ///
+    /// This is achieved, best-effort, by writing to a temporary file then replacing the target file
+    /// with the temporary file.
+    ///
+    /// See <https://stackoverflow.com/questions/70362352/atomic-file-create-write>.
     pub fn save(&self) -> Result<()> {
-        write_file(&self.path, serde_json::to_vec_pretty(&self.config)?)?;
+        let final_path = &self.path;
+        let mut temp_file = tempfile::NamedTempFile::new_in(final_path.parent().unwrap())?;
+        temp_file
+            .write_all(&serde_json::to_vec_pretty(&self.config)?)
+            .context("failed to write to tempfile")?;
+        temp_file
+            .persist(final_path)
+            .context("failed to replace destination file with tempfile")?;
         Ok(())
     }
 }
