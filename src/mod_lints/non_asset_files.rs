@@ -25,7 +25,7 @@ impl Lint for NonAssetFilesLint {
     fn check_mods(&mut self, lcx: &LintCtxt) -> Result<Self::Output> {
         let mut non_asset_files = BTreeMap::new();
 
-        lcx.for_each_mod_file(|mod_spec, _, _, normalized_path| {
+        lcx.for_each_mod_file(|mod_spec, _, _, _, normalized_path| {
             let is_unreal_asset = ENDS_WITH_WHITE_LIST
                 .iter()
                 .any(|end| normalized_path.ends_with(end));

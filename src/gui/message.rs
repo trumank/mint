@@ -416,6 +416,7 @@ impl LintMods {
         store: Arc<ModStore>,
         mods: Vec<ModSpecification>,
         enabled_lints: BTreeSet<LintId>,
+        game_pak_path: Option<PathBuf>,
         tx: Sender<Message>,
         ctx: egui::Context,
     ) -> MessageHandle<()> {
@@ -429,7 +430,11 @@ impl LintMods {
 
             let report_res = match mod_path_pairs_res {
                 Ok(pairs) => tokio::task::spawn_blocking(move || {
-                    crate::mod_lints::run_lints(&enabled_lints, BTreeSet::from_iter(pairs))
+                    crate::mod_lints::run_lints(
+                        &enabled_lints,
+                        BTreeSet::from_iter(pairs),
+                        game_pak_path,
+                    )
                 })
                 .await
                 .unwrap(),

@@ -3,7 +3,6 @@
 
 use eframe::egui;
 
-/// Here is the same code again, but a bit more compact:
 fn toggle_ui(ui: &mut egui::Ui, on: &mut bool) -> egui::Response {
     let desired_size = ui.spacing().interact_size.y * egui::vec2(2.0, 1.0);
     let (rect, mut response) = ui.allocate_exact_size(desired_size, egui::Sense::click());
@@ -29,13 +28,6 @@ fn toggle_ui(ui: &mut egui::Ui, on: &mut bool) -> egui::Response {
     response
 }
 
-// A wrapper that allows the more idiomatic usage pattern: `ui.add(toggle(&mut my_bool))`
-/// iOS-style toggle switch.
-///
-/// ## Example:
-/// ``` ignore
-/// ui.add(toggle(&mut my_bool));
-/// ```
 #[allow(clippy::needless_pass_by_ref_mut)]
 pub fn toggle_switch(on: &mut bool) -> impl egui::Widget + '_ {
     move |ui: &mut egui::Ui| toggle_ui(ui, on)

@@ -97,6 +97,7 @@ struct LintOptions {
     shader_files: bool,
     non_asset_files: bool,
     split_asset_pairs: bool,
+    unmodified_game_assets: bool,
 }
 
 enum LastActionStatus {
@@ -900,6 +901,16 @@ impl App {
                             ui.label("Mods containing split {uexp, uasset} pairs");
                             ui.add(toggle_switch(&mut self.lint_options.split_asset_pairs));
                             ui.end_row();
+
+                            ui.label("Mods containing unmodified game assets");
+                            ui.add_enabled(
+                                self.state.config.drg_pak_path.is_some(),
+                                toggle_switch(&mut self.lint_options.unmodified_game_assets),
+                            )
+                            .on_disabled_hover_text(
+                                "This lint requires DRG pak path to be specified",
+                            );
+                            ui.end_row();
                         });
                     });
 
@@ -942,6 +953,10 @@ impl App {
                                     LintId::SPLIT_ASSET_PAIRS,
                                     self.lint_options.split_asset_pairs,
                                 ),
+                                (
+                                    LintId::UNMODIFIED_GAME_ASSETS,
+                                    self.lint_options.unmodified_game_assets,
+                                ),
                             ]);
 
                             trace!(?lint_options);
@@ -956,6 +971,7 @@ impl App {
                                         .into_iter()
                                         .filter_map(|(lint, enabled)| enabled.then_some(lint)),
                                 ),
+                                self.state.config.drg_pak_path.clone(),
                                 self.tx.clone(),
                                 ctx.clone(),
                             ));
@@ -1222,6 +1238,34 @@ impl App {
                                                                 ui.label(format!("`{file}` missing matching .uexp file"));
                                                             }
                                                         }
+                                                    });
+                                                });
+                                            });
+                                        });
+                                    }
+                                }
+
+                                if let Some(unmodified_game_assets_mods) = &report.unmodified_game_assets_mods {
+                                    if !unmodified_game_assets_mods.is_empty() {
+                                        CollapsingHeader::new(
+                                            RichText::new(
+                                                "⚠ Mod(s) with unmodified game assets detected",
+                                            )
+                                            .color(AMBER),
+                                        )
+                                        .default_open(true)
+                                        .show(ui, |ui| {
+                                            unmodified_game_assets_mods.iter().for_each(|(r#mod, files)| {
+                                                CollapsingHeader::new(
+                                                    RichText::new(format!(
+                                                        "⚠ {} includes unmodified game assets",
+                                                        r#mod.url
+                                                    ))
+                                                    .color(AMBER),
+                                                )
+                                                .show(ui, |ui| {
+                                                    files.iter().for_each(|file| {
+                                                        ui.label(file);
                                                     });
                                                 });
                                             });

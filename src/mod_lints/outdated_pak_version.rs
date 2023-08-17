@@ -16,7 +16,7 @@ impl Lint for OutdatedPakVersionLint {
         let mut outdated_pak_version_mods = BTreeMap::new();
 
         lcx.for_each_mod(
-            |mod_spec, pak_reader| {
+            |mod_spec, _, pak_reader| {
                 if pak_reader.version() < repak::Version::V11 {
                     outdated_pak_version_mods.insert(mod_spec.clone(), pak_reader.version());
                 }

@@ -14,7 +14,7 @@ impl Lint for AssetRegisterBinLint {
     fn check_mods(&mut self, lcx: &LintCtxt) -> Result<Self::Output> {
         let mut asset_register_bin_mods = BTreeMap::new();
 
-        lcx.for_each_mod_file(|mod_spec, _, raw_path, normalized_path| {
+        lcx.for_each_mod_file(|mod_spec, _, _, raw_path, normalized_path| {
             if let Some(filename) = raw_path.file_name() {
                 if filename == "AssetRegistry.bin" {
                     asset_register_bin_mods

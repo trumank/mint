@@ -7,6 +7,7 @@ mod non_asset_files;
 mod outdated_pak_version;
 mod shader_files;
 mod split_asset_pairs;
+mod unmodified_game_assets;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::io::BufReader;
@@ -18,7 +19,7 @@ use repak::PakReader;
 use tracing::trace;
 
 use crate::mod_lints::conflicting_mods::ConflictingModsLint;
-use crate::providers::ModSpecification;
+use crate::providers::{ModSpecification, ReadSeek};
 use crate::{lint_get_all_files_from_data, open_file, GetAllFilesFromDataError, PakOrNotPak};
 
 use self::archive_multiple_paks::ArchiveMultiplePaksLint;
@@ -30,15 +31,20 @@ use self::outdated_pak_version::OutdatedPakVersionLint;
 use self::shader_files::ShaderFilesLint;
 pub use self::split_asset_pairs::SplitAssetPair;
 use self::split_asset_pairs::SplitAssetPairsLint;
+use self::unmodified_game_assets::UnmodifiedGameAssetsLint;
 
 pub struct LintCtxt {
-    mods: BTreeSet<(ModSpecification, PathBuf)>,
+    pub(crate) mods: BTreeSet<(ModSpecification, PathBuf)>,
+    pub(crate) fsd_pak_path: Option<PathBuf>,
 }
 
 impl LintCtxt {
-    pub fn init(mods: BTreeSet<(ModSpecification, PathBuf)>) -> Result<Self> {
+    pub fn init(
+        mods: BTreeSet<(ModSpecification, PathBuf)>,
+        fsd_pak_path: Option<PathBuf>,
+    ) -> Result<Self> {
         trace!("LintCtxt::init");
-        Ok(Self { mods })
+        Ok(Self { mods, fsd_pak_path })
     }
 
     pub fn for_each_mod<F, EmptyArchiveHandler, OnlyNonPakFilesHandler, MultiplePakFilesHandler>(
@@ -49,7 +55,7 @@ impl LintCtxt {
         mut multiple_pak_files_handler: Option<MultiplePakFilesHandler>,
     ) -> Result<()>
     where
-        F: FnMut(ModSpecification, &PakReader) -> Result<()>,
+        F: FnMut(ModSpecification, &mut Box<dyn ReadSeek>, &PakReader) -> Result<()>,
         EmptyArchiveHandler: FnMut(ModSpecification),
         OnlyNonPakFilesHandler: FnMut(ModSpecification),
         MultiplePakFilesHandler: FnMut(ModSpecification),
@@ -89,9 +95,9 @@ impl LintCtxt {
                 }
             }
 
-            let mut first_pak_reader = individual_pak_readers.remove(0);
-            let pak_reader = repak::PakReader::new_any(&mut first_pak_reader, None)?;
-            f(mod_spec.clone(), &pak_reader)?
+            let mut first_pak_read_seek = individual_pak_readers.remove(0);
+            let pak_reader = repak::PakReader::new_any(&mut first_pak_read_seek, None)?;
+            f(mod_spec.clone(), &mut first_pak_read_seek, &pak_reader)?
         }
 
         Ok(())
@@ -99,10 +105,16 @@ impl LintCtxt {
 
     pub fn for_each_mod_file<F>(&self, mut f: F) -> Result<()>
     where
-        F: FnMut(ModSpecification, &PakReader, PathBuf, String) -> Result<()>,
+        F: FnMut(
+            ModSpecification,
+            &mut Box<dyn ReadSeek>,
+            &PakReader,
+            PathBuf,
+            String,
+        ) -> Result<()>,
     {
         self.for_each_mod(
-            |mod_spec, pak_reader| {
+            |mod_spec, pak_read_seek, pak_reader| {
                 let mount = PathBuf::from(pak_reader.mount_point());
                 for p in pak_reader.files() {
                     let path = mount.join(&p);
@@ -113,6 +125,7 @@ impl LintCtxt {
                     let normalized_path = normalized_path.to_ascii_lowercase();
                     f(
                         mod_spec.clone(),
+                        pak_read_seek,
                         pak_reader,
                         path_buf.to_path_buf(),
                         normalized_path,
@@ -171,6 +184,9 @@ impl LintId {
     pub const SPLIT_ASSET_PAIRS: Self = LintId {
         name: "split_asset_pairs",
     };
+    pub const UNMODIFIED_GAME_ASSETS: Self = LintId {
+        name: "unmodified_game_assets",
+    };
 }
 
 #[derive(Default, Debug)]
@@ -185,13 +201,15 @@ pub struct LintReport {
     pub non_asset_file_mods: Option<BTreeMap<ModSpecification, BTreeSet<String>>>,
     pub split_asset_pairs_mods:
         Option<BTreeMap<ModSpecification, BTreeMap<String, SplitAssetPair>>>,
+    pub unmodified_game_assets_mods: Option<BTreeMap<ModSpecification, BTreeSet<String>>>,
 }
 
 pub fn run_lints(
     enabled_lints: &BTreeSet<LintId>,
     mods: BTreeSet<(ModSpecification, PathBuf)>,
+    fsd_pak_path: Option<PathBuf>,
 ) -> Result<LintReport> {
-    let lint_ctxt = LintCtxt::init(mods)?;
+    let lint_ctxt = LintCtxt::init(mods, fsd_pak_path)?;
     let mut lint_report = LintReport::default();
 
     for lint_id in enabled_lints {
@@ -231,6 +249,10 @@ pub fn run_lints(
             LintId::SPLIT_ASSET_PAIRS => {
                 let res = SplitAssetPairsLint.check_mods(&lint_ctxt)?;
                 lint_report.split_asset_pairs_mods = Some(res);
+            }
+            LintId::UNMODIFIED_GAME_ASSETS => {
+                let res = UnmodifiedGameAssetsLint.check_mods(&lint_ctxt)?;
+                lint_report.unmodified_game_assets_mods = Some(res);
             }
             _ => unimplemented!(),
         }

@@ -21,7 +21,7 @@ impl Lint for SplitAssetPairsLint {
     fn check_mods(&mut self, lcx: &LintCtxt) -> anyhow::Result<Self::Output> {
         let mut per_mod_path_without_final_ext_to_exts_map = BTreeMap::new();
 
-        lcx.for_each_mod_file(|mod_spec, _, _, normalized_path| {
+        lcx.for_each_mod_file(|mod_spec, _, _, _, normalized_path| {
             let mut iter = normalized_path.rsplit('.').take(2);
             let Some(final_ext) = iter.next() else {
                 return Ok(());

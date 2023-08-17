@@ -16,7 +16,7 @@ impl Lint for EmptyArchiveLint {
         let mut empty_archive_mods = BTreeSet::new();
 
         lcx.for_each_mod(
-            |_, _| Ok(()),
+            |_, _, _| Ok(()),
             Some(|mod_spec| {
                 empty_archive_mods.insert(mod_spec);
             }),

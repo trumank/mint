@@ -15,7 +15,7 @@ impl Lint for ShaderFilesLint {
     fn check_mods(&mut self, lcx: &LintCtxt) -> Result<Self::Output> {
         let mut shader_file_mods = BTreeMap::new();
 
-        lcx.for_each_mod_file(|mod_spec, _, raw_path, normalized_path| {
+        lcx.for_each_mod_file(|mod_spec, _, _, raw_path, normalized_path| {
             if raw_path.extension().and_then(std::ffi::OsStr::to_str) == Some("ushaderbytecode") {
                 shader_file_mods
                     .entry(mod_spec)

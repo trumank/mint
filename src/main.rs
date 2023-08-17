@@ -228,7 +228,7 @@ fn init_provider(state: &mut State, url: String, factory: &ProviderFactory) -> R
 }
 
 async fn action_integrate(action: ActionIntegrate) -> Result<()> {
-    let path_game_pak = action
+    let game_pak_path = action
         .fsd_pak
         .or_else(|| {
             DRGInstallation::find()
@@ -236,7 +236,7 @@ async fn action_integrate(action: ActionIntegrate) -> Result<()> {
                 .map(DRGInstallation::main_pak)
         })
         .context("Could not find DRG pak file, please specify manually with the --fsd_pak flag")?;
-    debug!(?path_game_pak);
+    debug!(?game_pak_path);
 
     let mut state = State::init()?;
 
@@ -247,7 +247,7 @@ async fn action_integrate(action: ActionIntegrate) -> Result<()> {
         .collect::<Vec<_>>();
 
     resolve_unordered_and_integrate_with_provider_init(
-        path_game_pak,
+        game_pak_path,
         &mut state,
         &mod_specs,
         action.update,
@@ -257,7 +257,7 @@ async fn action_integrate(action: ActionIntegrate) -> Result<()> {
 }
 
 async fn action_integrate_profile(action: ActionIntegrateProfile) -> Result<()> {
-    let path_game_pak = action
+    let game_pak_path = action
         .fsd_pak
         .or_else(|| {
             DRGInstallation::find()
@@ -265,7 +265,7 @@ async fn action_integrate_profile(action: ActionIntegrateProfile) -> Result<()> 
                 .map(DRGInstallation::main_pak)
         })
         .context("Could not find DRG pak file, please specify manually with the --fsd_pak flag")?;
-    debug!(?path_game_pak);
+    debug!(?game_pak_path);
 
     let mut state = State::init()?;
 
@@ -275,7 +275,7 @@ async fn action_integrate_profile(action: ActionIntegrateProfile) -> Result<()> 
     });
 
     resolve_unordered_and_integrate_with_provider_init(
-        path_game_pak,
+        game_pak_path,
         &mut state,
         &mods,
         action.update,
@@ -285,6 +285,16 @@ async fn action_integrate_profile(action: ActionIntegrateProfile) -> Result<()> 
 }
 
 async fn action_lint(action: ActionLint) -> Result<()> {
+    let game_pak_path = action
+        .fsd_pak
+        .or_else(|| {
+            DRGInstallation::find()
+                .as_ref()
+                .map(DRGInstallation::main_pak)
+        })
+        .context("Could not find DRG pak file, please specify manually with the --fsd_pak flag")?;
+    debug!(?game_pak_path);
+
     let mut state = State::init()?;
 
     let mut mods = Vec::new();
@@ -303,8 +313,12 @@ async fn action_lint(action: ActionLint) -> Result<()> {
                 LintId::EMPTY_ARCHIVE,
                 LintId::OUTDATED_PAK_VERSION,
                 LintId::SHADER_FILES,
+                LintId::ARCHIVE_WITH_MULTIPLE_PAKS,
+                LintId::NON_ASSET_FILES,
+                LintId::SPLIT_ASSET_PAIRS,
             ]),
             BTreeSet::from_iter(mods.into_iter().zip(mod_paths)),
+            Some(game_pak_path),
         )
     })
     .await??;
