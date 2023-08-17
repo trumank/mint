@@ -1,6 +1,7 @@
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{anyhow, bail, Context, Result};
 use reqwest::{Request, Response};
@@ -73,13 +74,25 @@ impl ModioProvider {
     }
 }
 
-#[derive(Debug, Default, Serialize, Deserialize)]
-#[serde(default)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct ModioCache {
     mod_id_map: HashMap<String, u32>,
     modfile_blobs: HashMap<u32, BlobRef>,
     dependencies: HashMap<u32, Vec<u32>>,
     mods: HashMap<u32, ModioMod>,
+    last_update_time: Option<SystemTime>,
+}
+
+impl Default for ModioCache {
+    fn default() -> Self {
+        Self {
+            mod_id_map: Default::default(),
+            modfile_blobs: Default::default(),
+            dependencies: Default::default(),
+            mods: Default::default(),
+            last_update_time: Some(SystemTime::now()),
+        }
+    }
 }
 
 #[typetag::serde]
@@ -206,7 +219,6 @@ impl ModProvider for ModioProvider {
         spec: &ModSpecification,
         update: bool,
         cache: ProviderCache,
-        _blob_cache: &BlobCache,
     ) -> Result<ModResponse> {
         use modio::filter::{Eq, In};
         use modio::mods::filters::{Id, NameId, Visible};
@@ -564,6 +576,114 @@ impl ModProvider for ModioProvider {
         } else {
             Err(anyhow!("download URL must be fully specified"))
         }
+    }
+
+    async fn update_cache(&self, cache: ProviderCache) -> Result<()> {
+        use futures::stream::{self, StreamExt, TryStreamExt};
+
+        use modio::filter::Cmp;
+        use modio::filter::In;
+        use modio::filter::NotIn;
+
+        use modio::mods::filters::events::EventType;
+        use modio::mods::filters::events::ModId;
+        use modio::mods::filters::DateAdded;
+        use modio::mods::EventType as EventTypes;
+
+        let now = SystemTime::now();
+
+        let (last_update, name_map) = {
+            let cache = cache.read().unwrap();
+            let Some(prov) = cache.get::<ModioCache>(MODIO_PROVIDER_ID) else {
+                return Ok(()); // no existing mods, nothing to update
+            };
+            (
+                prov.last_update_time,
+                prov.mods
+                    .iter()
+                    .map(|(id, mod_)| (*id, mod_.name_id.clone()))
+                    .collect::<HashMap<_, _>>(),
+            )
+        };
+
+        let last_update = last_update
+            .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+            .unwrap_or_default();
+
+        let events = self
+            .modio
+            .game(MODIO_DRG_ID)
+            .mods()
+            .events(
+                EventType::not_in(vec![
+                    EventTypes::ModCommentAdded,
+                    EventTypes::ModCommentDeleted,
+                ])
+                .and(ModId::_in(name_map.keys().collect::<Vec<_>>()))
+                .and(DateAdded::gt(last_update.as_secs())),
+            )
+            .collect()
+            .await?;
+        let mod_ids = events.iter().map(|e| e.mod_id).collect::<HashSet<_>>();
+
+        // TODO most of this is ripped from generic provider code. the resolution process is overly
+        // complex and should be redone now that there's a much better understanding of what
+        // exactly is required
+        let mut to_resolve = mod_ids
+            .iter()
+            .filter_map(|id| name_map.get(id).map(|name| format_spec(name, *id, None)))
+            .collect::<HashSet<_>>();
+
+        let mut mods_map = HashMap::new();
+
+        // used to deduplicate dependencies from mods already present in the mod list
+        let mut precise_mod_specs = HashSet::new();
+
+        pub async fn resolve_mod(
+            prov: &ModioProvider,
+            cache: ProviderCache,
+            original_spec: ModSpecification,
+        ) -> Result<(ModSpecification, ModInfo)> {
+            let mut spec = original_spec.clone();
+            loop {
+                match prov.resolve_mod(&spec, true, cache.clone()).await? {
+                    ModResponse::Resolve(m) => {
+                        return Ok((original_spec, m));
+                    }
+                    ModResponse::Redirect(redirected_spec) => spec = redirected_spec,
+                };
+            }
+        }
+
+        while !to_resolve.is_empty() {
+            for (u, m) in stream::iter(
+                to_resolve
+                    .iter()
+                    .map(|u| resolve_mod(self, cache.clone(), u.to_owned())),
+            )
+            .boxed()
+            .buffer_unordered(5)
+            .try_collect::<Vec<_>>()
+            .await?
+            {
+                precise_mod_specs.insert(m.spec.clone());
+                mods_map.insert(u, m);
+                to_resolve.clear();
+                for m in mods_map.values() {
+                    for d in &m.suggested_dependencies {
+                        if !precise_mod_specs.contains(d) {
+                            to_resolve.insert(d.clone());
+                        }
+                    }
+                }
+            }
+        }
+
+        let mut lock = cache.write().unwrap();
+        let c = lock.get_mut::<ModioCache>(MODIO_PROVIDER_ID);
+        c.last_update_time = Some(now);
+
+        Ok(())
     }
 
     async fn check(&self) -> Result<()> {

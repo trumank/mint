@@ -73,7 +73,6 @@ impl ModProvider for HttpProvider {
         spec: &ModSpecification,
         _update: bool,
         _cache: ProviderCache,
-        _blob_cache: &BlobCache,
     ) -> Result<ModResponse> {
         let url = url::Url::parse(&spec.url)?;
         let name = url
@@ -176,6 +175,11 @@ impl ModProvider for HttpProvider {
             },
         )
     }
+
+    async fn update_cache(&self, _cache: ProviderCache) -> Result<()> {
+        Ok(())
+    }
+
     async fn check(&self) -> Result<()> {
         Ok(())
     }

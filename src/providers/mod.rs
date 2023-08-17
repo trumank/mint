@@ -9,6 +9,7 @@ use crate::write_file;
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc::Sender;
+use tracing::info;
 
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::io::{Read, Seek};
@@ -202,7 +203,7 @@ impl ModStore {
         loop {
             match self
                 .get_provider(&spec.url)?
-                .resolve_mod(&spec, update, self.cache.clone(), &self.blob_cache.clone())
+                .resolve_mod(&spec, update, self.cache.clone())
                 .await?
             {
                 ModResponse::Resolve(m) => {
@@ -264,6 +265,15 @@ impl ModStore {
                 tx,
             )
             .await
+    }
+
+    pub async fn update_cache(&self) -> Result<()> {
+        let providers = self.providers.read().unwrap().clone();
+        for (name, provider) in providers.iter() {
+            info!("updating cache for {name} provider");
+            provider.update_cache(self.cache.clone()).await?;
+        }
+        Ok(())
     }
 
     pub fn get_mod_info(&self, spec: &ModSpecification) -> Option<ModInfo> {
@@ -462,7 +472,6 @@ pub trait ModProvider: Send + Sync + std::fmt::Debug {
         spec: &ModSpecification,
         update: bool,
         cache: ProviderCache,
-        blob_cache: &BlobCache,
     ) -> Result<ModResponse>;
     async fn fetch_mod(
         &self,
@@ -472,6 +481,7 @@ pub trait ModProvider: Send + Sync + std::fmt::Debug {
         blob_cache: &BlobCache,
         tx: Option<Sender<FetchProgress>>,
     ) -> Result<PathBuf>;
+    async fn update_cache(&self, cache: ProviderCache) -> Result<()>;
     /// Check if provider is configured correctly
     async fn check(&self) -> Result<()>;
     fn get_mod_info(&self, spec: &ModSpecification, cache: ProviderCache) -> Option<ModInfo>;

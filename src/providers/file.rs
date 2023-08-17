@@ -40,7 +40,6 @@ impl ModProvider for FileProvider {
         spec: &ModSpecification,
         _update: bool,
         _cache: ProviderCache,
-        _blob_cache: &BlobCache,
     ) -> Result<ModResponse> {
         let path = Path::new(&spec.url);
         let name = path
@@ -81,6 +80,10 @@ impl ModProvider for FileProvider {
             .unwrap();
         }
         Ok(PathBuf::from(&res.url))
+    }
+
+    async fn update_cache(&self, _cache: ProviderCache) -> Result<()> {
+        Ok(())
     }
 
     async fn check(&self) -> Result<()> {

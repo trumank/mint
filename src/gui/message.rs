@@ -274,12 +274,12 @@ pub struct UpdateCache {
 }
 
 impl UpdateCache {
-    pub fn send(app: &mut App, mod_specs: Vec<ModSpecification>) {
+    pub fn send(app: &mut App) {
         let rid = app.request_counter.next();
         let tx = app.tx.clone();
         let store = app.state.store.clone();
         let handle = tokio::spawn(async move {
-            let res = store.resolve_mods(&mod_specs, true).await.map(|_| ());
+            let res = store.update_cache().await;
             tx.send(Message::UpdateCache(UpdateCache { rid, result: res }))
                 .await
                 .unwrap();

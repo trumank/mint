@@ -1484,15 +1484,22 @@ impl eframe::App for App {
                         && self.state.config.drg_pak_path.is_some(),
                     |ui| {
                         if let Some(args) = &self.args {
-                            if ui.button("Launch game").on_hover_ui(|ui| for arg in args {
-                                ui.label(arg);
-                            }).clicked() {
+                            if ui
+                                .button("Launch game")
+                                .on_hover_ui(|ui| {
+                                    for arg in args {
+                                        ui.label(arg);
+                                    }
+                                })
+                                .clicked()
+                            {
                                 let args = args.clone();
                                 tokio::task::spawn_blocking(move || {
                                     let mut iter = args.iter();
-                                    std::process::Command::new(
-                                        iter.next().unwrap(),
-                                        ).args(iter).spawn().unwrap();
+                                    std::process::Command::new(iter.next().unwrap())
+                                        .args(iter)
+                                        .spawn()
+                                        .unwrap();
                                 });
                             }
                         }
@@ -1507,9 +1514,11 @@ impl eframe::App for App {
 
                             let mut mods = Vec::new();
                             let active_profile = self.state.mod_data.active_profile.clone();
-                            self.state.mod_data.for_each_enabled_mod(&active_profile, |mc| {
-                                mods.push(mc.spec.clone());
-                            });
+                            self.state
+                                .mod_data
+                                .for_each_enabled_mod(&active_profile, |mc| {
+                                    mods.push(mc.spec.clone());
+                                });
 
                             if button.clicked() {
                                 self.last_action_status = LastActionStatus::Idle;
@@ -1536,23 +1545,31 @@ impl eframe::App for App {
                                 if let Some(pak_path) = &self.state.config.drg_pak_path {
                                     let mut mods = HashSet::default();
                                     let active_profile = self.state.mod_data.active_profile.clone();
-                                    self.state.mod_data.for_each_enabled_mod(&active_profile, |mc| {
-                                        if let Some(modio_id) = self.state.store
-                                            .get_mod_info(&mc.spec)
-                                            .and_then(|i| i.modio_id) {
+                                    self.state.mod_data.for_each_enabled_mod(
+                                        &active_profile,
+                                        |mc| {
+                                            if let Some(modio_id) = self
+                                                .state
+                                                .store
+                                                .get_mod_info(&mc.spec)
+                                                .and_then(|i| i.modio_id)
+                                            {
                                                 mods.insert(modio_id);
-                                        }
-                                    });
+                                            }
+                                        },
+                                    );
 
                                     debug!("uninstalling mods: pak_path = {}", pak_path.display());
                                     match uninstall(pak_path, mods) {
                                         Ok(()) => {
-                                            self.last_action_status =
-                                            LastActionStatus::Success("Successfully uninstalled mods".to_string());
-                                        },
+                                            self.last_action_status = LastActionStatus::Success(
+                                                "Successfully uninstalled mods".to_string(),
+                                            );
+                                        }
                                         Err(e) => {
-                                            self.last_action_status =
-                                            LastActionStatus::Failure(format!("Failed to uninstall mods: {e}"))
+                                            self.last_action_status = LastActionStatus::Failure(
+                                                format!("Failed to uninstall mods: {e}"),
+                                            )
                                         }
                                     }
                                 }
@@ -1562,18 +1579,11 @@ impl eframe::App for App {
                         if ui
                             .button("Update cache")
                             .on_hover_text(
-                                "Checks for updates for all mods and updates local cache\n\
-                                due to strict mod.io rate-limiting, can take a long time for large mod lists",
+                                "Checks for updates for all mods and updates local cache",
                             )
                             .clicked()
                         {
-                            let mut mods = Vec::new();
-                            let active_profile = self.state.mod_data.active_profile.clone();
-                            self.state.mod_data.for_each_mod(&active_profile, |mc| {
-                                mods.push(mc.spec.clone());
-                            });
-
-                            message::UpdateCache::send(self, mods);
+                            message::UpdateCache::send(self);
                         }
                     },
                 );
@@ -1589,28 +1599,39 @@ impl eframe::App for App {
                     }
                     ui.spinner();
                 }
-                if ui.button("Lint mods").on_hover_text("Lint mods in the current profile").clicked() {
+                if ui
+                    .button("Lint mods")
+                    .on_hover_text("Lint mods in the current profile")
+                    .clicked()
+                {
                     let mut mods = Vec::new();
                     let active_profile = self.state.mod_data.active_profile.clone();
-                    self.state.mod_data.for_each_enabled_mod(&active_profile, |mc| {
-                        mods.push(mc.spec.clone());
-                    });
+                    self.state
+                        .mod_data
+                        .for_each_enabled_mod(&active_profile, |mc| {
+                            mods.push(mc.spec.clone());
+                        });
                     self.lints_toggle_window = Some(WindowLintsToggle { mods });
                 }
                 if ui.button("⚙").on_hover_text("Open settings").clicked() {
                     self.settings_window = Some(WindowSettings::new(&self.state));
                 }
                 if let Some(available_update) = &self.available_update {
-                    if ui.button(egui::RichText::new("\u{26A0}").color(ui.visuals().warn_fg_color))
-                        .on_hover_text(format!("Update available: {}\n{}", available_update.tag_name, available_update.html_url))
-                        .clicked() {
-                            ui.ctx().output_mut(|o| {
-                                o.open_url = Some(egui::output::OpenUrl {
-                                    url: available_update.html_url.clone(),
-                                    new_tab: true,
-                                });
+                    if ui
+                        .button(egui::RichText::new("\u{26A0}").color(ui.visuals().warn_fg_color))
+                        .on_hover_text(format!(
+                            "Update available: {}\n{}",
+                            available_update.tag_name, available_update.html_url
+                        ))
+                        .clicked()
+                    {
+                        ui.ctx().output_mut(|o| {
+                            o.open_url = Some(egui::output::OpenUrl {
+                                url: available_update.html_url.clone(),
+                                new_tab: true,
                             });
-                        }
+                        });
+                    }
                 }
                 ui.with_layout(egui::Layout::left_to_right(Align::TOP), |ui| {
                     match &self.last_action_status {
@@ -1618,19 +1639,19 @@ impl eframe::App for App {
                             ui.label(
                                 egui::RichText::new("STATUS")
                                     .color(Color32::BLACK)
-                                    .background_color(Color32::LIGHT_GREEN)
+                                    .background_color(Color32::LIGHT_GREEN),
                             );
                             ui.label(msg);
-                        },
+                        }
                         LastActionStatus::Failure(msg) => {
                             ui.label(
                                 egui::RichText::new("STATUS")
                                     .color(Color32::BLACK)
-                                    .background_color(Color32::LIGHT_RED)
+                                    .background_color(Color32::LIGHT_RED),
                             );
                             ui.label(msg);
-                        },
-                        _ => {},
+                        }
+                        _ => {}
                     }
                 });
             });
