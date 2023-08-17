@@ -908,7 +908,15 @@ impl App {
                             self.lints_toggle_window = None;
                         }
 
-                        if ui.button("Generate report").clicked() {
+                        if ui
+                            .add_enabled(
+                                self.check_updates_rid.is_none()
+                                    && self.integrate_rid.is_none()
+                                    && self.lint_rid.is_none(),
+                                egui::Button::new("Generate report"),
+                            )
+                            .clicked()
+                        {
                             let lint_options = BTreeMap::from([
                                 (
                                     LintId::ARCHIVE_WITH_MULTIPLE_PAKS,
