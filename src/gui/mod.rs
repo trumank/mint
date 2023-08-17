@@ -7,6 +7,7 @@ mod toggle_switch;
 //#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")] // hide console window on Windows in release
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::time::{Duration, SystemTime};
 use std::{
     collections::{HashMap, HashSet},
     ops::DerefMut,
@@ -15,11 +16,13 @@ use std::{
 
 use anyhow::{anyhow, Context, Result};
 use eframe::egui::{CollapsingHeader, RichText};
+use eframe::epaint::{Pos2, Vec2};
 use eframe::{
     egui::{self, FontSelection, Layout, TextFormat, Ui},
     emath::{Align, Align2},
     epaint::{text::LayoutJob, Color32, Stroke},
 };
+use egui_commonmark::{CommonMarkCache, CommonMarkViewer};
 use tokio::{
     sync::mpsc::{self, Receiver, Sender},
     task::JoinHandle,
@@ -78,12 +81,14 @@ pub struct App {
     modio_texture_handle: Option<egui::TextureHandle>,
     last_action_status: LastActionStatus,
     available_update: Option<GitHubRelease>,
+    show_update_time: Option<SystemTime>,
     open_profiles: HashSet<String>,
     lint_rid: Option<MessageHandle<()>>,
     lint_report_window: Option<WindowLintReport>,
     lint_report: Option<LintReport>,
     lints_toggle_window: Option<WindowLintsToggle>,
     lint_options: LintOptions,
+    cache: CommonMarkCache,
 }
 
 #[derive(Default)]
@@ -132,12 +137,14 @@ impl App {
             modio_texture_handle: None,
             last_action_status: LastActionStatus::Idle,
             available_update: None,
+            show_update_time: None,
             open_profiles: Default::default(),
             lint_rid: None,
             lint_report_window: None,
             lint_report: None,
             lints_toggle_window: None,
             lint_options: LintOptions::default(),
+            cache: Default::default(),
         })
     }
 
@@ -641,6 +648,45 @@ impl App {
             }
         }
         string
+    }
+
+    fn show_update_window(&mut self, ctx: &egui::Context) {
+        if let (Some(update), Some(update_time)) =
+            (self.available_update.as_ref(), self.show_update_time)
+        {
+            let now = SystemTime::now();
+            let wait_time = Duration::from_secs(10);
+            egui::Area::new("available-update-overlay")
+                .movable(false)
+                .fixed_pos(Pos2::ZERO)
+                .order(egui::Order::Background)
+                .show(ctx, |ui| {
+                    egui::Frame::none()
+                        .fill(Color32::from_rgba_unmultiplied(0, 0, 0, 127))
+                        .show(ui, |ui| {
+                            ui.allocate_space(ui.available_size());
+                        })
+                });
+            egui::Window::new(format!("Update Available: {}", update.tag_name))
+                .collapsible(false)
+                .anchor(Align2::CENTER_CENTER, Vec2::ZERO)
+                .resizable(false)
+                .show(ctx, |ui| {
+                    CommonMarkViewer::new("available-update")
+                        .max_image_width(Some(512))
+                        .show(ui, &mut self.cache, &update.body);
+                    ui.with_layout(egui::Layout::right_to_left(Align::TOP), |ui| {
+                        let elapsed = now.duration_since(update_time).unwrap_or_default();
+                        if elapsed > wait_time {
+                            if ui.button("Close").clicked() {
+                                self.show_update_time = None;
+                            }
+                        } else {
+                            ui.spinner();
+                        }
+                    });
+                });
+        }
     }
 
     fn show_provider_parameters(&mut self, ctx: &egui::Context) {
@@ -1355,6 +1401,7 @@ impl eframe::App for App {
 
         // begin draw
 
+        self.show_update_window(ctx);
         self.show_provider_parameters(ctx);
         self.show_profile_windows(ctx);
         self.show_settings(ctx);
@@ -1727,6 +1774,7 @@ fn custom_popup_above_or_below_widget<R>(
 pub struct GitHubRelease {
     html_url: String,
     tag_name: String,
+    body: String,
 }
 
 #[derive(Debug)]

@@ -11,6 +11,7 @@ clap = { version = "4.3.21", features = ["derive"] }
 dialoguer = "0.10.4"
 directories = "5.0.1"
 eframe = "0.22.0"
+egui_commonmark = "0.7.4"
 egui_dnd = { git = "https://github.com/lucasmerlin/egui_dnd.git" }
 egui_extras = "0.22.0"
 futures = "0.3.28"

@@ -1,5 +1,6 @@
 use std::collections::BTreeSet;
 use std::ops::DerefMut;
+use std::time::SystemTime;
 use std::{
     collections::{HashMap, HashSet},
     path::PathBuf,
@@ -344,6 +345,7 @@ impl CheckUpdates {
                 ) {
                     if release_version > version {
                         app.available_update = Some(release);
+                        app.show_update_time = Some(SystemTime::now());
                     }
                 }
             }
