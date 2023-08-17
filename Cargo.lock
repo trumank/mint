@@ -1181,6 +1181,7 @@ dependencies = [
  "sha2",
  "steamlocate",
  "task-local-extensions",
+ "tempfile",
  "thiserror",
  "tokio",
  "tracing",
