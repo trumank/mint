@@ -52,7 +52,7 @@ pub fn gui(args: Option<Vec<String>>) -> Result<()> {
         ..Default::default()
     };
     eframe::run_native(
-        "DRG Mod Integration",
+        &format!("DRG Mod Integration {}", env!("CARGO_PKG_VERSION")),
         options,
         Box::new(|_cc| Box::new(App::new(args).unwrap())),
     )
