@@ -4,6 +4,8 @@
 
 ## [Unreleased] - ReleaseDate
 
+## [0.2.10] - 2023-08-18
+
 - Many small improvements to the GUI
 - Add simple in game UI to show local and remote integration version and active mods
 - Add experimental mod linting to assist with common mod issues such as conflicts ([#55](https://github.com/trumank/drg-mod-integration/pull/55))
@@ -22,6 +24,7 @@
 - Fix including same asset paths with different casings causing Unreal Engine to load neither ([#29](https://github.com/trumank/drg-mod-integration/issues/29))
 
 <!-- next-url -->
-[Unreleased]: https://github.com/trumank/drg-mod-integration/compare/v0.2.9...HEAD
+[Unreleased]: https://github.com/trumank/drg-mod-integration/compare/v0.2.10...HEAD
+[0.2.10]: https://github.com/trumank/drg-mod-integration/compare/v0.2.9...v0.2.10
 [0.2.9]: https://github.com/trumank/drg-mod-integration/compare/v0.2.8...v0.2.9
 [0.2.8]: https://github.com/trumank/drg-mod-integration/compare/v0.2.7...v0.2.8
