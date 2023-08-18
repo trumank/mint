@@ -245,14 +245,19 @@ impl<T> TArray<T> {
 
 impl FString {
     fn to_os_string(&self) -> OsString {
-        use std::os::windows::ffi::OsStringExt;
-        let slice = self.as_slice();
-        let len = slice
-            .iter()
-            .enumerate()
-            .find_map(|(i, &b)| (b == 0).then_some(i))
-            .unwrap_or(slice.len());
-        std::ffi::OsString::from_wide(&slice[0..len])
+        #[cfg(target_os = "windows")]
+        {
+            use std::os::windows::ffi::OsStringExt;
+            let slice = self.as_slice();
+            let len = slice
+                .iter()
+                .enumerate()
+                .find_map(|(i, &b)| (b == 0).then_some(i))
+                .unwrap_or(slice.len());
+            std::ffi::OsString::from_wide(&slice[0..len])
+        }
+        #[cfg(not(target_os = "windows"))]
+        unimplemented!()
     }
 }
 
