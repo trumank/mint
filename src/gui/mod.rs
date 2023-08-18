@@ -89,6 +89,9 @@ pub struct App {
     lints_toggle_window: Option<WindowLintsToggle>,
     lint_options: LintOptions,
     cache: CommonMarkCache,
+    needs_restart: bool,
+    self_update_rid: Option<MessageHandle<SelfUpdateProgress>>,
+    original_exe_path: Option<PathBuf>,
 }
 
 #[derive(Default)]
@@ -145,6 +148,9 @@ impl App {
             lints_toggle_window: None,
             lint_options: LintOptions::default(),
             cache: Default::default(),
+            needs_restart: false,
+            self_update_rid: None,
+            original_exe_path: None,
         })
     }
 
@@ -667,25 +673,70 @@ impl App {
                             ui.allocate_space(ui.available_size());
                         })
                 });
-            egui::Window::new(format!("Update Available: {}", update.tag_name))
-                .collapsible(false)
-                .anchor(Align2::CENTER_CENTER, Vec2::ZERO)
-                .resizable(false)
-                .show(ctx, |ui| {
-                    CommonMarkViewer::new("available-update")
-                        .max_image_width(Some(512))
-                        .show(ui, &mut self.cache, &update.body);
-                    ui.with_layout(egui::Layout::right_to_left(Align::TOP), |ui| {
-                        let elapsed = now.duration_since(update_time).unwrap_or_default();
-                        if elapsed > wait_time {
-                            if ui.button("Close").clicked() {
-                                self.show_update_time = None;
-                            }
-                        } else {
-                            ui.spinner();
-                        }
+            if let Some(MessageHandle { state, .. }) = &self.self_update_rid {
+                egui::Window::new("Update progress")
+                    .collapsible(false)
+                    .anchor(Align2::CENTER_CENTER, Vec2::ZERO)
+                    .resizable(false)
+                    .show(ctx, |ui| {
+                        ui.with_layout(egui::Layout::top_down_justified(Align::Center), |ui| {
+                            match state {
+                                SelfUpdateProgress::Pending => {
+                                    ui.add(egui::ProgressBar::new(0.0).show_percentage());
+                                }
+                                SelfUpdateProgress::Progress { progress, size } => {
+                                    ui.add(
+                                        egui::ProgressBar::new(*progress as f32 / *size as f32)
+                                            .show_percentage(),
+                                    );
+                                }
+                                SelfUpdateProgress::Complete => {
+                                    ui.add(egui::ProgressBar::new(1.0).show_percentage());
+                                    ui.label(
+                                        egui::RichText::new("Update successful.")
+                                            .color(Color32::LIGHT_GREEN),
+                                    );
+
+                                    if ui.button("Restart").clicked() {
+                                        self.needs_restart = true;
+                                    }
+                                }
+                            };
+                        });
                     });
-                });
+            } else {
+                egui::Window::new(format!("Update available: {}", update.tag_name))
+                    .collapsible(false)
+                    .anchor(Align2::CENTER_CENTER, Vec2::ZERO)
+                    .resizable(false)
+                    .show(ctx, |ui| {
+                        CommonMarkViewer::new("available-update")
+                            .max_image_width(Some(512))
+                            .show(ui, &mut self.cache, &update.body);
+                        ui.with_layout(egui::Layout::right_to_left(Align::TOP), |ui| {
+                            if ui
+                                .add(egui::Button::new("Install update"))
+                                .on_hover_text("Download and install the update.")
+                                .clicked()
+                            {
+                                self.self_update_rid = Some(message::SelfUpdate::send(
+                                    &mut self.request_counter,
+                                    self.tx.clone(),
+                                    ctx.clone(),
+                                ));
+                            }
+
+                            let elapsed = now.duration_since(update_time).unwrap_or_default();
+                            if elapsed > wait_time {
+                                if ui.button("Close").clicked() {
+                                    self.show_update_time = None;
+                                }
+                            } else {
+                                ui.spinner();
+                            }
+                        });
+                    });
+            }
         }
     }
 
@@ -1389,6 +1440,21 @@ struct WindowLintsToggle {
 
 impl eframe::App for App {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        if self.needs_restart
+            && let Some(original_exe_path) = &self.original_exe_path
+        {
+            debug!("needs restart");
+            self.needs_restart = false;
+
+            debug!("restarting...");
+            let _child = std::process::Command::new(original_exe_path)
+                .spawn()
+                .unwrap();
+            debug!("created child process");
+
+            std::process::exit(0);
+        }
+
         if !self.checked_updates_initially {
             self.checked_updates_initially = true;
             message::CheckUpdates::send(self, ctx);
@@ -1414,6 +1480,7 @@ impl eframe::App for App {
                     self.integrate_rid.is_none()
                         && self.update_rid.is_none()
                         && self.lint_rid.is_none()
+                        && self.self_update_rid.is_none()
                         && self.state.config.drg_pak_path.is_some(),
                     |ui| {
                         if let Some(args) = &self.args {
@@ -1790,4 +1857,11 @@ impl From<FetchProgress> for SpecFetchProgress {
             FetchProgress::Complete { .. } => Self::Complete,
         }
     }
+}
+
+#[derive(Debug, PartialEq)]
+pub enum SelfUpdateProgress {
+    Pending,
+    Progress { progress: u64, size: u64 },
+    Complete,
 }
