@@ -507,6 +507,22 @@ fn find_array_property_named<'a>(
     }
     None
 }
+fn find_struct_property_named<'a>(
+    export: &'a mut unreal_asset::exports::normal_export::NormalExport,
+    name: &'a str,
+) -> Option<(
+    usize,
+    &'a mut unreal_asset::properties::struct_property::StructProperty,
+)> {
+    for (i, prop) in &mut export.properties.iter_mut().enumerate() {
+        if let unreal_asset::properties::Property::StructProperty(prop) = prop {
+            if prop.name.get_content(|n| n == name) {
+                return Some((i, prop));
+            }
+        }
+    }
+    None
+}
 
 /// "it's only 3 instructions"
 /// "how much boilerplate could there possibly be"
@@ -941,11 +957,14 @@ fn inject_init_actors<R: Read + Seek>(
             }
         }
 
-        if let Some((i, p)) = find_array_property_named(e, "LoadedMods") {
+        if let Some((_, p)) = find_struct_property_named(e, "Config") {
+            if let Some(Property::StrProperty(version)) = p.value.get_mut(0) {
+                version.value = Some(env!("CARGO_PKG_VERSION").into());
+            }
             if structs.is_empty() {
-                e.properties.remove(i);
-            } else {
-                p.value = structs;
+                p.value.remove(1);
+            } else if let Property::ArrayProperty(loaded_mods) = &mut p.value[1] {
+                loaded_mods.value = structs;
             }
         }
     }
