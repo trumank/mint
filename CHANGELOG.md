@@ -4,7 +4,11 @@
 
 ## [Unreleased] - ReleaseDate
 
-- Microsoft Store: Fix mods being unable to write custom save files
+- Many small improvements to the GUI
+- Add simple in game UI to show local and remote integration version and active mods
+- Add experimental mod linting to assist with common mod issues such as conflicts ([#55](https://github.com/trumank/drg-mod-integration/pull/55))
+- Microsoft Store: Fix mods being unable to write custom save files ([#58](https://github.com/trumank/drg-mod-integration/issues/58))
+- Fix `profile` CLI command not respecting mod's `enable` flag
 
 ## [0.2.9] - 2023-08-11
 
