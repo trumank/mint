@@ -885,23 +885,15 @@ fn inject_init_actors<R: Read + Seek>(
                         ancestry: ancestry.clone(),
                         property_guid: None,
                         duplication_index: 0,
+                        value: Some(mod_info.name.to_string()),
+                    }
+                    .into(),
+                    StrProperty {
+                        name: asset.add_fname("Resolution_13_9947C5279BF5459380939CBA188C9805"),
+                        ancestry: ancestry.clone(),
+                        property_guid: None,
+                        duplication_index: 0,
                         value: Some(mod_info.resolution.get_resolvable_url_or_name().to_string()),
-                    }
-                    .into(),
-                    StrProperty {
-                        name: asset.add_fname("ID_6_9947C5279BF5459380939CBA188C9805"),
-                        ancestry: ancestry.clone(),
-                        property_guid: None,
-                        duplication_index: 0,
-                        value: Some("".to_string()),
-                    }
-                    .into(),
-                    StrProperty {
-                        name: asset.add_fname("Version_7_B0FB8B97A09949F59B8F7142D9DA23A4"),
-                        ancestry: ancestry.clone(),
-                        property_guid: None,
-                        duplication_index: 0,
-                        value: Some("".to_string()),
                     }
                     .into(),
                     BoolProperty {
@@ -909,7 +901,7 @@ fn inject_init_actors<R: Read + Seek>(
                         ancestry: ancestry.clone(),
                         property_guid: None,
                         duplication_index: 0,
-                        value: false,
+                        value: mod_info.suggested_require,
                     }
                     .into(),
                 ]
