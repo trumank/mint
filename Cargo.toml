@@ -5,6 +5,7 @@ edition = "2021"
 repository = "https://github.com/trumank/drg-mod-integration"
 
 [dependencies]
+ansi_term = "0.12.1"
 anyhow = { version = "1.0.72", features = ["backtrace"] }
 async-trait = "0.1.73"
 clap = { version = "4.3.21", features = ["derive"] }

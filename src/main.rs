@@ -95,6 +95,13 @@ struct Args {
 }
 
 fn main() -> Result<()> {
+    #[cfg(target_os = "windows")]
+    {
+        // Try to enable ANSI code support on Windows 10 for console. If it fails, then whatever
+        // *shrugs*.
+        let _res = ansi_term::enable_ansi_support();
+    }
+
     std::env::set_var("RUST_BACKTRACE", "1");
     let _guard = setup_logging()?;
     debug!("logging setup complete");
