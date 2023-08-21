@@ -103,10 +103,10 @@ pub struct App {
     needs_restart: bool,
     self_update_rid: Option<MessageHandle<SelfUpdateProgress>>,
     original_exe_path: Option<PathBuf>,
-    detailed_mod_info_window: Option<WindowDetailedModInfo>,
-    mod_details: Option<ModDetails>,
-    fetch_mod_details_rid: Option<MessageHandle<()>>,
-    mod_details_thumbnail_texture_handle: Option<egui::TextureHandle>,
+    detailed_mod_info_windows: HashMap<u32, WindowDetailedModInfo>,
+    mod_details: HashMap<u32, ModDetails>,
+    fetch_mod_details_rid: HashMap<u32, MessageHandle<()>>,
+    mod_details_thumbnail_texture_handle: HashMap<u32, egui::TextureHandle>,
 }
 
 #[derive(Default)]
@@ -166,10 +166,10 @@ impl App {
             needs_restart: false,
             self_update_rid: None,
             original_exe_path: None,
-            detailed_mod_info_window: None,
-            mod_details: None,
-            fetch_mod_details_rid: None,
-            mod_details_thumbnail_texture_handle: None,
+            detailed_mod_info_windows: HashMap::default(),
+            mod_details: HashMap::default(),
+            fetch_mod_details_rid: HashMap::default(),
+            mod_details_thumbnail_texture_handle: HashMap::default(),
         })
     }
 
@@ -451,9 +451,8 @@ impl App {
                             .on_hover_text_at_pointer("View details")
                             .clicked()
                     {
-                        self.detailed_mod_info_window =
-                                Some(WindowDetailedModInfo { info: info.clone() });
-                        self.fetch_mod_details_rid = Some(message::FetchModDetails::send(
+                        self.detailed_mod_info_windows.insert(modio_id, WindowDetailedModInfo { info: info.clone() });
+                        self.fetch_mod_details_rid.insert(modio_id, message::FetchModDetails::send(
                             &mut self.request_counter,
                             ui.ctx(),
                             self.tx.clone(),
@@ -1429,40 +1428,35 @@ impl App {
         }
     }
 
-    fn show_detailed_mod_info(&mut self, ctx: &egui::Context) {
-        if let Some(WindowDetailedModInfo { info }) = &self.detailed_mod_info_window {
-            egui::Area::new("detailed-mod-info-overlay")
-                .movable(false)
-                .fixed_pos(Pos2::ZERO)
-                .order(egui::Order::Background)
-                .show(ctx, |ui| {
-                    egui::Frame::none()
-                        .fill(Color32::from_rgba_unmultiplied(0, 0, 0, 127))
-                        .show(ui, |ui| {
-                            ui.allocate_space(ui.available_size());
-                        })
-                });
+    fn show_detailed_mod_info(&mut self, ctx: &egui::Context, modio_id: u32) {
+        let mut to_remove = Vec::new();
 
+        if let Some(WindowDetailedModInfo { info }) = self.detailed_mod_info_windows.get(&modio_id)
+        {
             let mut open = true;
 
             egui::Window::new(&info.name)
                 .open(&mut open)
                 .collapsible(false)
-                .anchor(Align2::CENTER_TOP, Vec2::new(0.0, 30.0))
-                .resizable(false)
-                .show(ctx, |ui| self.show_detailed_mod_info_inner(ui));
+                .movable(true)
+                .resizable(true)
+                .show(ctx, |ui| self.show_detailed_mod_info_inner(ui, modio_id));
 
             if !open {
-                self.detailed_mod_info_window = None;
-                self.mod_details = None;
-                self.fetch_mod_details_rid = None;
-                self.mod_details_thumbnail_texture_handle = None;
+                to_remove.push(modio_id);
             }
+        }
+
+        for id in to_remove {
+            self.detailed_mod_info_windows.remove(&id);
+            self.mod_details.remove(&id);
+            self.fetch_mod_details_rid.remove(&id);
+            self.mod_details_thumbnail_texture_handle.remove(&id);
         }
     }
 
-    fn show_detailed_mod_info_inner(&mut self, ui: &mut egui::Ui) {
-        if let Some(mod_details) = &self.mod_details {
+    fn show_detailed_mod_info_inner(&mut self, ui: &mut egui::Ui, modio_id: u32) {
+        if let Some(mod_details) = &self.mod_details.get(&modio_id) {
             let scroll_area_height = (ui.available_height() - 60.0).clamp(0.0, f32::INFINITY);
 
             egui::ScrollArea::vertical()
@@ -1473,7 +1467,8 @@ impl App {
                 .show(ui, |ui| {
                     let texture: &egui::TextureHandle = self
                         .mod_details_thumbnail_texture_handle
-                        .get_or_insert_with(|| {
+                        .entry(modio_id)
+                        .or_insert_with(|| {
                             ui.ctx().load_texture(
                                 format!("{} image", mod_details.r#mod.name),
                                 {
@@ -1646,7 +1641,16 @@ impl eframe::App for App {
         self.show_settings(ctx);
         self.show_lints_toggle(ctx);
         self.show_lint_report(ctx);
-        self.show_detailed_mod_info(ctx);
+
+        let modio_ids = self
+            .detailed_mod_info_windows
+            .keys()
+            .copied()
+            .collect::<Vec<_>>();
+
+        for modio_id in modio_ids {
+            self.show_detailed_mod_info(ctx, modio_id);
+        }
 
         egui::TopBottomPanel::bottom("bottom_panel").show(ctx, |ui| {
             ui.with_layout(egui::Layout::right_to_left(Align::TOP), |ui| {
@@ -1655,8 +1659,8 @@ impl eframe::App for App {
                         && self.update_rid.is_none()
                         && self.lint_rid.is_none()
                         && self.self_update_rid.is_none()
-                        && self.detailed_mod_info_window.is_none()
-                        && self.fetch_mod_details_rid.is_none()
+                        && self.detailed_mod_info_windows.is_empty()
+                        && self.fetch_mod_details_rid.is_empty()
                         && self.state.config.drg_pak_path.is_some(),
                     |ui| {
                         if let Some(args) = &self.args {

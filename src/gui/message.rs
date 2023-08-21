@@ -754,6 +754,7 @@ async fn self_update_async(
 #[derive(Debug)]
 pub struct FetchModDetails {
     rid: RequestID,
+    modio_id: u32,
     result: Result<ModDetails>,
 }
 
@@ -780,9 +781,13 @@ impl FetchModDetails {
             rid,
             handle: tokio::task::spawn(async move {
                 let result = fetch_modio_mod_details(oauth_token, modio_id).await;
-                tx.send(Message::FetchModDetails(FetchModDetails { rid, result }))
-                    .await
-                    .unwrap();
+                tx.send(Message::FetchModDetails(FetchModDetails {
+                    rid,
+                    result,
+                    modio_id,
+                }))
+                .await
+                .unwrap();
                 ctx.request_repaint();
             }),
             state: (),
@@ -790,24 +795,30 @@ impl FetchModDetails {
     }
 
     fn receive(self, app: &mut App) {
-        if Some(self.rid) == app.fetch_mod_details_rid.as_ref().map(|r| r.rid) {
+        let mut to_remove = None;
+
+        if let Some(req) = app.fetch_mod_details_rid.get(&self.modio_id)
+            && req.rid == self.rid
+        {
             match self.result {
                 Ok(mod_details) => {
                     info!("fetch mod details successful");
-                    app.mod_details = Some(mod_details);
+                    app.mod_details.insert(mod_details.r#mod.id, mod_details);
                     app.last_action_status =
                         LastActionStatus::Success("fetch mod details complete".to_string());
                 }
                 Err(e) => {
                     error!("fetch mod details failed");
                     error!("{:#?}", e);
-                    app.mod_details = None;
-                    app.fetch_mod_details_rid = None;
+                    to_remove = Some(self.modio_id);
                     app.last_action_status =
                         LastActionStatus::Failure("fetch mod details failed".to_string());
                 }
             }
-            app.integrate_rid = None;
+        }
+
+        if let Some(id) = to_remove {
+            app.fetch_mod_details_rid.remove(&id);
         }
     }
 }
