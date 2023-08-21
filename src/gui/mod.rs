@@ -15,7 +15,7 @@ use std::{
 };
 
 use anyhow::{anyhow, Context, Result};
-use eframe::egui::{Button, CollapsingHeader, RichText};
+use eframe::egui::{Button, CollapsingHeader, Label, RichText};
 use eframe::epaint::{Pos2, Vec2};
 use eframe::{
     egui::{self, FontSelection, Layout, TextFormat, Ui},
@@ -43,6 +43,7 @@ use find_string::FindString;
 use message::MessageHandle;
 use request_counter::{RequestCounter, RequestID};
 
+use self::message::ModDetails;
 use self::toggle_switch::toggle_switch;
 
 pub fn gui(args: Option<Vec<String>>) -> Result<()> {
@@ -98,10 +99,14 @@ pub struct App {
     lint_report: Option<LintReport>,
     lints_toggle_window: Option<WindowLintsToggle>,
     lint_options: LintOptions,
-    cache: CommonMarkCache,
+    update_cmark_cache: CommonMarkCache,
     needs_restart: bool,
     self_update_rid: Option<MessageHandle<SelfUpdateProgress>>,
     original_exe_path: Option<PathBuf>,
+    detailed_mod_info_window: Option<WindowDetailedModInfo>,
+    mod_details: Option<ModDetails>,
+    fetch_mod_details_rid: Option<MessageHandle<()>>,
+    mod_details_thumbnail_texture_handle: Option<egui::TextureHandle>,
 }
 
 #[derive(Default)]
@@ -157,10 +162,14 @@ impl App {
             lint_report: None,
             lints_toggle_window: None,
             lint_options: LintOptions::default(),
-            cache: Default::default(),
+            update_cmark_cache: Default::default(),
             needs_restart: false,
             self_update_rid: None,
             original_exe_path: None,
+            detailed_mod_info_window: None,
+            mod_details: None,
+            fetch_mod_details_rid: None,
+            mod_details_thumbnail_texture_handle: None,
         })
     }
 
@@ -432,6 +441,25 @@ impl App {
                         .clicked()
                     {
                         ui.output_mut(|o| o.copied_text = mc.spec.url.to_owned());
+                    }
+
+                    if let Some(modio_id) = info.modio_id
+                        && let Some(modio_provider_params) = self.state.config.provider_parameters.get("modio")
+                        && let Some(oauth_token) = modio_provider_params.get("oauth")
+                        && ui
+                            .button("ℹ")
+                            .on_hover_text_at_pointer("View details")
+                            .clicked()
+                    {
+                        self.detailed_mod_info_window =
+                                Some(WindowDetailedModInfo { info: info.clone() });
+                        self.fetch_mod_details_rid = Some(message::FetchModDetails::send(
+                            &mut self.request_counter,
+                            ui.ctx(),
+                            self.tx.clone(),
+                            oauth_token,
+                            modio_id
+                        ));
                     }
 
                     if mc.enabled {
@@ -730,7 +758,7 @@ impl App {
                     .show(ctx, |ui| {
                         CommonMarkViewer::new("available-update")
                             .max_image_width(Some(512))
-                            .show(ui, &mut self.cache, &update.body);
+                            .show(ui, &mut self.update_cmark_cache, &update.body);
                         ui.with_layout(egui::Layout::right_to_left(Align::TOP), |ui| {
                             if ui
                                 .add(egui::Button::new("Install update"))
@@ -1400,6 +1428,129 @@ impl App {
             }
         }
     }
+
+    fn show_detailed_mod_info(&mut self, ctx: &egui::Context) {
+        if let Some(WindowDetailedModInfo { info }) = &self.detailed_mod_info_window {
+            egui::Area::new("detailed-mod-info-overlay")
+                .movable(false)
+                .fixed_pos(Pos2::ZERO)
+                .order(egui::Order::Background)
+                .show(ctx, |ui| {
+                    egui::Frame::none()
+                        .fill(Color32::from_rgba_unmultiplied(0, 0, 0, 127))
+                        .show(ui, |ui| {
+                            ui.allocate_space(ui.available_size());
+                        })
+                });
+
+            let mut open = true;
+
+            egui::Window::new(&info.name)
+                .open(&mut open)
+                .collapsible(false)
+                .anchor(Align2::CENTER_TOP, Vec2::new(0.0, 30.0))
+                .resizable(false)
+                .show(ctx, |ui| self.show_detailed_mod_info_inner(ui));
+
+            if !open {
+                self.detailed_mod_info_window = None;
+                self.mod_details = None;
+                self.fetch_mod_details_rid = None;
+                self.mod_details_thumbnail_texture_handle = None;
+            }
+        }
+    }
+
+    fn show_detailed_mod_info_inner(&mut self, ui: &mut egui::Ui) {
+        if let Some(mod_details) = &self.mod_details {
+            let scroll_area_height = (ui.available_height() - 60.0).clamp(0.0, f32::INFINITY);
+
+            egui::ScrollArea::vertical()
+                .max_height(scroll_area_height)
+                .max_width(f32::INFINITY)
+                .auto_shrink([false, false])
+                .stick_to_right(true)
+                .show(ui, |ui| {
+                    let texture: &egui::TextureHandle = self
+                        .mod_details_thumbnail_texture_handle
+                        .get_or_insert_with(|| {
+                            ui.ctx().load_texture(
+                                format!("{} image", mod_details.r#mod.name),
+                                {
+                                    let image =
+                                        image::load_from_memory(&mod_details.thumbnail).unwrap();
+                                    let size = [image.width() as _, image.height() as _];
+                                    let image_buffer = image.to_rgb8();
+                                    let pixels = image_buffer.as_flat_samples();
+                                    egui::ColorImage::from_rgb(size, pixels.as_slice())
+                                },
+                                Default::default(),
+                            )
+                        });
+                    ui.vertical_centered(|ui| {
+                        ui.image(texture, texture.size_vec2());
+                    });
+
+                    ui.heading("Uploader");
+                    ui.label(&mod_details.r#mod.submitted_by.username);
+                    ui.add_space(10.0);
+
+                    ui.heading("Description");
+                    if let Some(desc) = &mod_details.r#mod.description_plaintext {
+                        ui.label(desc);
+                    } else {
+                        ui.label("No description provided.");
+                    }
+                    ui.add_space(10.0);
+
+                    ui.heading("Versions and changelog");
+                    ui.label(
+                        RichText::new("Only the 10 most recent versions are shown.")
+                            .color(Color32::GRAY)
+                            .italics(),
+                    );
+                    egui::Grid::new("mod-details-available-versions")
+                        .spacing(Vec2::new(3.0, 10.0))
+                        .striped(true)
+                        .num_columns(2)
+                        .show(ui, |ui| {
+                            mod_details.versions.iter().for_each(|file| {
+                                if let Some(version) = &file.version {
+                                    ui.label(version);
+                                } else {
+                                    ui.label("Unknown version");
+                                }
+                                if let Some(changelog) = &file.changelog {
+                                    ui.add(Label::new(changelog).wrap(true));
+                                } else {
+                                    ui.label("N/A");
+                                }
+                                ui.end_row();
+                            });
+                        });
+                    ui.add_space(10.0);
+
+                    ui.heading("Files");
+                    if let Some(file) = &mod_details.r#mod.modfile {
+                        ui.horizontal(|ui| {
+                            if let Some(version) = &file.version {
+                                ui.label(version);
+                            } else {
+                                ui.label("Unknown version");
+                            }
+                            ui.hyperlink(&file.download.binary_url);
+                        });
+                    } else {
+                        ui.label("No files provided.");
+                    }
+                });
+        } else {
+            ui.horizontal(|ui| {
+                ui.spinner();
+                ui.label("Fetching mod details from mod.io...");
+            });
+        }
+    }
 }
 
 struct WindowProviderParameters {
@@ -1456,6 +1607,10 @@ struct WindowLintsToggle {
     mods: Vec<ModSpecification>,
 }
 
+struct WindowDetailedModInfo {
+    info: ModInfo,
+}
+
 impl eframe::App for App {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         if self.needs_restart
@@ -1491,6 +1646,7 @@ impl eframe::App for App {
         self.show_settings(ctx);
         self.show_lints_toggle(ctx);
         self.show_lint_report(ctx);
+        self.show_detailed_mod_info(ctx);
 
         egui::TopBottomPanel::bottom("bottom_panel").show(ctx, |ui| {
             ui.with_layout(egui::Layout::right_to_left(Align::TOP), |ui| {
@@ -1499,6 +1655,8 @@ impl eframe::App for App {
                         && self.update_rid.is_none()
                         && self.lint_rid.is_none()
                         && self.self_update_rid.is_none()
+                        && self.detailed_mod_info_window.is_none()
+                        && self.fetch_mod_details_rid.is_none()
                         && self.state.config.drg_pak_path.is_some(),
                     |ui| {
                         if let Some(args) = &self.args {
