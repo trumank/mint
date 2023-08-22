@@ -15,7 +15,7 @@ use std::{
 };
 
 use anyhow::{anyhow, Context, Result};
-use eframe::egui::{CollapsingHeader, RichText};
+use eframe::egui::{Button, CollapsingHeader, RichText};
 use eframe::epaint::{Pos2, Vec2};
 use eframe::{
     egui::{self, FontSelection, Layout, TextFormat, Ui},
@@ -58,6 +58,16 @@ pub fn gui(args: Option<Vec<String>>) -> Result<()> {
     )
     .map_err(|e| anyhow!("{e}"))?;
     Ok(())
+}
+
+pub mod colors {
+    use eframe::epaint::Color32;
+
+    pub const DARK_RED: Color32 = Color32::DARK_RED;
+    pub const DARKER_RED: Color32 = Color32::from_rgb(110, 0, 0);
+
+    pub const DARK_GREEN: Color32 = Color32::DARK_GREEN;
+    pub const DARKER_GREEN: Color32 = Color32::from_rgb(0, 80, 0);
 }
 
 const MODIO_LOGO_PNG: &[u8] = include_bytes!("../../assets/modio-cog-blue.png");
@@ -350,7 +360,7 @@ impl App {
 
                 if ui
                     .add(toggle_switch(&mut mc.enabled))
-                    .on_hover_text_at_pointer("enabled?")
+                    .on_hover_text_at_pointer("Enabled?")
                     .changed()
                 {
                     ctx.needs_save = true;
@@ -540,9 +550,17 @@ impl App {
 
             let mut ui_item =
                 |ctx: &mut Ctx, ui: &mut Ui, mc: &mut ModOrGroup, state: egui_dnd::ItemState| {
-                    if ui.button(" ➖ ").clicked() {
-                        ctx.btn_remove = Some(state.index);
-                    }
+                    ui.scope(|ui| {
+                        ui.visuals_mut().widgets.hovered.weak_bg_fill = colors::DARK_RED;
+                        ui.visuals_mut().widgets.active.weak_bg_fill = colors::DARKER_RED;
+                        if ui
+                            .add(Button::new(" 🗑 "))
+                            .on_hover_text_at_pointer("Delete mod")
+                            .clicked()
+                        {
+                            ctx.btn_remove = Some(state.index);
+                        };
+                    });
 
                     match mc {
                         ModOrGroup::Individual(mc) => {
@@ -554,7 +572,7 @@ impl App {
                         } => {
                             if ui
                                 .add(toggle_switch(enabled))
-                                .on_hover_text_at_pointer("enabled?")
+                                .on_hover_text_at_pointer("Enabled?")
                                 .changed()
                             {
                                 ctx.needs_save = true;
@@ -597,7 +615,7 @@ impl App {
                     frame.show(ui, |ui| {
                         ui.horizontal(|ui| {
                             handle.ui(ui, |ui| {
-                                ui.label("☰");
+                                ui.label("   ☰  ");
                             });
 
                             ui_item(&mut ctx, ui, item, state);
