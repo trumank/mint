@@ -1,6 +1,6 @@
 use std;
 
-use super::{custom_popup_above_or_below_widget, is_committed};
+use super::{colors, custom_popup_above_or_below_widget, is_committed};
 
 use eframe::egui;
 
@@ -84,8 +84,8 @@ where
     let mut modified = false;
     ui.push_id(name, |ui| {
         ui.horizontal(|ui| {
-            mk_delete(ui, name, entries, &mut modified);
             mk_add(ui, name, entries, &mut modified);
+            mk_delete(ui, name, entries, &mut modified);
             mk_rename(ui, name, entries, &mut modified);
 
             ui.with_layout(egui::Layout::right_to_left(egui::Align::TOP), |ui| {
@@ -109,14 +109,18 @@ where
     N: NamedEntries<E>,
 {
     ui.add_enabled_ui(entries.len() > 1, |ui| {
-        if ui
-            .button(" ➖ ")
-            .on_hover_text_at_pointer(format!("Delete {name}"))
-            .clicked()
-        {
-            entries.remove_selected();
-            *modified = true;
-        }
+        ui.scope(|ui| {
+            ui.visuals_mut().widgets.hovered.weak_bg_fill = colors::DARK_RED;
+            ui.visuals_mut().widgets.active.weak_bg_fill = colors::DARKER_RED;
+            if ui
+                .button(" 🗑 ")
+                .on_hover_text_at_pointer(format!("Delete {name}"))
+                .clicked()
+            {
+                entries.remove_selected();
+                *modified = true;
+            }
+        });
     });
 }
 
@@ -126,8 +130,14 @@ where
 {
     ui.add_enabled_ui(true, |ui| {
         let response = ui
-            .button(" ➕ ")
-            .on_hover_text_at_pointer(format!("Add new {name}"));
+            .scope(|ui| {
+                ui.visuals_mut().widgets.hovered.weak_bg_fill = colors::DARK_GREEN;
+                ui.visuals_mut().widgets.active.weak_bg_fill = colors::DARKER_GREEN;
+                ui.button(" ➕ ")
+                    .on_hover_text_at_pointer(format!("Add new {name}"))
+            })
+            .inner;
+
         let popup_id = ui.make_persistent_id(format!("add-{name}"));
         if response.clicked() {
             ui.memory_mut(|mem| mem.open_popup(popup_id));
