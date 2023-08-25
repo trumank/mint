@@ -15,6 +15,7 @@ use tokio::{
 };
 use tracing::{debug, error, info};
 
+use crate::integrate::{IntegrationErr, IntegrationErrKind};
 use crate::mod_lints::{LintId, LintReport};
 use crate::state::{ModData_v0_1_0 as ModData, ModOrGroup};
 use crate::{
@@ -179,7 +180,7 @@ impl ResolveMods {
 #[derive(Debug)]
 pub struct Integrate {
     rid: RequestID,
-    result: Result<()>,
+    result: Result<(), IntegrationErr>,
 }
 
 impl Integrate {
@@ -212,15 +213,34 @@ impl Integrate {
                     app.last_action_status =
                         LastActionStatus::Success("integration complete".to_string());
                 }
-                Err(e) => match e.downcast::<IntegrationError>() {
-                    Ok(IntegrationError::NoProvider { url: _, factory }) => {
-                        app.window_provider_parameters =
-                            Some(WindowProviderParameters::new(factory, &app.state));
-                        app.last_action_status =
-                            LastActionStatus::Failure("no provider".to_string());
+                Err(IntegrationErr { mod_ctxt, kind }) => match kind {
+                    IntegrationErrKind::Generic(e) => match e.downcast::<IntegrationError>() {
+                        Ok(IntegrationError::NoProvider { url: _, factory }) => {
+                            app.window_provider_parameters =
+                                Some(WindowProviderParameters::new(factory, &app.state));
+                            app.last_action_status =
+                                LastActionStatus::Failure("no provider".to_string());
+                        }
+                        Err(e) => {
+                            match mod_ctxt {
+                                        Some(mod_ctxt) => error!("error encountered during integration while working with mod `{:?}`\n{:#?}\n{}", mod_ctxt, e, e.backtrace()),
+                                        None => error!("{:#?}\n{}", e, e.backtrace()),
+                                    };
+                            app.last_action_status = LastActionStatus::Failure(e.to_string());
+                        }
+                    },
+                    IntegrationErrKind::Repak(e) => {
+                        match mod_ctxt {
+                                Some(mod_ctxt) => error!("`repak` error encountered during integration while working with mod `{:?}`\n{:#?}", mod_ctxt, e),
+                                None => error!("`repak` error encountered during integration: {:#?}", e),
+                            };
+                        app.last_action_status = LastActionStatus::Failure(e.to_string());
                     }
-                    Err(e) => {
-                        error!("{:#?}\n{}", e, e.backtrace());
+                    IntegrationErrKind::UnrealAsset(e) => {
+                        match mod_ctxt {
+                                Some(mod_ctxt) => error!("`unreal_asset` error encountered during integration while working with mod `{:?}`\n{:#?}", mod_ctxt, e),
+                                None => error!("`unreal_asset` error encountered during integration: {:#?}", e),
+                            };
                         app.last_action_status = LastActionStatus::Failure(e.to_string());
                     }
                 },
@@ -365,10 +385,16 @@ async fn integrate_async(
     fsd_pak: PathBuf,
     rid: RequestID,
     message_tx: Sender<Message>,
-) -> Result<()> {
+) -> Result<(), IntegrationErr> {
     let update = false;
 
-    let mods = store.resolve_mods(&mod_specs, update).await?;
+    let mods = store
+        .resolve_mods(&mod_specs, update)
+        .await
+        .map_err(|e| IntegrationErr {
+            mod_ctxt: None,
+            kind: IntegrationErrKind::Generic(e),
+        })?;
 
     let to_integrate = mod_specs
         .iter()
@@ -401,12 +427,22 @@ async fn integrate_async(
         }
     });
 
-    let paths = store.fetch_mods(&urls, update, Some(tx)).await?;
+    let paths = store
+        .fetch_mods(&urls, update, Some(tx))
+        .await
+        .map_err(|e| IntegrationErr {
+            mod_ctxt: None,
+            kind: IntegrationErrKind::Generic(e),
+        })?;
 
     tokio::task::spawn_blocking(|| {
         crate::integrate::integrate(fsd_pak, to_integrate.into_iter().zip(paths).collect())
     })
-    .await??;
+    .await
+    .map_err(|e| IntegrationErr {
+        mod_ctxt: None,
+        kind: IntegrationErrKind::Generic(e.into()),
+    })??;
 
     Ok(())
 }

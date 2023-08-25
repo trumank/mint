@@ -17,6 +17,7 @@ use std::{
 use anyhow::{bail, Context, Result};
 
 use error::IntegrationError;
+use integrate::IntegrationErr;
 use providers::{ModResolution, ModSpecification, ProviderFactory, ReadSeek};
 use state::State;
 use tracing::{info, warn};
@@ -156,8 +157,15 @@ pub async fn resolve_unordered_and_integrate<P: AsRef<Path>>(
     state: &State,
     mod_specs: &[ModSpecification],
     update: bool,
-) -> Result<()> {
-    let mods = state.store.resolve_mods(mod_specs, update).await?;
+) -> Result<(), IntegrationErr> {
+    let mods = state
+        .store
+        .resolve_mods(mod_specs, update)
+        .await
+        .map_err(|e| IntegrationErr {
+            mod_ctxt: None,
+            kind: integrate::IntegrationErrKind::Generic(e),
+        })?;
 
     let mods_set = mod_specs
         .iter()
@@ -191,7 +199,14 @@ pub async fn resolve_unordered_and_integrate<P: AsRef<Path>>(
         .collect::<Vec<_>>();
 
     info!("fetching mods...");
-    let paths = state.store.fetch_mods(&urls, update, None).await?;
+    let paths = state
+        .store
+        .fetch_mods(&urls, update, None)
+        .await
+        .map_err(|e| IntegrationErr {
+            mod_ctxt: None,
+            kind: integrate::IntegrationErrKind::Generic(e),
+        })?;
 
     integrate::integrate(game_path, to_integrate.into_iter().zip(paths).collect())
 }
@@ -256,9 +271,34 @@ where
     loop {
         match resolve_unordered_and_integrate(&game_path, state, mod_specs, update).await {
             Ok(()) => return Ok(()),
-            Err(e) => match e.downcast::<IntegrationError>() {
-                Ok(IntegrationError::NoProvider { url, factory }) => init(state, url, factory)?,
-                Err(e) => return Err(e),
+            Err(IntegrationErr { mod_ctxt, kind }) => match kind {
+                integrate::IntegrationErrKind::Generic(e) => match e.downcast::<IntegrationError>()
+                {
+                    Ok(IntegrationError::NoProvider { url, factory }) => init(state, url, factory)?,
+                    Err(e) => {
+                        return Err(if let Some(mod_ctxt) = mod_ctxt {
+                            e.context(format!("while working with mod `{:?}`", mod_ctxt))
+                        } else {
+                            e
+                        })
+                    }
+                },
+                integrate::IntegrationErrKind::Repak(e) => {
+                    return Err(if let Some(mod_ctxt) = mod_ctxt {
+                        anyhow::Error::from(e)
+                            .context(format!("while working with mod `{:?}`", mod_ctxt))
+                    } else {
+                        e.into()
+                    })
+                }
+                integrate::IntegrationErrKind::UnrealAsset(e) => {
+                    return Err(if let Some(mod_ctxt) = mod_ctxt {
+                        anyhow::Error::from(e)
+                            .context(format!("while working with mod `{:?}`", mod_ctxt))
+                    } else {
+                        e.into()
+                    })
+                }
             },
         }
     }
@@ -303,7 +343,7 @@ pub(crate) fn get_pak_from_data(mut data: Box<dyn ReadSeek>) -> Result<Box<dyn R
                 }
             })
             .find_map(Result::transpose)
-            .context("Zip does not contain pak")?
+            .context("zip does not contain pak")?
     } else {
         data.rewind()?;
         Ok(data)
