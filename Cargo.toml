@@ -26,7 +26,6 @@ opener = "0.6.1"
 path-slash = "0.2.1"
 rayon = "1.7.0"
 regex = "1.9.3"
-repak = { git = "https://github.com/trumank/repak.git", version = "0.1.3" }
 reqwest = { version = "0.11.18", default-features = false, features = ["blocking", "rustls"] }
 reqwest-middleware = "0.2.3"
 rfd = "0.11.4"
@@ -50,6 +49,10 @@ unreal_asset = { git = "https://github.com/trumank/unrealmodding", branch = "pat
 url = "2.4.0"
 zip = { version = "0.6.6", default-features = false, features = ["aes-crypto", "deflate", "time"] }
 
+[target.'cfg(windows)'.dependencies]
+repak = { git = "https://github.com/trumank/repak", features = ["oodle"] }
+[target.'cfg(not(windows))'.dependencies]
+repak = { git = "https://github.com/trumank/repak" }
 [target.'cfg(target_env = "msvc")'.dependencies]
 hook = { path = "hook", version = "0.1.0", artifact = "cdylib", target = "x86_64-pc-windows-msvc"}
 [target.'cfg(not(target_env = "msvc"))'.dependencies]

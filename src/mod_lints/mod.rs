@@ -96,7 +96,7 @@ impl LintCtxt {
             }
 
             let mut first_pak_read_seek = individual_pak_readers.remove(0);
-            let pak_reader = repak::PakReader::new_any(&mut first_pak_read_seek, None)?;
+            let pak_reader = repak::PakReader::new_any(&mut first_pak_read_seek)?;
             f(mod_spec.clone(), &mut first_pak_read_seek, &pak_reader)?
         }
 

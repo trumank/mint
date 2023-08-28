@@ -168,11 +168,10 @@ pub fn integrate<P: AsRef<Path>>(
         kind: IntegrationErrKind::Generic(e),
     })?;
     let mut fsd_pak_reader = BufReader::new(fsd_pak_file);
-    let fsd_pak =
-        repak::PakReader::new_any(&mut fsd_pak_reader, None).map_err(|e| IntegrationErr {
-            mod_ctxt: None,
-            kind: IntegrationErrKind::Repak(e),
-        })?;
+    let fsd_pak = repak::PakReader::new_any(&mut fsd_pak_reader).map_err(|e| IntegrationErr {
+        mod_ctxt: None,
+        kind: IntegrationErrKind::Repak(e),
+    })?;
 
     #[derive(Debug, Default)]
     struct Dir<'a> {
@@ -318,7 +317,6 @@ pub fn integrate<P: AsRef<Path>>(
                     kind: IntegrationErrKind::Generic(e.into()),
                 })?,
         ),
-        None,
         repak::Version::V11,
         "../../../".to_string(),
         None,
@@ -354,7 +352,7 @@ pub fn integrate<P: AsRef<Path>>(
                 kind: IntegrationErrKind::Generic(e),
             }
         })?;
-        let pak = repak::PakReader::new_any(&mut buf, None).map_err(|e| IntegrationErr {
+        let pak = repak::PakReader::new_any(&mut buf).map_err(|e| IntegrationErr {
             mod_ctxt: Some(mod_info.clone()),
             kind: IntegrationErrKind::Repak(e),
         })?;
@@ -448,11 +446,10 @@ pub fn integrate<P: AsRef<Path>>(
     }
 
     let mut int_pak_reader = Cursor::new(include_bytes!("../assets/integration.pak"));
-    let int_pak =
-        repak::PakReader::new_any(&mut int_pak_reader, None).map_err(|e| IntegrationErr {
-            mod_ctxt: None,
-            kind: IntegrationErrKind::Repak(e),
-        })?;
+    let int_pak = repak::PakReader::new_any(&mut int_pak_reader).map_err(|e| IntegrationErr {
+        mod_ctxt: None,
+        kind: IntegrationErrKind::Repak(e),
+    })?;
 
     let mount = Path::new(int_pak.mount_point());
     let files = int_pak.files();

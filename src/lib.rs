@@ -147,7 +147,7 @@ pub fn write_file<P: AsRef<Path>, C: AsRef<[u8]>>(path: P, data: C) -> Result<()
 
 pub fn is_drg_pak<P: AsRef<Path>>(path: P) -> Result<()> {
     let mut reader = std::io::BufReader::new(open_file(path)?);
-    let pak = repak::PakReader::new_any(&mut reader, None)?;
+    let pak = repak::PakReader::new_any(&mut reader)?;
     pak.get("FSD/FSD.uproject", &mut reader)?;
     Ok(())
 }
