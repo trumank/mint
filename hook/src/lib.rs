@@ -111,6 +111,7 @@ unsafe fn patch() -> Result<()> {
         SaveGameToSlot,
         LoadGameFromMemory,
         LoadGameFromSlot,
+        DoesSaveGameExist,
     }
 
     let patterns = [
@@ -119,6 +120,7 @@ unsafe fn patch() -> Result<()> {
         (Sig::SaveGameToSlot, "48 89 5c 24 08 48 89 74 24 10 57 48 83 ec 40 48 8b da 33 f6 48 8d 54 24 30 48 89 74 24 30 48 89 74 24 38 41 8b f8"),
         (Sig::LoadGameFromMemory, "40 55 48 8d ac 24 00 ff ff ff 48 81 ec 00 02 00 00 83 79 08 00"),
         (Sig::LoadGameFromSlot, "48 8b c4 55 57 48 8d a8 d8 fe ff ff 48 81 ec 18 02 00 00"),
+        (Sig::DoesSaveGameExist, "48 89 5C 24 08 57 48 83 EC 20 8B FA 48 8B D9 E8 ?? ?? ?? ?? 48 8B C8 4C 8B 00 41 FF 50 40 48 8B C8 48 85 C0 74 38 83 7B 08 00 74 17 48 8B 00 44 8B C7 48 8B 13 48 8B 5C 24 30 48 83 C4 20 5F 48 FF 60 08 48 8B 00 48 8D ?? ?? ?? ?? ?? 44 8B C7 48 8B 5C 24 30 48 83 C4 20 5F 48 FF 60 08 48 8B 5C 24 30 48 83 C4 20 5F C3"),
     ].iter().map(|(name, pattern)| Ok((name, patternsleuth_scanner::Pattern::new(pattern)?))).collect::<Result<Vec<_>>>()?;
     let pattern_refs = patterns
         .iter()
@@ -210,6 +212,15 @@ unsafe fn patch() -> Result<()> {
                     .enable()?;
             }
         }
+
+        if let Some(rva) = get_sig(Sig::DoesSaveGameExist) {
+            let address = module_addr.add(rva);
+
+            let target: FnDoesSaveGameExist = std::mem::transmute(address);
+            DoesSaveGameExist
+                .initialize(target, does_save_game_exist_detour)?
+                .enable()?;
+        }
     }
     Ok(())
 }
@@ -267,11 +278,13 @@ type FnSaveGameToSlot = unsafe extern "system" fn(*const USaveGame, *const FStri
 type FnSaveGameToMemory = unsafe extern "system" fn(*const USaveGame, *mut TArray<u8>) -> bool;
 type FnLoadGameFromSlot = unsafe extern "system" fn(*const FString, i32) -> *const USaveGame;
 type FnLoadGameFromMemory = unsafe extern "system" fn(*const TArray<u8>) -> *const USaveGame;
+type FnDoesSaveGameExist = unsafe extern "system" fn(*const FString, i32) -> bool;
 
 static_detour! {
     static GetServerName: unsafe extern "system" fn(*const c_void, *const c_void) -> *const FString;
     static SaveGameToSlot: unsafe extern "system" fn(*const USaveGame, *const FString, i32) -> bool;
     static LoadGameFromSlot: unsafe extern "system" fn(*const FString, i32) -> *const USaveGame;
+    static DoesSaveGameExist: unsafe extern "system" fn(*const FString, i32) -> bool;
 }
 
 #[allow(non_upper_case_globals)]
@@ -344,6 +357,19 @@ fn load_game_from_slot_detour(slot_name: *const FString, user_index: i32) -> *co
             LoadGameFromMemory.unwrap()(&TArray::from_slice(data.as_slice()))
         } else {
             std::ptr::null()
+        }
+    }
+}
+
+fn does_save_game_exist_detour(slot_name: *const FString, user_index: i32) -> bool {
+    unsafe {
+        let slot_name = &*slot_name;
+        if slot_name.to_os_string().to_string_lossy() == "Player" {
+            DoesSaveGameExist.call(slot_name, user_index)
+        } else if let Some(path) = get_path_for_slot(slot_name) {
+            path.exists()
+        } else {
+            false
         }
     }
 }
