@@ -46,21 +46,24 @@ use unreal_asset::{
 pub fn uninstall<P: AsRef<Path>>(path_pak: P, modio_mods: HashSet<u32>) -> Result<()> {
     let installation = DRGInstallation::from_pak_path(path_pak)?;
     let path_mods_pak = installation.paks_path().join("mods_P.pak");
-    let path_hook_dll = installation
-        .binaries_directory()
-        .join(installation.installation_type.hook_dll_name());
     match std::fs::remove_file(&path_mods_pak) {
         Ok(()) => Ok(()),
         Err(e) if e.kind() == ErrorKind::NotFound => Ok(()),
         Err(e) => Err(e),
     }
     .with_context(|| format!("failed to remove {}", path_mods_pak.display()))?;
-    match std::fs::remove_file(&path_hook_dll) {
-        Ok(()) => Ok(()),
-        Err(e) if e.kind() == ErrorKind::NotFound => Ok(()),
-        Err(e) => Err(e),
+    #[cfg(feature = "hook")]
+    {
+        let path_hook_dll = installation
+            .binaries_directory()
+            .join(installation.installation_type.hook_dll_name());
+        match std::fs::remove_file(&path_hook_dll) {
+            Ok(()) => Ok(()),
+            Err(e) if e.kind() == ErrorKind::NotFound => Ok(()),
+            Err(e) => Err(e),
+        }
+        .with_context(|| format!("failed to remove {}", path_hook_dll.display()))?;
     }
-    .with_context(|| format!("failed to remove {}", path_hook_dll.display()))?;
     uninstall_modio(&installation, modio_mods).ok();
     Ok(())
 }
@@ -159,9 +162,6 @@ pub fn integrate<P: AsRef<Path>>(
         kind: IntegrationErrKind::Generic(e),
     })?;
     let path_mod_pak = installation.paks_path().join("mods_P.pak");
-    let path_hook_dll = installation
-        .binaries_directory()
-        .join(installation.installation_type.hook_dll_name());
 
     let fsd_pak_file = open_file(path_pak).map_err(|e| IntegrationErr {
         mod_ctxt: None,
@@ -322,18 +322,24 @@ pub fn integrate<P: AsRef<Path>>(
         None,
     );
 
-    let hook_dll = include_bytes!(env!("CARGO_CDYLIB_FILE_HOOK_hook"));
-    if path_hook_dll
-        .metadata()
-        .map(|m| m.len() != hook_dll.len() as u64)
-        .unwrap_or(true)
+    #[cfg(feature = "hook")]
     {
-        std::fs::write(&path_hook_dll, hook_dll)
-            .with_context(|| format!("failed to write hook to {}", path_hook_dll.display()))
-            .map_err(|e| IntegrationErr {
-                mod_ctxt: None,
-                kind: IntegrationErrKind::Generic(e),
-            })?;
+        let path_hook_dll = installation
+            .binaries_directory()
+            .join(installation.installation_type.hook_dll_name());
+        let hook_dll = include_bytes!(env!("CARGO_CDYLIB_FILE_HOOK_hook"));
+        if path_hook_dll
+            .metadata()
+            .map(|m| m.len() != hook_dll.len() as u64)
+            .unwrap_or(true)
+        {
+            std::fs::write(&path_hook_dll, hook_dll)
+                .with_context(|| format!("failed to write hook to {}", path_hook_dll.display()))
+                .map_err(|e| IntegrationErr {
+                    mod_ctxt: None,
+                    kind: IntegrationErrKind::Generic(e),
+                })?;
+        }
     }
 
     let mut init_spacerig_assets = HashSet::new();
