@@ -26,7 +26,7 @@ const MODIO_PROVIDER_ID: &str = "modio";
 inventory::submit! {
     super::ProviderFactory {
         id: MODIO_PROVIDER_ID,
-        new: ModioProvider::new_provider,
+        new: ModioProvider::<modio::Modio>::new_provider,
         can_provide: |url| RE_MOD.is_match(url),
         parameters: &[
             super::ProviderParameter {
@@ -47,29 +47,15 @@ fn format_spec(name_id: &str, mod_id: u32, file_id: Option<u32>) -> ModSpecifica
     })
 }
 
-#[derive(Debug)]
-pub struct ModioProvider {
-    modio: modio::Modio,
+pub struct ModioProvider<M: DrgModio> {
+    modio: M,
 }
 
-impl ModioProvider {
+impl<M: DrgModio + 'static> ModioProvider<M> {
     fn new_provider(parameters: &HashMap<String, String>) -> Result<Arc<dyn ModProvider>> {
-        let client = reqwest_middleware::ClientBuilder::new(reqwest::Client::new())
-            .with::<LoggingMiddleware>(Default::default())
-            .build();
-        let modio = modio::Modio::new(
-            modio::Credentials::with_token(
-                "".to_owned(), // TODO patch modio to not use API key at all
-                parameters
-                    .get("oauth")
-                    .context("missing OAuth token param")?,
-            ),
-            client,
-        )?;
-
-        Ok(Arc::new(Self::new(modio)))
+        Ok(Arc::new(Self::new(M::new(parameters)?)))
     }
-    fn new(modio: modio::Modio) -> Self {
+    fn new(modio: M) -> Self {
         Self { modio }
     }
 }
@@ -125,36 +111,6 @@ impl ModioMod {
             modfiles: files.into_iter().map(ModioFile::new).collect(),
             tags: mod_.tags.into_iter().map(|t| t.name).collect(),
         }
-    }
-    async fn fetch(modio: &modio::Modio, id: u32) -> Result<Self> {
-        use modio::filter::NotEq;
-        use modio::mods::filters::Id;
-
-        let files = modio
-            .game(MODIO_DRG_ID)
-            .mod_(id)
-            .files()
-            .search(Id::ne(0))
-            .collect()
-            .await?;
-        let mod_ = modio.game(MODIO_DRG_ID).mod_(id).get().await?;
-
-        Ok(ModioMod::new(mod_, files))
-    }
-    async fn fetch_files(modio: &modio::Modio, mod_: modio::mods::Mod) -> Result<Self> {
-        use modio::filter::NotEq;
-        use modio::mods::filters::Id;
-
-        let files = modio
-            .game(MODIO_DRG_ID)
-            .mod_(mod_.id)
-            .files()
-            .search(Id::ne(0))
-            .collect()
-            .await?;
-        let mod_ = modio.game(MODIO_DRG_ID).mod_(mod_.id).get().await?;
-
-        Ok(ModioMod::new(mod_, files))
     }
 }
 
@@ -213,16 +169,175 @@ impl Middleware for LoggingMiddleware {
 }
 
 #[async_trait::async_trait]
-impl ModProvider for ModioProvider {
+pub trait DrgModio: Sync + Send {
+    fn new(parameters: &HashMap<String, String>) -> Result<Self>
+    where
+        Self: Sized;
+    async fn check(&self) -> Result<()>;
+    async fn fetch_mod(&self, id: u32) -> Result<ModioMod>;
+    async fn fetch_files(&self, mod_id: u32) -> Result<ModioMod>;
+    async fn fetch_file(&self, mod_id: u32, modfile_id: u32) -> Result<modio::files::File>;
+    async fn fetch_dependencies(&self, mod_id: u32) -> Result<Vec<u32>>;
+    async fn fetch_mods_by_name(&self, name_id: &str) -> Result<Vec<modio::mods::Mod>>;
+    async fn fetch_mods_by_ids(&self, filter_ids: Vec<u32>) -> Result<Vec<modio::mods::Mod>>;
+    async fn fetch_mod_updates_since(
+        &self,
+        mod_ids: Vec<u32>,
+        last_update: u64,
+    ) -> Result<HashSet<u32>>;
+    fn download<A>(&self, action: A) -> modio::download::Downloader
+    where
+        modio::download::DownloadAction: From<A>;
+}
+
+#[async_trait::async_trait]
+impl DrgModio for modio::Modio {
+    fn new(parameters: &HashMap<String, String>) -> Result<Self> {
+        let client = reqwest_middleware::ClientBuilder::new(reqwest::Client::new())
+            .with::<LoggingMiddleware>(Default::default())
+            .build();
+        let modio = modio::Modio::new(
+            modio::Credentials::with_token(
+                "".to_owned(), // TODO patch modio to not use API key at all
+                parameters
+                    .get("oauth")
+                    .context("missing OAuth token param")?,
+            ),
+            client,
+        )?;
+
+        Ok(modio)
+    }
+    async fn check(&self) -> Result<()> {
+        use modio::filter::Eq;
+        use modio::mods::filters::Id;
+
+        self.game(MODIO_DRG_ID)
+            .mods()
+            .search(Id::eq(0))
+            .collect()
+            .await?;
+        Ok(())
+    }
+    async fn fetch_mod(&self, id: u32) -> Result<ModioMod> {
+        use modio::filter::NotEq;
+        use modio::mods::filters::Id;
+
+        let files = self
+            .game(MODIO_DRG_ID)
+            .mod_(id)
+            .files()
+            .search(Id::ne(0))
+            .collect()
+            .await?;
+        let mod_ = self.game(MODIO_DRG_ID).mod_(id).get().await?;
+
+        Ok(ModioMod::new(mod_, files))
+    }
+    async fn fetch_files(&self, mod_id: u32) -> Result<ModioMod> {
+        use modio::filter::NotEq;
+        use modio::mods::filters::Id;
+
+        let files = self
+            .game(MODIO_DRG_ID)
+            .mod_(mod_id)
+            .files()
+            .search(Id::ne(0))
+            .collect()
+            .await?;
+        let mod_ = self.game(MODIO_DRG_ID).mod_(mod_id).get().await?;
+
+        Ok(ModioMod::new(mod_, files))
+    }
+    async fn fetch_file(&self, mod_id: u32, modfile_id: u32) -> Result<modio::files::File> {
+        Ok(self
+            .game(MODIO_DRG_ID)
+            .mod_(mod_id)
+            .file(modfile_id)
+            .get()
+            .await?)
+    }
+    async fn fetch_dependencies(&self, mod_id: u32) -> Result<Vec<u32>> {
+        Ok(self
+            .game(MODIO_DRG_ID)
+            .mod_(mod_id)
+            .dependencies()
+            .list()
+            .await?
+            .into_iter()
+            .map(|d| d.mod_id)
+            .collect::<Vec<_>>())
+    }
+    async fn fetch_mods_by_name(&self, name_id: &str) -> Result<Vec<modio::mods::Mod>> {
+        use modio::filter::{Eq, In};
+        use modio::mods::filters::{NameId, Visible};
+
+        let filter = NameId::eq(name_id).and(Visible::_in(vec![0, 1]));
+        Ok(self
+            .game(MODIO_DRG_ID)
+            .mods()
+            .search(filter)
+            .collect()
+            .await?)
+    }
+    async fn fetch_mods_by_ids(&self, filter_ids: Vec<u32>) -> Result<Vec<modio::mods::Mod>> {
+        use modio::filter::In;
+        use modio::mods::filters::Id;
+
+        let filter = Id::_in(filter_ids);
+
+        Ok(self
+            .game(MODIO_DRG_ID)
+            .mods()
+            .search(filter)
+            .collect()
+            .await?)
+    }
+    async fn fetch_mod_updates_since(
+        &self,
+        mod_ids: Vec<u32>,
+        last_update: u64,
+    ) -> Result<HashSet<u32>> {
+        use modio::filter::Cmp;
+        use modio::filter::In;
+        use modio::filter::NotIn;
+
+        use modio::mods::filters::events::EventType;
+        use modio::mods::filters::events::ModId;
+        use modio::mods::filters::DateAdded;
+        use modio::mods::EventType as EventTypes;
+
+        let events = self
+            .game(MODIO_DRG_ID)
+            .mods()
+            .events(
+                EventType::not_in(vec![
+                    EventTypes::ModCommentAdded,
+                    EventTypes::ModCommentDeleted,
+                ])
+                .and(ModId::_in(mod_ids))
+                .and(DateAdded::gt(last_update)),
+            )
+            .collect()
+            .await?;
+        Ok(events.iter().map(|e| e.mod_id).collect::<HashSet<_>>())
+    }
+    fn download<A>(&self, action: A) -> modio::download::Downloader
+    where
+        modio::download::DownloadAction: From<A>,
+    {
+        self.download(action)
+    }
+}
+
+#[async_trait::async_trait]
+impl<M: DrgModio + Send + Sync> ModProvider for ModioProvider<M> {
     async fn resolve_mod(
         &self,
         spec: &ModSpecification,
         update: bool,
         cache: ProviderCache,
     ) -> Result<ModResponse> {
-        use modio::filter::{Eq, In};
-        use modio::mods::filters::{Id, NameId, Visible};
-
         if spec.url.contains("?preview=") {
             bail!("Preview mod links cannot be added directly, please subscribe to the mod on mod.io and and then use the non-preview link.");
         };
@@ -248,7 +363,7 @@ impl ModProvider for ModioProvider {
             {
                 mod_
             } else {
-                let mod_ = ModioMod::fetch(&self.modio, mod_id).await?;
+                let mod_ = self.modio.fetch_mod(mod_id).await?;
 
                 let mut lock = cache.write().unwrap();
                 let c = lock.get_mut::<ModioCache>(MODIO_PROVIDER_ID);
@@ -270,16 +385,7 @@ impl ModProvider for ModioProvider {
             {
                 Some(deps) => deps,
                 None => {
-                    let deps = self
-                        .modio
-                        .game(MODIO_DRG_ID)
-                        .mod_(mod_id)
-                        .dependencies()
-                        .list()
-                        .await?
-                        .into_iter()
-                        .map(|d| d.mod_id)
-                        .collect::<Vec<_>>();
+                    let deps = self.modio.fetch_dependencies(mod_id).await?;
 
                     cache
                         .write()
@@ -308,17 +414,10 @@ impl ModProvider for ModioProvider {
                 let filter_ids = dep_ids
                     .iter()
                     .filter(|id| !name_map.contains_key(id))
+                    .cloned()
                     .collect::<Vec<_>>();
                 if !filter_ids.is_empty() {
-                    let filter = Id::_in(filter_ids);
-
-                    let mods = self
-                        .modio
-                        .game(MODIO_DRG_ID)
-                        .mods()
-                        .search(filter)
-                        .collect()
-                        .await?;
+                    let mods = self.modio.fetch_mods_by_ids(filter_ids).await?;
 
                     for m in &mods {
                         name_map.insert(m.id, m.name_id.to_string());
@@ -326,7 +425,8 @@ impl ModProvider for ModioProvider {
 
                     for m in mods {
                         let id = m.id;
-                        let m = ModioMod::fetch_files(&self.modio, m).await?;
+                        // TODO avoid fetching mod a second time
+                        let m = self.modio.fetch_files(id).await?;
                         let mut lock = cache.write().unwrap();
                         let c = lock.get_mut::<ModioCache>(MODIO_PROVIDER_ID);
                         c.mod_id_map.insert(m.name_id.to_owned(), id);
@@ -381,7 +481,7 @@ impl ModProvider for ModioProvider {
             let mod_ = if let Some(mod_) = cached {
                 mod_
             } else {
-                let mod_ = ModioMod::fetch(&self.modio, mod_id).await?;
+                let mod_ = self.modio.fetch_mod(mod_id).await?;
 
                 let mut lock = cache.write().unwrap();
                 let c = lock.get_mut::<ModioCache>(MODIO_PROVIDER_ID);
@@ -428,7 +528,7 @@ impl ModProvider for ModioProvider {
                 let modfile_id = if let Some(modfile_id) = cached {
                     modfile_id
                 } else {
-                    let mod_ = ModioMod::fetch(&self.modio, id).await?;
+                    let mod_ = self.modio.fetch_mod(id).await?;
 
                     let mut lock = cache.write().unwrap();
                     let c = lock.get_mut::<ModioCache>(MODIO_PROVIDER_ID);
@@ -446,19 +546,12 @@ impl ModProvider for ModioProvider {
                     Some(modfile_id),
                 )))
             } else {
-                let filter = NameId::eq(name_id).and(Visible::_in(vec![0, 1]));
-                let mut mods = self
-                    .modio
-                    .game(MODIO_DRG_ID)
-                    .mods()
-                    .search(filter)
-                    .collect()
-                    .await?;
+                let mut mods = self.modio.fetch_mods_by_name(name_id).await?;
                 if mods.len() > 1 {
                     bail!("multiple mods returned for mod name_id {}", name_id,)
                 } else if let Some(mod_) = mods.pop() {
                     let mod_id = mod_.id;
-                    let mod_ = ModioMod::fetch(&self.modio, mod_id).await?;
+                    let mod_ = self.modio.fetch_mod(mod_id).await?;
 
                     let mut lock = cache.write().unwrap();
                     let c = lock.get_mut::<ModioCache>(MODIO_PROVIDER_ID);
@@ -520,13 +613,7 @@ impl ModProvider for ModioProvider {
                     }
                     path
                 } else {
-                    let file = self
-                        .modio
-                        .game(MODIO_DRG_ID)
-                        .mod_(mod_id)
-                        .file(modfile_id)
-                        .get()
-                        .await?;
+                    let file = self.modio.fetch_file(mod_id, modfile_id).await?;
 
                     let size = file.filesize;
                     let download: modio::download::DownloadAction = file.into();
@@ -580,15 +667,6 @@ impl ModProvider for ModioProvider {
     async fn update_cache(&self, cache: ProviderCache) -> Result<()> {
         use futures::stream::{self, StreamExt, TryStreamExt};
 
-        use modio::filter::Cmp;
-        use modio::filter::In;
-        use modio::filter::NotIn;
-
-        use modio::mods::filters::events::EventType;
-        use modio::mods::filters::events::ModId;
-        use modio::mods::filters::DateAdded;
-        use modio::mods::EventType as EventTypes;
-
         let now = SystemTime::now();
 
         let (last_update, name_map) = {
@@ -609,21 +687,13 @@ impl ModProvider for ModioProvider {
             .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
             .unwrap_or_default();
 
-        let events = self
+        let mod_ids = self
             .modio
-            .game(MODIO_DRG_ID)
-            .mods()
-            .events(
-                EventType::not_in(vec![
-                    EventTypes::ModCommentAdded,
-                    EventTypes::ModCommentDeleted,
-                ])
-                .and(ModId::_in(name_map.keys().collect::<Vec<_>>()))
-                .and(DateAdded::gt(last_update.as_secs())),
+            .fetch_mod_updates_since(
+                name_map.keys().cloned().collect::<Vec<u32>>(),
+                last_update.as_secs(),
             )
-            .collect()
             .await?;
-        let mod_ids = events.iter().map(|e| e.mod_id).collect::<HashSet<_>>();
 
         // TODO most of this is ripped from generic provider code. the resolution process is overly
         // complex and should be redone now that there's a much better understanding of what
@@ -638,8 +708,8 @@ impl ModProvider for ModioProvider {
         // used to deduplicate dependencies from mods already present in the mod list
         let mut precise_mod_specs = HashSet::new();
 
-        pub async fn resolve_mod(
-            prov: &ModioProvider,
+        pub async fn resolve_mod<M: DrgModio>(
+            prov: &ModioProvider<M>,
             cache: ProviderCache,
             original_spec: ModSpecification,
         ) -> Result<(ModSpecification, ModInfo)> {
@@ -686,16 +756,7 @@ impl ModProvider for ModioProvider {
     }
 
     async fn check(&self) -> Result<()> {
-        use modio::filter::Eq;
-        use modio::mods::filters::Id;
-
-        self.modio
-            .game(MODIO_DRG_ID)
-            .mods()
-            .search(Id::eq(0))
-            .collect()
-            .await?;
-        Ok(())
+        self.modio.check().await
     }
 
     fn get_mod_info(&self, spec: &ModSpecification, cache: ProviderCache) -> Option<ModInfo> {

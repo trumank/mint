@@ -466,7 +466,7 @@ impl ModResolution {
 }
 
 #[async_trait::async_trait]
-pub trait ModProvider: Send + Sync + std::fmt::Debug {
+pub trait ModProvider: Send + Sync {
     async fn resolve_mod(
         &self,
         spec: &ModSpecification,
