@@ -3,6 +3,9 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+#[cfg(test)]
+use mockall::{automock, predicate::*};
+
 use anyhow::{bail, Context, Result};
 use reqwest::{Request, Response};
 use reqwest_middleware::{Middleware, Next};
@@ -53,7 +56,7 @@ pub struct ModioProvider<M: DrgModio> {
 
 impl<M: DrgModio + 'static> ModioProvider<M> {
     fn new_provider(parameters: &HashMap<String, String>) -> Result<Arc<dyn ModProvider>> {
-        Ok(Arc::new(Self::new(M::new(parameters)?)))
+        Ok(Arc::new(Self::new(M::with_parameters(parameters)?)))
     }
     fn new(modio: M) -> Self {
         Self { modio }
@@ -94,7 +97,7 @@ impl ModProviderCache for ModioCache {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ModioMod {
     name_id: String,
     name: String,
@@ -115,6 +118,17 @@ impl ModioMod {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ModioModResponse {
+    id: u32,
+}
+
+impl From<modio::mods::Mod> for ModioModResponse {
+    fn from(value: modio::mods::Mod) -> Self {
+        Self { id: value.id }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ModioFile {
     id: u32,
     date_added: u64,
@@ -168,9 +182,10 @@ impl Middleware for LoggingMiddleware {
     }
 }
 
+#[cfg_attr(test, automock)]
 #[async_trait::async_trait]
 pub trait DrgModio: Sync + Send {
-    fn new(parameters: &HashMap<String, String>) -> Result<Self>
+    fn with_parameters(parameters: &HashMap<String, String>) -> Result<Self>
     where
         Self: Sized;
     async fn check(&self) -> Result<()>;
@@ -178,21 +193,21 @@ pub trait DrgModio: Sync + Send {
     async fn fetch_files(&self, mod_id: u32) -> Result<ModioMod>;
     async fn fetch_file(&self, mod_id: u32, modfile_id: u32) -> Result<modio::files::File>;
     async fn fetch_dependencies(&self, mod_id: u32) -> Result<Vec<u32>>;
-    async fn fetch_mods_by_name(&self, name_id: &str) -> Result<Vec<modio::mods::Mod>>;
+    async fn fetch_mods_by_name(&self, name_id: &str) -> Result<Vec<ModioModResponse>>;
     async fn fetch_mods_by_ids(&self, filter_ids: Vec<u32>) -> Result<Vec<modio::mods::Mod>>;
     async fn fetch_mod_updates_since(
         &self,
         mod_ids: Vec<u32>,
         last_update: u64,
     ) -> Result<HashSet<u32>>;
-    fn download<A>(&self, action: A) -> modio::download::Downloader
+    fn download<A: 'static>(&self, action: A) -> modio::download::Downloader
     where
         modio::download::DownloadAction: From<A>;
 }
 
 #[async_trait::async_trait]
 impl DrgModio for modio::Modio {
-    fn new(parameters: &HashMap<String, String>) -> Result<Self> {
+    fn with_parameters(parameters: &HashMap<String, String>) -> Result<Self> {
         let client = reqwest_middleware::ClientBuilder::new(reqwest::Client::new())
             .with::<LoggingMiddleware>(Default::default())
             .build();
@@ -268,7 +283,7 @@ impl DrgModio for modio::Modio {
             .map(|d| d.mod_id)
             .collect::<Vec<_>>())
     }
-    async fn fetch_mods_by_name(&self, name_id: &str) -> Result<Vec<modio::mods::Mod>> {
+    async fn fetch_mods_by_name(&self, name_id: &str) -> Result<Vec<ModioModResponse>> {
         use modio::filter::{Eq, In};
         use modio::mods::filters::{NameId, Visible};
 
@@ -278,7 +293,10 @@ impl DrgModio for modio::Modio {
             .mods()
             .search(filter)
             .collect()
-            .await?)
+            .await?
+            .into_iter()
+            .map(|m| m.into())
+            .collect())
     }
     async fn fetch_mods_by_ids(&self, filter_ids: Vec<u32>) -> Result<Vec<modio::mods::Mod>> {
         use modio::filter::In;
@@ -858,5 +876,116 @@ fn process_modio_tags(set: &HashSet<String>) -> ModioTags {
         versions,
         required_status,
         approval_status,
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use std::sync::RwLock;
+
+    use crate::{providers::VersionAnnotatedCache, state::config::ConfigWrapper};
+
+    use super::*;
+
+    #[tokio::test]
+    async fn test_check_pass() {
+        let mut mock = MockDrgModio::new();
+        mock.expect_check().times(1).returning(|| Ok(()));
+        let modio_provider = ModioProvider::new(mock);
+        assert!(modio_provider.check().await.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_check_fail() {
+        let mut mock = MockDrgModio::new();
+        mock.expect_check().times(1).returning(|| bail!("fail"));
+        let modio_provider = ModioProvider::new(mock);
+        assert!(modio_provider.check().await.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_fetch_mod_simple() {
+        let mut mock = MockDrgModio::new();
+        mock.expect_fetch_mods_by_name().times(1).returning(|name| {
+            Ok(vec![match name {
+                "test-mod" => ModioModResponse { id: 3 },
+                _ => unreachable!(),
+            }])
+        });
+        mock.expect_fetch_mod().times(1).returning(|id| {
+            Ok(match id {
+                3 => ModioMod {
+                    name_id: "test-mod".to_string(),
+                    name: "Test Mod".to_string(),
+                    latest_modfile: Some(5),
+                    modfiles: vec![ModioFile {
+                        id: 5,
+                        date_added: 12345,
+                        version: None,
+                        changelog: None,
+                    }],
+                    tags: HashSet::new(),
+                },
+                _ => unreachable!(),
+            })
+        });
+        mock.expect_fetch_dependencies().times(1).returning(|id| {
+            Ok(match id {
+                3 => vec![],
+                _ => unreachable!(),
+            })
+        });
+        let cache = Arc::new(RwLock::new(ConfigWrapper::<VersionAnnotatedCache>::memory(
+            VersionAnnotatedCache::default(),
+        )));
+        let modio_provider = ModioProvider::new(mock);
+        let resolved_mod = modio_provider
+            .resolve_mod(
+                &ModSpecification::new("https://mod.io/g/drg/m/test-mod".to_string()),
+                false,
+                cache.clone(),
+            )
+            .await
+            .unwrap();
+
+        let resolved_mod = match resolved_mod {
+            ModResponse::Redirect(spec) => spec,
+            _ => unreachable!(),
+        };
+        let _resolved_mod = modio_provider
+            .resolve_mod(&resolved_mod, false, cache.clone())
+            .await
+            .unwrap();
+        let lock = cache.read().unwrap();
+        let modio_cache = lock.get::<ModioCache>(MODIO_PROVIDER_ID).unwrap();
+
+        assert_eq!(
+            modio_cache.mod_id_map,
+            [("test-mod".to_string(), 3)].into_iter().collect()
+        );
+        assert_eq!(
+            modio_cache.dependencies,
+            [(3, vec![])].into_iter().collect()
+        );
+        assert_eq!(
+            modio_cache.mods,
+            [(
+                3,
+                ModioMod {
+                    name_id: "test-mod".to_string(),
+                    name: "Test Mod".to_string(),
+                    latest_modfile: Some(5),
+                    modfiles: vec![ModioFile {
+                        id: 5,
+                        date_added: 12345,
+                        version: None,
+                        changelog: None,
+                    }],
+                    tags: HashSet::new(),
+                }
+            )]
+            .into_iter()
+            .collect()
+        );
     }
 }
