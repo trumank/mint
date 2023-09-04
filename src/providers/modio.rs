@@ -342,6 +342,30 @@ impl<M: DrgModio + Send + Sync> ModProvider for ModioProvider<M> {
             bail!("Preview mod links cannot be added directly, please subscribe to the mod on mod.io and and then use the non-preview link.");
         };
 
+        fn read_cache<F, R>(cache: &ProviderCache, update: bool, f: F) -> Option<R>
+        where
+            F: Fn(&ModioCache) -> Option<R>,
+        {
+            (!update)
+                .then(|| {
+                    cache
+                        .read()
+                        .unwrap()
+                        .get::<ModioCache>(MODIO_PROVIDER_ID)
+                        .and_then(f)
+                })
+                .flatten()
+        }
+        fn write_cache<F>(cache: &ProviderCache, f: F)
+        where
+            F: FnOnce(&mut ModioCache),
+        {
+            f(cache
+                .write()
+                .unwrap()
+                .get_mut::<ModioCache>(MODIO_PROVIDER_ID))
+        }
+
         let url = &spec.url;
         let captures = RE_MOD.captures(url).context("invalid modio URL {url}")?;
 
@@ -351,65 +375,43 @@ impl<M: DrgModio + Send + Sync> ModProvider for ModioProvider<M> {
             // both mod ID and modfile ID specified, but not necessarily name
             let mod_id = mod_id.as_str().parse::<u32>().unwrap();
 
-            let mod_ = if let Some(mod_) = (!update)
-                .then(|| {
-                    cache
-                        .read()
-                        .unwrap()
-                        .get::<ModioCache>(MODIO_PROVIDER_ID)
-                        .and_then(|c| c.mods.get(&mod_id).cloned())
-                })
-                .flatten()
-            {
-                mod_
-            } else {
-                let mod_ = self.modio.fetch_mod(mod_id).await?;
+            let mod_ =
+                if let Some(mod_) = read_cache(&cache, update, |c| c.mods.get(&mod_id).cloned()) {
+                    mod_
+                } else {
+                    let mod_ = self.modio.fetch_mod(mod_id).await?;
 
-                let mut lock = cache.write().unwrap();
-                let c = lock.get_mut::<ModioCache>(MODIO_PROVIDER_ID);
-                c.mods.insert(mod_id, mod_.clone());
-                c.mod_id_map.insert(mod_.name_id.to_owned(), mod_id);
+                    write_cache(&cache, |c| {
+                        c.mods.insert(mod_id, mod_.clone());
+                        c.mod_id_map.insert(mod_.name_id.to_owned(), mod_id);
+                    });
 
-                mod_
-            };
+                    mod_
+                };
 
-            let dep_ids = match (!update)
-                .then(|| {
-                    cache
-                        .read()
-                        .unwrap()
-                        .get::<ModioCache>(MODIO_PROVIDER_ID)
-                        .and_then(|c| c.dependencies.get(&mod_id).cloned())
-                })
-                .flatten()
+            let dep_ids = match read_cache(&cache, update, |c| c.dependencies.get(&mod_id).cloned())
             {
                 Some(deps) => deps,
                 None => {
                     let deps = self.modio.fetch_dependencies(mod_id).await?;
-
-                    cache
-                        .write()
-                        .unwrap()
-                        .get_mut::<ModioCache>(MODIO_PROVIDER_ID)
-                        .dependencies
-                        .insert(mod_id, deps.clone());
+                    write_cache(&cache, |c| {
+                        c.dependencies.insert(mod_id, deps.clone());
+                    });
                     deps
                 }
             };
 
             let deps = {
                 // build map of (id -> name) for deps
-                let mut name_map = cache
-                    .read()
-                    .unwrap()
-                    .get::<ModioCache>(MODIO_PROVIDER_ID)
-                    .map(|c| {
+                let mut name_map = read_cache(&cache, false, |c| {
+                    Some(
                         dep_ids
                             .iter()
                             .flat_map(|id| c.mods.get(id).map(|m| (*id, m.name_id.to_string())))
-                            .collect::<HashMap<_, _>>()
-                    })
-                    .unwrap_or_default();
+                            .collect::<HashMap<_, _>>(),
+                    )
+                })
+                .unwrap_or_default();
 
                 let filter_ids = dep_ids
                     .iter()
@@ -427,19 +429,18 @@ impl<M: DrgModio + Send + Sync> ModProvider for ModioProvider<M> {
                         let id = m.id;
                         // TODO avoid fetching mod a second time
                         let m = self.modio.fetch_files(id).await?;
-                        let mut lock = cache.write().unwrap();
-                        let c = lock.get_mut::<ModioCache>(MODIO_PROVIDER_ID);
-                        c.mod_id_map.insert(m.name_id.to_owned(), id);
-                        c.mods.insert(id, m);
+                        write_cache(&cache, |c| {
+                            c.mod_id_map.insert(m.name_id.to_owned(), id);
+                            c.mods.insert(id, m);
+                        });
                     }
                 }
 
                 let deps = dep_ids
                     .iter()
-                    .filter_map(|id| {
-                        if let Some(name) = name_map.get(id) {
-                            Some(format_spec(name, *id, None))
-                        } else {
+                    .filter_map(|id| match name_map.get(id) {
+                        Some(name) => Some(format_spec(name, *id, None)),
+                        None => {
                             warn!("dependency ID missing from name_map: {id}");
                             None
                         }
@@ -468,27 +469,16 @@ impl<M: DrgModio + Send + Sync> ModProvider for ModioProvider<M> {
             // only mod ID specified, use latest version (either cached local or remote depending)
             let mod_id = mod_id.as_str().parse::<u32>().unwrap();
 
-            let cached = (!update)
-                .then(|| {
-                    cache
-                        .read()
-                        .unwrap()
-                        .get::<ModioCache>(MODIO_PROVIDER_ID)
-                        .and_then(|c| c.mods.get(&mod_id).cloned())
-                })
-                .flatten();
-
-            let mod_ = if let Some(mod_) = cached {
-                mod_
-            } else {
-                let mod_ = self.modio.fetch_mod(mod_id).await?;
-
-                let mut lock = cache.write().unwrap();
-                let c = lock.get_mut::<ModioCache>(MODIO_PROVIDER_ID);
-                c.mods.insert(mod_id, mod_.clone());
-                c.mod_id_map.insert(mod_.name_id.to_owned(), mod_id);
-
-                mod_
+            let mod_ = match read_cache(&cache, update, |c| c.mods.get(&mod_id).cloned()) {
+                Some(mod_) => mod_,
+                None => {
+                    let mod_ = self.modio.fetch_mod(mod_id).await?;
+                    write_cache(&cache, |c| {
+                        c.mods.insert(mod_id, mod_.clone());
+                        c.mod_id_map.insert(mod_.name_id.to_owned(), mod_id);
+                    });
+                    mod_
+                }
             };
 
             Ok(ModResponse::Redirect(format_spec(
@@ -503,41 +493,26 @@ impl<M: DrgModio + Send + Sync> ModProvider for ModioProvider<M> {
         } else {
             let name_id = captures.name("name_id").unwrap().as_str();
 
-            let cached_id = if update {
-                None
-            } else {
-                cache
-                    .read()
-                    .unwrap()
-                    .get::<ModioCache>(MODIO_PROVIDER_ID)
-                    .and_then(|c| c.mod_id_map.get(name_id).cloned())
-            };
+            let cached_id = read_cache(&cache, update, |c| c.mod_id_map.get(name_id).cloned());
 
             if let Some(id) = cached_id {
-                let cached = (!update)
-                    .then(|| {
-                        cache
-                            .read()
-                            .unwrap()
-                            .get::<ModioCache>(MODIO_PROVIDER_ID)
-                            .and_then(|c| c.mods.get(&id))
-                            .and_then(|m| m.latest_modfile)
-                    })
-                    .flatten();
+                let cached = read_cache(&cache, update, |c| {
+                    c.mods.get(&id).and_then(|m| m.latest_modfile)
+                });
 
-                let modfile_id = if let Some(modfile_id) = cached {
-                    modfile_id
-                } else {
-                    let mod_ = self.modio.fetch_mod(id).await?;
-
-                    let mut lock = cache.write().unwrap();
-                    let c = lock.get_mut::<ModioCache>(MODIO_PROVIDER_ID);
-                    c.mods.insert(id, mod_.clone());
-                    c.mod_id_map.insert(mod_.name_id, id);
-
-                    mod_.latest_modfile.with_context(|| {
-                        format!("mod {} does not have an associated modfile", url)
-                    })?
+                let modfile_id = match cached {
+                    Some(modfile_id) => modfile_id,
+                    None => {
+                        let mod_ = self.modio.fetch_mod(id).await?;
+                        let modfile_id = mod_.latest_modfile;
+                        write_cache(&cache, |c| {
+                            c.mods.insert(id, mod_.clone());
+                            c.mod_id_map.insert(mod_.name_id, id);
+                        });
+                        modfile_id.with_context(|| {
+                            format!("mod {} does not have an associated modfile", url)
+                        })?
+                    }
                 };
 
                 Ok(ModResponse::Redirect(format_spec(
@@ -548,17 +523,16 @@ impl<M: DrgModio + Send + Sync> ModProvider for ModioProvider<M> {
             } else {
                 let mut mods = self.modio.fetch_mods_by_name(name_id).await?;
                 if mods.len() > 1 {
-                    bail!("multiple mods returned for mod name_id {}", name_id,)
+                    bail!("multiple mods returned for mod name_id {}", name_id)
                 } else if let Some(mod_) = mods.pop() {
                     let mod_id = mod_.id;
                     let mod_ = self.modio.fetch_mod(mod_id).await?;
-
-                    let mut lock = cache.write().unwrap();
-                    let c = lock.get_mut::<ModioCache>(MODIO_PROVIDER_ID);
-                    c.mods.insert(mod_id, mod_.clone());
-                    c.mod_id_map.insert(mod_.name_id, mod_id);
-
-                    let file = mod_.latest_modfile.with_context(|| {
+                    let modfile_id = mod_.latest_modfile;
+                    write_cache(&cache, |c| {
+                        c.mods.insert(mod_id, mod_.clone());
+                        c.mod_id_map.insert(mod_.name_id, mod_id);
+                    });
+                    let file = modfile_id.with_context(|| {
                         format!("mod {} does not have an associated modfile", url)
                     })?;
 
