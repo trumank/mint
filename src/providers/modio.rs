@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use anyhow::{anyhow, bail, Context, Result};
+use anyhow::{bail, Context, Result};
 use reqwest::{Request, Response};
 use reqwest_middleware::{Middleware, Next};
 use serde::{Deserialize, Serialize};
@@ -440,10 +440,11 @@ impl ModProvider for ModioProvider {
                     })?
                 };
 
-                Ok(ModResponse::Redirect(ModSpecification::new(format!(
-                    "https://mod.io/g/drg/m/{}#{}/{}",
-                    &name_id, id, modfile_id
-                ))))
+                Ok(ModResponse::Redirect(format_spec(
+                    name_id,
+                    id,
+                    Some(modfile_id),
+                )))
             } else {
                 let filter = NameId::eq(name_id).and(Visible::_in(vec![0, 1]));
                 let mut mods = self
@@ -454,10 +455,7 @@ impl ModProvider for ModioProvider {
                     .collect()
                     .await?;
                 if mods.len() > 1 {
-                    Err(anyhow!(
-                        "multiple mods returned for mod name_id {}",
-                        name_id,
-                    ))
+                    bail!("multiple mods returned for mod name_id {}", name_id,)
                 } else if let Some(mod_) = mods.pop() {
                     let mod_id = mod_.id;
                     let mod_ = ModioMod::fetch(&self.modio, mod_id).await?;
@@ -471,12 +469,13 @@ impl ModProvider for ModioProvider {
                         format!("mod {} does not have an associated modfile", url)
                     })?;
 
-                    Ok(ModResponse::Redirect(ModSpecification::new(format!(
-                        "https://mod.io/g/drg/m/{}#{}/{}",
-                        &name_id, mod_id, file
-                    ))))
+                    Ok(ModResponse::Redirect(format_spec(
+                        name_id,
+                        mod_id,
+                        Some(file),
+                    )))
                 } else {
-                    Err(anyhow!("no mods returned for mod name_id {}", &name_id))
+                    bail!("no mods returned for mod name_id {}", &name_id)
                 }
             }
         }
@@ -574,7 +573,7 @@ impl ModProvider for ModioProvider {
                 },
             )
         } else {
-            Err(anyhow!("download URL must be fully specified"))
+            bail!("download URL must be fully specified")
         }
     }
 
