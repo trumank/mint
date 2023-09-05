@@ -47,6 +47,7 @@ pub enum Message {
     LintMods(LintMods),
     SelfUpdate(SelfUpdate),
     FetchSelfUpdateProgress(FetchSelfUpdateProgress),
+    FetchModDetails(FetchModDetails),
 }
 
 impl Message {
@@ -60,6 +61,7 @@ impl Message {
             Self::LintMods(msg) => msg.receive(app),
             Self::SelfUpdate(msg) => msg.receive(app),
             Self::FetchSelfUpdateProgress(msg) => msg.receive(app),
+            Self::FetchModDetails(msg) => msg.receive(app),
         }
     }
 }
@@ -747,4 +749,106 @@ async fn self_update_async(
     info!("update successful");
 
     Ok(original_exe_path)
+}
+
+#[derive(Debug)]
+pub struct FetchModDetails {
+    rid: RequestID,
+    modio_id: u32,
+    result: Result<ModDetails>,
+}
+
+#[derive(Debug)]
+pub struct ModDetails {
+    pub r#mod: modio::mods::Mod,
+    pub versions: Vec<modio::files::File>,
+    pub thumbnail: Vec<u8>,
+}
+
+impl FetchModDetails {
+    pub fn send(
+        rc: &mut RequestCounter,
+        ctx: &egui::Context,
+        tx: Sender<Message>,
+        oauth_token: &str,
+        modio_id: u32,
+    ) -> MessageHandle<()> {
+        let rid = rc.next();
+        let ctx = ctx.clone();
+        let oauth_token = oauth_token.to_string();
+
+        MessageHandle {
+            rid,
+            handle: tokio::task::spawn(async move {
+                let result = fetch_modio_mod_details(oauth_token, modio_id).await;
+                tx.send(Message::FetchModDetails(FetchModDetails {
+                    rid,
+                    result,
+                    modio_id,
+                }))
+                .await
+                .unwrap();
+                ctx.request_repaint();
+            }),
+            state: (),
+        }
+    }
+
+    fn receive(self, app: &mut App) {
+        let mut to_remove = None;
+
+        if let Some(req) = app.fetch_mod_details_rid.get(&self.modio_id)
+            && req.rid == self.rid
+        {
+            match self.result {
+                Ok(mod_details) => {
+                    info!("fetch mod details successful");
+                    app.mod_details.insert(mod_details.r#mod.id, mod_details);
+                    app.last_action_status =
+                        LastActionStatus::Success("fetch mod details complete".to_string());
+                }
+                Err(e) => {
+                    error!("fetch mod details failed");
+                    error!("{:#?}", e);
+                    to_remove = Some(self.modio_id);
+                    app.last_action_status =
+                        LastActionStatus::Failure("fetch mod details failed".to_string());
+                }
+            }
+        }
+
+        if let Some(id) = to_remove {
+            app.fetch_mod_details_rid.remove(&id);
+        }
+    }
+}
+
+async fn fetch_modio_mod_details(oauth_token: String, modio_id: u32) -> Result<ModDetails> {
+    use crate::providers::modio::{LoggingMiddleware, MODIO_DRG_ID};
+    use modio::{filter::prelude::*, Credentials, Modio};
+
+    let credentials = Credentials::with_token("", oauth_token);
+    let client = reqwest_middleware::ClientBuilder::new(reqwest::Client::new())
+        .with::<LoggingMiddleware>(Default::default())
+        .build();
+    let modio = Modio::new(credentials, client.clone())?;
+    let mod_ref = modio.mod_(MODIO_DRG_ID, modio_id);
+    let r#mod = mod_ref.clone().get().await?;
+
+    let filter = with_limit(10).order_by(modio::user::filters::files::Version::desc());
+    let versions = mod_ref.clone().files().search(filter).first_page().await?;
+
+    let thumbnail = client
+        .get(r#mod.logo.thumb_320x180.clone())
+        .send()
+        .await?
+        .bytes()
+        .await?
+        .to_vec();
+
+    Ok(ModDetails {
+        r#mod,
+        versions,
+        thumbnail,
+    })
 }
