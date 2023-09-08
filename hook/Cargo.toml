@@ -11,7 +11,6 @@ crate-type = ["cdylib"]
 anyhow = "1.0.72"
 patternsleuth_scanner = { git = "https://github.com/trumank/patternsleuth", version = "0.1.0" }
 retour = { version = "0.3.1", features = ["static-detour"] }
-winapi = "0.3.9"
 windows = { version = "0.48.0", features = [
   "Win32_Foundation",
   "Win32_System_SystemServices",

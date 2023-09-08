@@ -1953,7 +1953,6 @@ dependencies = [
  "anyhow",
  "patternsleuth_scanner",
  "retour",
- "winapi",
  "windows 0.48.0",
 ]
 
