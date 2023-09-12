@@ -475,7 +475,7 @@ impl LintMods {
                 Ok(pairs) => tokio::task::spawn_blocking(move || {
                     crate::mod_lints::run_lints(
                         &enabled_lints,
-                        BTreeSet::from_iter(pairs),
+                        pairs.into_iter().collect(),
                         game_pak_path,
                     )
                 })

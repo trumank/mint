@@ -324,7 +324,7 @@ async fn action_lint(action: ActionLint) -> Result<()> {
                 LintId::NON_ASSET_FILES,
                 LintId::SPLIT_ASSET_PAIRS,
             ]),
-            BTreeSet::from_iter(mods.into_iter().zip(mod_paths)),
+            mods.into_iter().zip(mod_paths).collect(),
             Some(game_pak_path),
         )
     })

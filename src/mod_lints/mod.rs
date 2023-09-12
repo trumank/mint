@@ -34,13 +34,13 @@ use self::split_asset_pairs::SplitAssetPairsLint;
 use self::unmodified_game_assets::UnmodifiedGameAssetsLint;
 
 pub struct LintCtxt {
-    pub(crate) mods: BTreeSet<(ModSpecification, PathBuf)>,
+    pub(crate) mods: IndexSet<(ModSpecification, PathBuf)>,
     pub(crate) fsd_pak_path: Option<PathBuf>,
 }
 
 impl LintCtxt {
     pub fn init(
-        mods: BTreeSet<(ModSpecification, PathBuf)>,
+        mods: IndexSet<(ModSpecification, PathBuf)>,
         fsd_pak_path: Option<PathBuf>,
     ) -> Result<Self> {
         trace!("LintCtxt::init");
@@ -206,7 +206,7 @@ pub struct LintReport {
 
 pub fn run_lints(
     enabled_lints: &BTreeSet<LintId>,
-    mods: BTreeSet<(ModSpecification, PathBuf)>,
+    mods: IndexSet<(ModSpecification, PathBuf)>,
     fsd_pak_path: Option<PathBuf>,
 ) -> Result<LintReport> {
     let lint_ctxt = LintCtxt::init(mods, fsd_pak_path)?;
