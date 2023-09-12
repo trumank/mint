@@ -15,7 +15,7 @@ use std::{
 };
 
 use anyhow::{anyhow, Context, Result};
-use eframe::egui::{Button, CollapsingHeader, RichText};
+use eframe::egui::{Button, CollapsingHeader, RichText, Visuals};
 use eframe::epaint::{Pos2, Vec2};
 use eframe::{
     egui::{self, FontSelection, Layout, TextFormat, Ui},
@@ -54,7 +54,7 @@ pub fn gui(args: Option<Vec<String>>) -> Result<()> {
     eframe::run_native(
         &format!("DRG Mod Integration {}", env!("CARGO_PKG_VERSION")),
         options,
-        Box::new(|_cc| Box::new(App::new(args).unwrap())),
+        Box::new(|cc| Box::new(App::new(cc, args).unwrap())),
     )
     .map_err(|e| anyhow!("{e}"))?;
     Ok(())
@@ -70,9 +70,25 @@ pub mod colors {
     pub const DARKER_GREEN: Color32 = Color32::from_rgb(0, 80, 0);
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum GuiTheme {
+    Light,
+    Dark,
+}
+
+impl GuiTheme {
+    fn visuals(self) -> Visuals {
+        match self {
+            GuiTheme::Light => Visuals::light(),
+            GuiTheme::Dark => Visuals::dark(),
+        }
+    }
+}
+
 const MODIO_LOGO_PNG: &[u8] = include_bytes!("../../assets/modio-cog-blue.png");
 
 pub struct App {
+    default_visuals: Visuals,
     args: Option<Vec<String>>,
     tx: Sender<message::Message>,
     rx: Receiver<message::Message>,
@@ -82,7 +98,7 @@ pub struct App {
     integrate_rid: Option<MessageHandle<HashMap<ModSpecification, SpecFetchProgress>>>,
     update_rid: Option<MessageHandle<()>>,
     check_updates_rid: Option<MessageHandle<()>>,
-    checked_updates_initially: bool,
+    has_run_init: bool,
     request_counter: RequestCounter,
     window_provider_parameters: Option<WindowProviderParameters>,
     search_string: Option<String>,
@@ -125,13 +141,18 @@ enum LastActionStatus {
 }
 
 impl App {
-    fn new(args: Option<Vec<String>>) -> Result<Self> {
+    fn new(cc: &eframe::CreationContext, args: Option<Vec<String>>) -> Result<Self> {
         let (tx, rx) = mpsc::channel(10);
         let state = State::init()?;
         info!("config dir = {}", state.project_dirs.config_dir().display());
         info!("cache dir = {}", state.project_dirs.cache_dir().display());
 
         Ok(Self {
+            default_visuals: cc
+                .integration_info
+                .system_theme
+                .map(|t| t.egui_visuals())
+                .unwrap_or_default(),
             args,
             tx,
             rx,
@@ -142,7 +163,7 @@ impl App {
             integrate_rid: None,
             update_rid: None,
             check_updates_rid: None,
-            checked_updates_initially: false,
+            has_run_init: false,
             window_provider_parameters: None,
             search_string: Default::default(),
             scroll_to_match: false,
@@ -869,7 +890,7 @@ impl App {
                 .open(&mut open)
                 .resizable(false)
                 .show(ctx, |ui| {
-                    egui::Grid::new("grid").num_columns(2).show(ui, |ui| {
+                    egui::Grid::new("grid").num_columns(2).striped(true).show(ui, |ui| {
                         let mut job = LayoutJob::default();
                         job.append(
                             "DRG pak",
@@ -918,6 +939,21 @@ impl App {
                         if ui.link(cache_dir.display().to_string()).clicked() {
                             opener::open(cache_dir).ok();
                         }
+                        ui.end_row();
+
+                        ui.label("GUI theme:");
+                        ui.horizontal(|ui| {
+                            ui.horizontal(|ui| {
+                                let config = &mut self.state.config;
+                                let changed = ui.selectable_value(&mut config.gui_theme, Some(GuiTheme::Light), "☀ Light").changed() ||
+                                    ui.selectable_value(&mut config.gui_theme, Some(GuiTheme::Dark), "🌙 Dark").changed() ||
+                                    ui.selectable_value(&mut config.gui_theme, None, "System").changed();
+                                if changed {
+                                    ctx.set_visuals(config.gui_theme.map(GuiTheme::visuals).unwrap_or_else(|| self.default_visuals.clone()));
+                                    config.save().unwrap();
+                                }
+                            });
+                        });
                         ui.end_row();
 
                         ui.label("Mod providers:");
@@ -1473,8 +1509,18 @@ impl eframe::App for App {
             std::process::exit(0);
         }
 
-        if !self.checked_updates_initially {
-            self.checked_updates_initially = true;
+        // do some init things that depend on ctx so cannot be done earlier
+        if !self.has_run_init {
+            self.has_run_init = true;
+
+            ctx.set_visuals(
+                self.state
+                    .config
+                    .gui_theme
+                    .map(GuiTheme::visuals)
+                    .unwrap_or_else(|| self.default_visuals.clone()),
+            );
+
             message::CheckUpdates::send(self, ctx);
         }
 

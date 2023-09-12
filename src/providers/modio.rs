@@ -994,12 +994,9 @@ mod test {
         );
         assert_eq!(
             modio_cache.mods,
-            [(
-                3,
-                mods.get(&3).map(|m| m.mod_.clone()).unwrap()
-            )]
-            .into_iter()
-            .collect()
+            [(3, mods.get(&3).map(|m| m.mod_.clone()).unwrap())]
+                .into_iter()
+                .collect()
         );
     }
 }
