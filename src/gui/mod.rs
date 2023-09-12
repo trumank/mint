@@ -998,10 +998,8 @@ impl App {
     }
 
     fn show_lints_toggle(&mut self, ctx: &egui::Context) {
-        if let Some(lints_toggle) = &self.lints_toggle_window {
+        if let Some(_lints_toggle) = &self.lints_toggle_window {
             let mut open = true;
-
-            let mods = lints_toggle.mods.clone();
 
             egui::Window::new("Toggle lints")
                 .open(&mut open)
@@ -1111,6 +1109,14 @@ impl App {
                             ]);
 
                             trace!(?lint_options);
+
+                            let mut mods = Vec::new();
+                            self.state.mod_data.for_each_enabled_mod(
+                                &self.state.mod_data.active_profile,
+                                |mc| {
+                                    mods.push(mc.spec.clone());
+                                },
+                            );
 
                             self.lint_report = None;
                             self.lint_rid = Some(message::LintMods::send(
@@ -1488,9 +1494,7 @@ impl WindowSettings {
 
 struct WindowLintReport;
 
-struct WindowLintsToggle {
-    mods: Vec<ModSpecification>,
-}
+struct WindowLintsToggle;
 
 impl eframe::App for App {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
@@ -1668,14 +1672,7 @@ impl eframe::App for App {
                     .on_hover_text("Lint mods in the current profile")
                     .clicked()
                 {
-                    let mut mods = Vec::new();
-                    let active_profile = self.state.mod_data.active_profile.clone();
-                    self.state
-                        .mod_data
-                        .for_each_enabled_mod(&active_profile, |mc| {
-                            mods.push(mc.spec.clone());
-                        });
-                    self.lints_toggle_window = Some(WindowLintsToggle { mods });
+                    self.lints_toggle_window = Some(WindowLintsToggle);
                 }
                 if ui.button("⚙").on_hover_text("Open settings").clicked() {
                     self.settings_window = Some(WindowSettings::new(&self.state));
