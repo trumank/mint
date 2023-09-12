@@ -881,7 +881,7 @@ fn process_modio_tags(set: &HashSet<String>) -> ModioTags {
 
 #[cfg(test)]
 mod test {
-    use std::sync::RwLock;
+    use std::sync::{OnceLock, RwLock};
 
     use crate::{providers::VersionAnnotatedCache, state::config::ConfigWrapper};
 
@@ -903,41 +903,66 @@ mod test {
         assert!(modio_provider.check().await.is_err());
     }
 
+    struct FullMod {
+        mod_: ModioMod,
+        dependencies: Vec<u32>,
+    }
+
+    static MODS: OnceLock<HashMap<u32, FullMod>> = OnceLock::new();
+
     #[tokio::test]
     async fn test_fetch_mod_simple() {
-        let mut mock = MockDrgModio::new();
-        mock.expect_fetch_mods_by_name().times(1).returning(|name| {
-            Ok(vec![match name {
-                "test-mod" => ModioModResponse { id: 3 },
-                _ => unreachable!(),
-            }])
-        });
-        mock.expect_fetch_mod().times(1).returning(|id| {
-            Ok(match id {
-                3 => ModioMod {
-                    name_id: "test-mod".to_string(),
-                    name: "Test Mod".to_string(),
-                    latest_modfile: Some(5),
-                    modfiles: vec![ModioFile {
-                        id: 5,
-                        date_added: 12345,
-                        version: None,
-                        changelog: None,
-                    }],
-                    tags: HashSet::new(),
+        let mods = MODS.get_or_init(|| {
+            [(
+                3,
+                FullMod {
+                    mod_: ModioMod {
+                        name_id: "test-mod".to_string(),
+                        name: "Test Mod".to_string(),
+                        latest_modfile: Some(5),
+                        modfiles: vec![ModioFile {
+                            id: 5,
+                            date_added: 12345,
+                            version: None,
+                            changelog: None,
+                        }],
+                        tags: HashSet::new(),
+                    },
+                    dependencies: vec![],
                 },
-                _ => unreachable!(),
-            })
+            )]
+            .into_iter()
+            .collect::<HashMap<_, _>>()
         });
-        mock.expect_fetch_dependencies().times(1).returning(|id| {
-            Ok(match id {
-                3 => vec![],
-                _ => unreachable!(),
-            })
-        });
+        let mod_names = mods
+            .iter()
+            .map(|(id, m)| (m.mod_.name_id.as_str(), id))
+            .collect::<HashMap<_, _>>();
+        let mut mock = MockDrgModio::new();
+
+        mock.expect_fetch_mods_by_name()
+            .times(1)
+            .returning(move |name| {
+                mod_names
+                    .get(name)
+                    .map(|id| vec![ModioModResponse { id: **id }])
+                    .context("not found")
+            });
+        mock.expect_fetch_mod()
+            .times(1)
+            .returning(move |id| mods.get(&id).map(|m| m.mod_.clone()).context("not found"));
+        mock.expect_fetch_dependencies()
+            .times(1)
+            .returning(move |id| {
+                mods.get(&id)
+                    .map(|m| m.dependencies.clone())
+                    .context("not found")
+            });
+
         let cache = Arc::new(RwLock::new(ConfigWrapper::<VersionAnnotatedCache>::memory(
             VersionAnnotatedCache::default(),
         )));
+
         let modio_provider = ModioProvider::new(mock);
         let resolved_mod = modio_provider
             .resolve_mod(
@@ -971,18 +996,7 @@ mod test {
             modio_cache.mods,
             [(
                 3,
-                ModioMod {
-                    name_id: "test-mod".to_string(),
-                    name: "Test Mod".to_string(),
-                    latest_modfile: Some(5),
-                    modfiles: vec![ModioFile {
-                        id: 5,
-                        date_added: 12345,
-                        version: None,
-                        changelog: None,
-                    }],
-                    tags: HashSet::new(),
-                }
+                mods.get(&3).map(|m| m.mod_.clone()).unwrap()
             )]
             .into_iter()
             .collect()
