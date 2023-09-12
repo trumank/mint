@@ -160,7 +160,7 @@ unsafe fn patch() -> Result<()> {
                 patch_mem.as_ptr() as *const c_void,
                 patch_mem.len(),
                 PAGE_EXECUTE_READWRITE,
-                &mut old as *mut _,
+                &mut old,
             );
 
             patch_mem.copy_from_slice(&patch);
@@ -169,7 +169,7 @@ unsafe fn patch() -> Result<()> {
                 patch_mem.as_ptr() as *const c_void,
                 patch_mem.len(),
                 old,
-                &mut old as *mut _,
+                &mut old,
             );
         }
     }
