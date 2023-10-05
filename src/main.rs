@@ -91,6 +91,10 @@ enum Action {
 struct Args {
     #[command(subcommand)]
     action: Option<Action>,
+
+    /// Location to store configs and data
+    #[arg(long)]
+    appdata: Option<PathBuf>,
 }
 
 fn main() -> Result<()> {
@@ -101,7 +105,13 @@ fn main() -> Result<()> {
         let _res = ansi_term::enable_ansi_support();
     }
 
-    let dirs = Dirs::defauld_xdg()?;
+    let args = Args::parse();
+
+    let dirs = args
+        .appdata
+        .as_ref()
+        .map(Dirs::from_path)
+        .unwrap_or_else(Dirs::defauld_xdg)?;
 
     std::env::set_var("RUST_BACKTRACE", "1");
     let _guard = setup_logging(&dirs)?;
@@ -111,7 +121,6 @@ fn main() -> Result<()> {
     debug!("tokio runtime created");
     let _enter = rt.enter();
 
-    let args = Args::parse();
     debug!(?args);
 
     match args.action {
