@@ -8,13 +8,12 @@ use std::{
 };
 
 use anyhow::{bail, Context, Result};
-use directories::ProjectDirs;
 use serde::{Deserialize, Serialize};
 
 use crate::{
     gui::GuiTheme,
     providers::{ModSpecification, ModStore},
-    DRGInstallation,
+    DRGInstallation, Dirs,
 };
 
 use self::config::ConfigWrapper;
@@ -394,35 +393,30 @@ impl Default for Config!["0.0.0"] {
 }
 
 pub struct State {
-    pub project_dirs: ProjectDirs,
+    pub dirs: Dirs,
     pub config: ConfigWrapper<VersionAnnotatedConfig>,
     pub mod_data: ConfigWrapper<VersionAnnotatedModData>,
     pub store: Arc<ModStore>,
 }
 
 impl State {
-    pub fn init() -> Result<Self> {
-        let project_dirs = ProjectDirs::from("", "", "drg-mod-integration")
-            .context("constructing project dirs")?;
-        std::fs::create_dir_all(project_dirs.cache_dir())?;
-        std::fs::create_dir_all(project_dirs.config_dir())?;
-
-        let config_path = project_dirs.config_dir().join("config.json");
+    pub fn init(dirs: Dirs) -> Result<Self> {
+        let config_path = dirs.config_dir.join("config.json");
 
         let config = read_config_or_default(&config_path)?;
         let config = ConfigWrapper::<VersionAnnotatedConfig>::new(&config_path, config);
         config.save().unwrap();
 
-        let legacy_mod_profiles_path = project_dirs.config_dir().join("profiles.json");
-        let mod_data_path = project_dirs.config_dir().join("mod_data.json");
+        let legacy_mod_profiles_path = dirs.config_dir.join("profiles.json");
+        let mod_data_path = dirs.config_dir.join("mod_data.json");
         let mod_data = read_mod_data_or_default(&mod_data_path, legacy_mod_profiles_path)?;
         let mod_data = ConfigWrapper::<VersionAnnotatedModData>::new(mod_data_path, mod_data);
         mod_data.save().unwrap();
 
-        let store = ModStore::new(project_dirs.cache_dir(), &config.provider_parameters)?.into();
+        let store = ModStore::new(&dirs.cache_dir, &config.provider_parameters)?.into();
 
         Ok(Self {
-            project_dirs,
+            dirs,
             config,
             mod_data,
             store,

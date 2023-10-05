@@ -30,6 +30,7 @@ use tokio::{
 use tracing::{debug, info, trace};
 
 use crate::mod_lints::{LintId, LintReport, SplitAssetPair};
+use crate::Dirs;
 use crate::{
     integrate::uninstall,
     is_drg_pak,
@@ -45,7 +46,7 @@ use request_counter::{RequestCounter, RequestID};
 
 use self::toggle_switch::toggle_switch;
 
-pub fn gui(args: Option<Vec<String>>) -> Result<()> {
+pub fn gui(dirs: Dirs, args: Option<Vec<String>>) -> Result<()> {
     let options = eframe::NativeOptions {
         initial_window_size: Some(egui::vec2(800.0, 400.0)),
         drag_and_drop_support: true,
@@ -54,7 +55,7 @@ pub fn gui(args: Option<Vec<String>>) -> Result<()> {
     eframe::run_native(
         &format!("DRG Mod Integration {}", env!("CARGO_PKG_VERSION")),
         options,
-        Box::new(|cc| Box::new(App::new(cc, args).unwrap())),
+        Box::new(|cc| Box::new(App::new(cc, dirs, args).unwrap())),
     )
     .map_err(|e| anyhow!("{e}"))?;
     Ok(())
@@ -141,11 +142,11 @@ enum LastActionStatus {
 }
 
 impl App {
-    fn new(cc: &eframe::CreationContext, args: Option<Vec<String>>) -> Result<Self> {
+    fn new(cc: &eframe::CreationContext, dirs: Dirs, args: Option<Vec<String>>) -> Result<Self> {
         let (tx, rx) = mpsc::channel(10);
-        let state = State::init()?;
-        info!("config dir = {}", state.project_dirs.config_dir().display());
-        info!("cache dir = {}", state.project_dirs.cache_dir().display());
+        let state = State::init(dirs)?;
+        info!("config dir = {}", state.dirs.config_dir.display());
+        info!("cache dir = {}", state.dirs.cache_dir.display());
 
         Ok(Self {
             default_visuals: cc
@@ -927,14 +928,14 @@ impl App {
                         });
                         ui.end_row();
 
-                        let config_dir = self.state.project_dirs.config_dir();
+                        let config_dir = &self.state.dirs.config_dir;
                         ui.label("Config directory:");
                         if ui.link(config_dir.display().to_string()).clicked() {
                             opener::open(config_dir).ok();
                         }
                         ui.end_row();
 
-                        let cache_dir = self.state.project_dirs.cache_dir();
+                        let cache_dir = &self.state.dirs.cache_dir;
                         ui.label("Cache directory:");
                         if ui.link(cache_dir.display().to_string()).clicked() {
                             opener::open(cache_dir).ok();

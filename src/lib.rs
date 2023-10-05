@@ -16,11 +16,49 @@ use std::{
 
 use anyhow::{bail, Context, Result};
 
+use directories::ProjectDirs;
 use error::IntegrationError;
 use integrate::IntegrationErr;
 use providers::{ModResolution, ModSpecification, ProviderFactory, ReadSeek};
 use state::State;
 use tracing::{info, warn};
+
+pub struct Dirs {
+    pub config_dir: PathBuf,
+    pub cache_dir: PathBuf,
+    pub data_dir: PathBuf,
+}
+
+impl Dirs {
+    pub fn defauld_xdg() -> Result<Self> {
+        let project_dirs = ProjectDirs::from("", "", "drg-mod-integration")
+            .context("constructing project dirs")?;
+
+        Self::from_paths(
+            project_dirs.config_dir(),
+            project_dirs.cache_dir(),
+            project_dirs.data_dir(),
+        )
+    }
+    pub fn from_path<P: AsRef<Path>>(path: P) -> Result<Self> {
+        Self::from_paths(
+            path.as_ref().join("config"),
+            path.as_ref().join("cache"),
+            path.as_ref().join("data"),
+        )
+    }
+    fn from_paths<P: AsRef<Path>>(config_dir: P, cache_dir: P, data_dir: P) -> Result<Self> {
+        std::fs::create_dir_all(&config_dir)?;
+        std::fs::create_dir_all(&cache_dir)?;
+        std::fs::create_dir_all(&data_dir)?;
+
+        Ok(Self {
+            config_dir: config_dir.as_ref().to_path_buf(),
+            cache_dir: cache_dir.as_ref().to_path_buf(),
+            data_dir: data_dir.as_ref().to_path_buf(),
+        })
+    }
+}
 
 #[derive(Debug)]
 pub enum DRGInstallationType {
