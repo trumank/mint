@@ -75,9 +75,11 @@ After these steps, you can now add local mods or mod.io mods.
 
 Copy the URL to the mod into the "Add mods..." field and hit enter.
 
-You can obtain a list of your subscribed mods list using the "Copy Mod List"
+You can obtain a list of your subscribed mods list using the "Copy Mod URLs"
 button via [A Better Modding Menu](https://mod.io/g/drg/m/a-better-modding-menu)
-in game.
+in game:
+
+![Copy Mod URLs](https://github.com/trumank/drg-mod-integration/assets/1144160/375f441f-4762-4549-a241-1b54ed391b2f)
 
 #### Adding a local mod
 
