@@ -1675,6 +1675,47 @@ impl eframe::App for App {
                 {
                     self.lints_toggle_window = Some(WindowLintsToggle);
                 }
+                // ideally, there should be some error checking to determine whether we've already imported our local mods
+                // because typically users will click buttons for no reason, potentially ruining their current profile
+                if ui.button("Import mods")
+                    .on_hover_text("Import mods that were previously installed with mod.io")
+                    .clicked()
+                {
+                    use std::path::Path;
+                    // im not really sure how you'd enforce this to target specifically the OS drive, or how you'd use this with a linux OS
+                    let local_mods_path = Path::new("C:\\Users\\Public\\mod.io\\2475\\mods");
+                    if ! local_mods_path.exists(){
+                        // if that path failed, then open a file browser prompt to allow the user to find the path themselves
+                    }
+                    
+                    // check again just in case they either aborted 
+                    if local_mods_path.exists(){
+                        self.resolve_mod = recurs_pak_search(local_mods_path);
+                        print!("results: \n {}", self.resolve_mod);
+                        message::ResolveMods::send(self, ctx, self.parse_mods(), false);
+
+
+                        fn recurs_pak_search(dir: &Path) -> String {
+                            let mut result: String = "".to_string();
+                            for entry in dir.read_dir().expect("read_dir call failed") {
+                                if let Ok(entry) = entry {
+                                    if entry.path().is_dir(){
+                                        result += &recurs_pak_search(entry.path().as_path());
+                                    // else is probably a pak
+                                    } else if entry.path().extension().is_some() {
+                                        result += &entry.path().to_string_lossy().to_string();
+                                        result += "\n";
+                                        //print!("found pak: {}\n", app.resolve_mod);
+                                    }
+                                }
+                            }
+                            return result;
+                        }
+                        
+
+                    }
+
+                }
                 if ui.button("⚙").on_hover_text("Open settings").clicked() {
                     self.settings_window = Some(WindowSettings::new(&self.state));
                 }
