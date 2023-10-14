@@ -1691,7 +1691,6 @@ impl eframe::App for App {
                     // check again just in case they either aborted 
                     if local_mods_path.exists(){
                         self.resolve_mod = recurs_pak_search(local_mods_path);
-                        print!("results: \n {}", self.resolve_mod);
                         message::ResolveMods::send(self, ctx, self.parse_mods(), false);
 
 
