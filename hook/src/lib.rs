@@ -5,14 +5,15 @@ use std::{
 
 use anyhow::{bail, Context, Result};
 use retour::static_detour;
-use windows::{
-    Win32::Foundation::*,
-    Win32::System::{
+use windows::Win32::{
+    Foundation::HMODULE,
+    System::{
         LibraryLoader::GetModuleHandleA,
         Memory::{VirtualProtect, PAGE_EXECUTE_READWRITE, PAGE_PROTECTION_FLAGS},
         ProcessStatus::{GetModuleInformation, MODULEINFO},
         SystemServices::*,
         Threading::GetCurrentProcess,
+        Threading::{GetCurrentThread, QueueUserAPC},
     },
 };
 
@@ -38,7 +39,7 @@ extern "system" fn DllMain(dll_module: HMODULE, call_reason: u32, _: *mut ()) ->
     unsafe {
         match call_reason {
             DLL_PROCESS_ATTACH => {
-                std::thread::spawn(|| patch().ok());
+                QueueUserAPC(Some(init), GetCurrentThread(), 0);
             }
             DLL_PROCESS_DETACH => (),
             _ => (),
@@ -69,6 +70,10 @@ impl DRGInstallationType {
             _ => bail!("unrecognized exe file name: {exe_name}"),
         })
     }
+}
+
+unsafe extern "system" fn init(_: usize) {
+    patch().ok();
 }
 
 unsafe fn patch() -> Result<()> {
