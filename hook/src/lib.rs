@@ -4,16 +4,12 @@ use std::{
 };
 
 use anyhow::{bail, Context, Result};
-use patternsleuth_scanner::Pattern;
 use retour::static_detour;
 use windows::Win32::{
     Foundation::HMODULE,
     System::{
-        LibraryLoader::GetModuleHandleA,
-        Memory::{VirtualProtect, PAGE_EXECUTE_READWRITE, PAGE_PROTECTION_FLAGS},
-        ProcessStatus::{GetModuleInformation, MODULEINFO},
+        Memory::{VirtualProtect, PAGE_EXECUTE_READWRITE},
         SystemServices::*,
-        Threading::GetCurrentProcess,
         Threading::{GetCurrentThread, QueueUserAPC},
     },
 };
@@ -73,6 +69,95 @@ impl DRGInstallationType {
     }
 }
 
+mod resolvers {
+    use patternsleuth::resolvers::futures::future::join_all;
+    use patternsleuth::resolvers::unreal::*;
+    use patternsleuth::resolvers::*;
+    use patternsleuth::scanner::Pattern;
+
+    #[derive(Debug)]
+    pub struct GetServerName(pub usize);
+    impl_resolver_singleton!(GetServerName, |ctx| async {
+        let patterns = [
+            "48 89 5C 24 10 48 89 6C 24 18 48 89 74 24 20 57 41 56 41 57 48 83 EC 30 45 33 FF 4C 8B F2 48 8B D9 44 89 7C 24 50 41 8B FF"
+        ];
+
+        let res = join_all(patterns.iter().map(|p| ctx.scan(Pattern::new(p).unwrap()))).await;
+
+        // matches two but the first is the one we need
+        // could potentially get number of xrefs if this becomes problematic
+        Ok(Self(
+            res.into_iter()
+                .flatten()
+                .next()
+                .context("expected at least one")?,
+        ))
+    });
+
+    #[derive(Debug)]
+    pub struct Disable(pub usize);
+    impl_resolver_singleton!(Disable, |ctx| async {
+        let patterns = ["4C 8B B4 24 48 01 00 00 0F 84"];
+
+        let res = join_all(patterns.iter().map(|p| ctx.scan(Pattern::new(p).unwrap()))).await;
+
+        Ok(Self(ensure_one(res.into_iter().flatten())?))
+    });
+
+    #[derive(Debug)]
+    pub struct Resize16(pub usize);
+    impl_resolver_singleton!(Resize16, |ctx| async {
+        let patterns = [
+            "48 89 5C 24 ?? 57 48 83 EC 20 48 63 DA 48 8B F9 85 D2 74 ?? 48 8B CB 33 D2 48 03 C9",
+        ];
+
+        let res = join_all(patterns.iter().map(|p| ctx.scan(Pattern::new(p).unwrap()))).await;
+
+        Ok(Self(ensure_one(res.into_iter().flatten())?))
+    });
+
+    #[derive(Debug)]
+    pub struct FMemoryFree(pub usize);
+    impl_resolver_singleton!(FMemoryFree, |ctx| async {
+        let patterns = ["48 85 C9 74 ?? 53 48 83 EC 20 48 8B D9 48 8B 0D"];
+
+        let res = join_all(patterns.iter().map(|p| ctx.scan(Pattern::new(p).unwrap()))).await;
+
+        Ok(Self(ensure_one(res.into_iter().flatten())?))
+    });
+
+    impl_try_collector! {
+        #[derive(Debug)]
+        pub struct ServerNameResolution {
+            pub fmemory_free: FMemoryFree,
+            pub resize16: Resize16,
+            pub get_server_name: GetServerName,
+        }
+    }
+
+    impl_try_collector! {
+        #[derive(Debug)]
+        pub struct SaveGameResolution {
+            pub fmemory_free: FMemoryFree,
+            pub save_game_to_memory: UGameplayStaticsSaveGameToMemory,
+            pub save_game_to_slot: UGameplayStaticsSaveGameToSlot,
+            pub load_game_from_memory: UGameplayStaticsLoadGameFromMemory,
+            pub load_game_from_slot: UGameplayStaticsLoadGameFromSlot,
+            pub does_save_game_exist: UGameplayStaticsDoesSaveGameExist,
+        }
+    }
+
+    impl_collector! {
+        #[derive(Debug)]
+        pub struct HookResolution {
+            pub fmemory_free: FMemoryFree,
+            pub disable: Disable,
+            pub server_name: ServerNameResolution,
+            pub save_game: SaveGameResolution,
+        }
+    }
+}
+
 unsafe extern "system" fn init(_: usize) {
     patch().ok();
 }
@@ -92,148 +177,97 @@ unsafe fn patch() -> Result<()> {
 
     let installation_type = DRGInstallationType::from_exe_path()?;
 
-    let module = GetModuleHandleA(None).context("could not find main module")?;
-    let process = GetCurrentProcess();
+    let image = patternsleuth::process::internal::read_image()?;
+    let resolution = image.resolve(resolvers::HookResolution::resolver())?;
+    println!("{:#x?}", resolution);
 
-    let mut mod_info = MODULEINFO::default();
-    GetModuleInformation(
-        process,
-        module,
-        &mut mod_info as *mut _,
-        std::mem::size_of::<MODULEINFO>() as u32,
-    )?;
-
-    let module_addr = mod_info.lpBaseOfDll;
-
-    let memory = std::slice::from_raw_parts_mut(
-        mod_info.lpBaseOfDll as *mut u8,
-        mod_info.SizeOfImage as usize,
-    );
-
-    #[derive(Debug, Clone, Copy, Eq, PartialEq)]
-    enum Sig {
-        GetServerName,
-        Disable,
-        SaveGameToSlot,
-        LoadGameFromMemory,
-        LoadGameFromSlot,
-        DoesSaveGameExist,
+    if let Ok(fmemory_free) = resolution.fmemory_free {
+        Free = Some(std::mem::transmute(fmemory_free.0));
     }
 
-    let patterns = [
-        (Sig::GetServerName, Pattern::new("48 89 5C 24 10 48 89 6C 24 18 48 89 74 24 20 57 41 56 41 57 48 83 EC 30 45 33 FF 4C 8B F2 48 8B D9 44 89 7C 24 50 41 8B FF").unwrap()),
-        (Sig::Disable, Pattern::new("4C 8B B4 24 48 01 00 00 0F 84").unwrap()),
-        (Sig::SaveGameToSlot, Pattern::new("48 89 5c 24 08 48 89 74 24 10 57 48 83 ec 40 48 8b da 33 f6 48 8d 54 24 30 48 89 74 24 30 48 89 74 24 38 41 8b f8").unwrap()),
-        (Sig::LoadGameFromMemory, Pattern::new("40 55 48 8d ac 24 00 ff ff ff 48 81 ec 00 02 00 00 83 79 08 00").unwrap()),
-        (Sig::LoadGameFromSlot, Pattern::new("48 8b c4 55 57 48 8d a8 d8 fe ff ff 48 81 ec 18 02 00 00").unwrap()),
-        (Sig::DoesSaveGameExist, Pattern::new("48 89 5C 24 08 57 48 83 EC 20 8B FA 48 8B D9 E8 ?? ?? ?? ?? 48 8B C8 4C 8B 00 41 FF 50 40 48 8B C8 48 85 C0 74 38 83 7B 08 00 74 17 48 8B 00 44 8B C7 48 8B 13 48 8B 5C 24 30 48 83 C4 20 5F 48 FF 60 08 48 8B 00 48 8D ?? ?? ?? ?? ?? 44 8B C7 48 8B 5C 24 30 48 83 C4 20 5F 48 FF 60 08 48 8B 5C 24 30 48 83 C4 20 5F C3").unwrap()),
-    ];
-    let pattern_refs = patterns.iter().map(|(_, p)| p).collect::<Vec<_>>();
+    if let Ok(server_name) = resolution.server_name {
+        Resize16 = Some(std::mem::transmute(server_name.resize16.0));
 
-    let results = patterns
-        .iter()
-        .map(|(s, _)| s)
-        .zip(patternsleuth_scanner::scan_pattern(
-            &pattern_refs,
-            0,
-            memory,
-        ))
-        .collect::<Vec<_>>();
-
-    let get_sig = |sig: Sig| {
-        results
-            .iter()
-            .find_map(|(s, results)| (**s == sig).then(|| results.first().cloned()))
-            .flatten()
-    };
-
-    if let Some(rva) = get_sig(Sig::GetServerName) {
-        let address = module_addr.add(rva);
-
-        Resize16 = Some(std::mem::transmute(address.add(53 + 4).offset(
-            i32::from_le_bytes(memory[rva + 53..rva + 53 + 4].try_into().unwrap()) as isize,
-        )));
-
-        let target: FnGetServerName = std::mem::transmute(address);
         GetServerName
-            .initialize(target, get_server_name_detour)?
+            .initialize(
+                std::mem::transmute(server_name.get_server_name.0),
+                get_server_name_detour,
+            )?
             .enable()?;
     }
 
-    if matches!(installation_type, DRGInstallationType::Steam) {
-        if let Some(rva) = get_sig(Sig::Disable) {
-            let patch = [0xB8, 0x01, 0x00, 0x00, 0x00];
-
-            let rva = rva + 29;
-            let patch_mem = &mut memory[rva..rva + 5];
-
-            let mut old: PAGE_PROTECTION_FLAGS = Default::default();
-            VirtualProtect(
-                patch_mem.as_ptr() as *const c_void,
-                patch_mem.len(),
-                PAGE_EXECUTE_READWRITE,
-                &mut old,
-            )?;
-
-            patch_mem.copy_from_slice(&patch);
-
-            VirtualProtect(
-                patch_mem.as_ptr() as *const c_void,
-                patch_mem.len(),
-                old,
-                &mut old,
-            )?;
+    match installation_type {
+        DRGInstallationType::Steam => {
+            if let Ok(address) = resolution.disable {
+                patch_mem(
+                    (address.0 as *mut u8).add(29),
+                    [0xB8, 0x01, 0x00, 0x00, 0x00],
+                )?;
+            }
         }
-    }
-    if matches!(installation_type, DRGInstallationType::Xbox) {
-        SAVES_DIR = Some(
-            std::env::current_exe()
-                .ok()
-                .as_deref()
-                .and_then(Path::parent)
-                .and_then(Path::parent)
-                .and_then(Path::parent)
-                .context("could not determine save location")?
-                .join("Saved")
-                .join("SaveGames"),
-        );
+        DRGInstallationType::Xbox => {
+            SAVES_DIR = Some(
+                std::env::current_exe()
+                    .ok()
+                    .as_deref()
+                    .and_then(Path::parent)
+                    .and_then(Path::parent)
+                    .and_then(Path::parent)
+                    .context("could not determine save location")?
+                    .join("Saved")
+                    .join("SaveGames"),
+            );
 
-        if let Some(rva) = get_sig(Sig::SaveGameToSlot) {
-            let address = module_addr.add(rva);
+            if let Ok(save_game) = resolution.save_game {
+                SaveGameToMemory = Some(std::mem::transmute(save_game.save_game_to_memory.0));
+                LoadGameFromMemory = Some(std::mem::transmute(save_game.load_game_from_memory.0));
 
-            SaveGameToMemory = Some(std::mem::transmute(address.add(39 + 4).offset(
-                i32::from_le_bytes(memory[rva + 39..rva + 39 + 4].try_into().unwrap()) as isize,
-            )));
-
-            let target: FnSaveGameToSlot = std::mem::transmute(address);
-            SaveGameToSlot
-                .initialize(target, save_game_to_slot_detour)?
-                .enable()?;
-        }
-
-        if let Some(rva) = get_sig(Sig::LoadGameFromMemory) {
-            let address = module_addr.add(rva);
-            LoadGameFromMemory = Some(std::mem::transmute(address));
-
-            if let Some(rva) = get_sig(Sig::LoadGameFromSlot) {
-                let address = module_addr.add(rva);
-
-                let target: FnLoadGameFromSlot = std::mem::transmute(address);
+                SaveGameToSlot
+                    .initialize(
+                        std::mem::transmute(save_game.save_game_to_slot.0),
+                        save_game_to_slot_detour,
+                    )?
+                    .enable()?;
                 LoadGameFromSlot
-                    .initialize(target, load_game_from_slot_detour)?
+                    .initialize(
+                        std::mem::transmute(save_game.load_game_from_slot.0),
+                        load_game_from_slot_detour,
+                    )?
+                    .enable()?;
+
+                DoesSaveGameExist
+                    .initialize(
+                        std::mem::transmute(save_game.does_save_game_exist.0),
+                        does_save_game_exist_detour,
+                    )?
                     .enable()?;
             }
         }
-
-        if let Some(rva) = get_sig(Sig::DoesSaveGameExist) {
-            let address = module_addr.add(rva);
-
-            let target: FnDoesSaveGameExist = std::mem::transmute(address);
-            DoesSaveGameExist
-                .initialize(target, does_save_game_exist_detour)?
-                .enable()?;
-        }
     }
+    Ok(())
+}
+
+unsafe fn patch_mem(address: *mut u8, patch: impl AsRef<[u8]>) -> Result<()> {
+    let patch = patch.as_ref();
+    let patch_mem = std::slice::from_raw_parts_mut(address, patch.len());
+
+    let mut old = Default::default();
+    VirtualProtect(
+        patch_mem.as_ptr() as *const c_void,
+        patch_mem.len(),
+        PAGE_EXECUTE_READWRITE,
+        &mut old,
+    )?;
+
+    patch_mem.copy_from_slice(patch);
+
+    VirtualProtect(
+        patch_mem.as_ptr() as *const c_void,
+        patch_mem.len(),
+        old,
+        &mut old,
+    )?;
+
     Ok(())
 }
 
@@ -284,13 +318,10 @@ impl FString {
     }
 }
 
+type FnFree = unsafe extern "system" fn(*const c_void);
 type FnResize16 = unsafe extern "system" fn(*const c_void, new_max: i32);
-type FnGetServerName = unsafe extern "system" fn(*const c_void, *const c_void) -> *const FString;
-type FnSaveGameToSlot = unsafe extern "system" fn(*const USaveGame, *const FString, i32) -> bool;
 type FnSaveGameToMemory = unsafe extern "system" fn(*const USaveGame, *mut TArray<u8>) -> bool;
-type FnLoadGameFromSlot = unsafe extern "system" fn(*const FString, i32) -> *const USaveGame;
 type FnLoadGameFromMemory = unsafe extern "system" fn(*const TArray<u8>) -> *const USaveGame;
-type FnDoesSaveGameExist = unsafe extern "system" fn(*const FString, i32) -> bool;
 
 static_detour! {
     static GetServerName: unsafe extern "system" fn(*const c_void, *const c_void) -> *const FString;
@@ -299,6 +330,8 @@ static_detour! {
     static DoesSaveGameExist: unsafe extern "system" fn(*const FString, i32) -> bool;
 }
 
+#[allow(non_upper_case_globals)]
+static mut Free: Option<FnFree> = None;
 #[allow(non_upper_case_globals)]
 static mut Resize16: Option<FnResize16> = None;
 #[allow(non_upper_case_globals)]
@@ -352,7 +385,9 @@ fn save_game_to_slot_detour(
                 std::fs::create_dir_all(parent).ok();
             }
 
-            std::fs::write(path, data.as_slice()).is_ok()
+            let res = std::fs::write(path, data.as_slice()).is_ok();
+            Free.unwrap()(data.data as *const c_void);
+            res
         }
     }
 }
@@ -365,7 +400,6 @@ fn load_game_from_slot_detour(slot_name: *const FString, user_index: i32) -> *co
         } else if let Some(data) =
             get_path_for_slot(slot_name).and_then(|path| std::fs::read(path).ok())
         {
-            // TODO this currently leaks the buffer but to free it we need to find the allocator
             LoadGameFromMemory.unwrap()(&TArray::from_slice(data.as_slice()))
         } else {
             std::ptr::null()
