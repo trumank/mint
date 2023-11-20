@@ -95,7 +95,7 @@ unsafe fn patch() -> Result<()> {
         module,
         &mut mod_info as *mut _,
         std::mem::size_of::<MODULEINFO>() as u32,
-    );
+    )?;
 
     let module_addr = mod_info.lpBaseOfDll;
 
@@ -161,7 +161,7 @@ unsafe fn patch() -> Result<()> {
                 patch_mem.len(),
                 PAGE_EXECUTE_READWRITE,
                 &mut old,
-            );
+            )?;
 
             patch_mem.copy_from_slice(&patch);
 
@@ -170,7 +170,7 @@ unsafe fn patch() -> Result<()> {
                 patch_mem.len(),
                 old,
                 &mut old,
-            );
+            )?;
         }
     }
     if matches!(installation_type, DRGInstallationType::Xbox) {

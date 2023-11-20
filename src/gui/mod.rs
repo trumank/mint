@@ -48,8 +48,9 @@ use self::toggle_switch::toggle_switch;
 
 pub fn gui(dirs: Dirs, args: Option<Vec<String>>) -> Result<()> {
     let options = eframe::NativeOptions {
-        initial_window_size: Some(egui::vec2(800.0, 400.0)),
-        drag_and_drop_support: true,
+        viewport: egui::ViewportBuilder::default()
+            .with_inner_size([800.0, 400.0])
+            .with_drag_and_drop(true),
         ..Default::default()
     };
     eframe::run_native(
@@ -534,7 +535,8 @@ impl App {
                                     ui.ctx()
                                         .load_texture("modio-logo", image, Default::default())
                                 });
-                            let mut img = egui::Image::new(texture, [16.0, 16.0]);
+                            let mut img =
+                                egui::Image::new(texture).fit_to_exact_size([16.0, 16.0].into());
                             if !mc.enabled {
                                 img = img.tint(Color32::LIGHT_RED);
                             }

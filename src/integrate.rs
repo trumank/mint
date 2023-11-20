@@ -234,7 +234,7 @@ pub fn integrate<P: AsRef<Path>>(
         let binding = normalize_path(path);
         let path = binding.to_str().unwrap().replace('\\', "/");
 
-        pak.write_file(&path, &mut Cursor::new(data))?;
+        pak.write_file(&path, data)?;
 
         Ok(())
     };
