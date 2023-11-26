@@ -7,6 +7,7 @@ repository = "https://github.com/trumank/drg-mod-integration"
 [features]
 default = ["hook"]
 hook = ["dep:hook"]
+debug = ["egui/deadlock_detection", "egui/extra_debug_asserts", "egui/extra_asserts"]
 
 [dependencies]
 ansi_term = "0.12.1"
@@ -16,6 +17,7 @@ clap = { version = "4.4.8", features = ["derive"] }
 dialoguer = "0.11.0"
 directories = "5.0.1"
 eframe = "0.24.0"
+egui = "0.24.0"
 egui_commonmark = "0.10.0"
 egui_dnd = { git = "https://github.com/lucasmerlin/egui_dnd.git" }
 futures = "0.3.29"

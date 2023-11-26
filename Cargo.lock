@@ -1238,6 +1238,7 @@ dependencies = [
  "dialoguer",
  "directories",
  "eframe",
+ "egui",
  "egui_commonmark",
  "egui_dnd",
  "futures",
@@ -1540,6 +1541,7 @@ checksum = "12f370b53e435fc235243174f3b2bf68a4b0202f3885cece16ad4aecd03222c4"
 dependencies = [
  "ab_glyph",
  "ahash",
+ "backtrace",
  "bytemuck",
  "ecolor",
  "emath",
