@@ -10,6 +10,7 @@ use tracing::info;
 use uasset_utils::splice::{
     extract_tracked_statements, inject_tracked_statements, walk, AssetVersion, TrackedStatement,
 };
+use unreal_asset::kismet::ExPopExecutionFlow;
 
 use crate::providers::ModInfo;
 use crate::{get_pak_from_data, open_file, DRGInstallation};
@@ -274,11 +275,14 @@ pub fn integrate<P: AsRef<Path>>(
         "FSD/Content/UI/Menu_ServerList/_MENU_ServerList",
         "FSD/Content/UI/Menu_ServerList/WND_JoiningModded",
     ];
+    let escape_menu_path = "FSD/Content/UI/Menu_EscapeMenu/MENU_EscapeMenu";
+    let modding_tab_path = "FSD/Content/UI/Menu_EscapeMenu/Modding/MENU_Modding";
 
     let mut deferred_assets: HashMap<&str, RawAsset> = HashMap::from_iter(
         [pcb_path]
             .iter()
             .chain(patch_paths.iter())
+            .chain([escape_menu_path, modding_tab_path].iter())
             .map(|path| (*path, RawAsset::default())),
     );
 
@@ -434,22 +438,32 @@ pub fn integrate<P: AsRef<Path>>(
             kind: IntegrationErrKind::Generic(e),
         })?;
     }
-    for patch_path in patch_paths {
-        let mut asset = deferred_assets[&patch_path]
-            .parse()
-            .map_err(|e| IntegrationErr {
+
+    let mut patch_deferred =
+        |path_str: &str, f: fn(&mut _) -> Result<()>| -> Result<(), IntegrationErr> {
+            let mut asset = deferred_assets[path_str]
+                .parse()
+                .map_err(|e| IntegrationErr {
+                    mod_ctxt: None,
+                    kind: IntegrationErrKind::Generic(e),
+                })?;
+            f(&mut asset).map_err(|e| IntegrationErr {
                 mod_ctxt: None,
                 kind: IntegrationErrKind::Generic(e),
             })?;
-        patch(&mut asset).map_err(|e| IntegrationErr {
-            mod_ctxt: None,
-            kind: IntegrationErrKind::Generic(e),
-        })?;
-        write_asset(&mut mod_pak, asset, patch_path).map_err(|e| IntegrationErr {
-            mod_ctxt: None,
-            kind: IntegrationErrKind::Generic(e),
-        })?;
+            write_asset(&mut mod_pak, asset, path_str).map_err(|e| IntegrationErr {
+                mod_ctxt: None,
+                kind: IntegrationErrKind::Generic(e),
+            })?;
+            Ok(())
+        };
+
+    // apply patches to base assets
+    for patch_path in patch_paths {
+        patch_deferred(patch_path, patch)?;
     }
+    patch_deferred(escape_menu_path, patch_modding_tab)?;
+    patch_deferred(modding_tab_path, patch_modding_tab_item)?;
 
     let mut int_pak_reader = Cursor::new(include_bytes!("../assets/integration.pak"));
     let int_pak = repak::PakReader::new_any(&mut int_pak_reader).map_err(|e| IntegrationErr {
@@ -1145,5 +1159,83 @@ fn patch<C: Seek + Read>(asset: &mut Asset<C>) -> Result<()> {
             .collect();
     }
     inject_tracked_statements(asset, ver, statements);
+    Ok(())
+}
+
+fn patch_modding_tab<C: Seek + Read>(asset: &mut Asset<C>) -> Result<()> {
+    let ver = AssetVersion::new_from(asset);
+    let mut statements = extract_tracked_statements(asset, ver, &None);
+
+    for (_pi, statements) in statements.iter_mut() {
+        for statement in statements {
+            walk(&mut statement.ex, &|ex| {
+                if let KismetExpression::ExContext(ctx) = ex {
+                    let a = matches!(&*ctx.object_expression, KismetExpression::ExInstanceVariable(v) if v.variable.new.as_ref().unwrap().path.last().unwrap().get_content(|c| c == "BTN_Modding"));
+                    let b = matches!(&*ctx.context_expression, KismetExpression::ExVirtualFunction(v) if v.virtual_function_name.get_content(|c| c == "SetVisibility"));
+                    if a && b {
+                        info!("patched modding tab visibility");
+                        *ex = ExPopExecutionFlow {
+                            token: EExprToken::ExPopExecutionFlow,
+                        }
+                        .into()
+                    }
+                }
+            });
+        }
+    }
+    inject_tracked_statements(asset, ver, statements);
+    Ok(())
+}
+
+fn patch_modding_tab_item<C: Seek + Read>(asset: &mut Asset<C>) -> Result<()> {
+    let itm_tab_modding = get_import(
+        asset,
+        vec![
+            Import::new(
+                "/Script/CoreUObject",
+                "Package",
+                "/Game/UI/Menu_EscapeMenu/Modding/ITM_Tab_Modding",
+            ),
+            Import::new(
+                "/Script/UMG",
+                "WidgetBlueprintGeneratedClass",
+                "ITM_Tab_Modding_C",
+            ),
+        ],
+    );
+    let itm_tab_modding_cdo = get_import(
+        asset,
+        vec![
+            Import::new(
+                "/Script/CoreUObject",
+                "Package",
+                "/Game/UI/Menu_EscapeMenu/Modding/ITM_Tab_Modding",
+            ),
+            Import::new(
+                "/Game/UI/Menu_EscapeMenu/Modding/ITM_Tab_Modding",
+                "ITM_Tab_Modding_C",
+                "Default__ITM_Tab_Modding_C",
+            ),
+        ],
+    );
+
+    let new_class = asset.add_fname("MI_UI_C");
+    let new_cdo = asset.add_fname("Default__MI_UI_C");
+    let new_package = asset.add_fname("/Game/_AssemblyStorm/ModIntegration/MI_UI");
+
+    // TODO add get_import_mut or something so indexes don't have to be handled manually
+
+    asset.imports[(-itm_tab_modding_cdo.index - 1) as usize].object_name = new_cdo;
+    asset.imports[(-itm_tab_modding_cdo.index - 1) as usize].class_package = new_package.clone();
+    asset.imports[(-itm_tab_modding_cdo.index - 1) as usize].class_name = new_class.clone();
+
+    let package_index = {
+        let obj = &mut asset.imports[(-itm_tab_modding.index - 1) as usize];
+        obj.object_name = new_class;
+        obj.outer_index
+    };
+
+    asset.imports[(-package_index.index - 1) as usize].object_name = new_package;
+
     Ok(())
 }
