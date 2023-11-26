@@ -1828,6 +1828,8 @@ impl eframe::App for App {
                 }
             }
 
+            // must access memory outside of input lock to prevent deadlock
+            let is_anything_focused = ctx.memory(|m| m.focus().is_some());
             ctx.input(|i| {
                 if !i.raw.dropped_files.is_empty()
                     && self.integrate_rid.is_none()
@@ -1853,14 +1855,14 @@ impl eframe::App for App {
                             if self.integrate_rid.is_none()
                                 && self.update_rid.is_none()
                                 && self.lint_rid.is_none()
-                                && ctx.memory(|m| m.focus().is_none())
+                                && !is_anything_focused
                             {
                                 self.resolve_mod = s.trim().to_string();
                                 message::ResolveMods::send(self, ctx, self.parse_mods(), false);
                             }
                         }
                         egui::Event::Text(text) => {
-                            if ctx.memory(|m| m.focus().is_none()) {
+                            if !is_anything_focused {
                                 self.search_string = Some(text.to_string());
                                 self.scroll_to_match = true;
                             }
