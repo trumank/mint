@@ -304,7 +304,8 @@ fn read_cache_metadata_or_default(cache_metadata_path: &PathBuf) -> Result<Versi
                 .as_object_mut()
                 .context("failed to deserialize cache metadata into object map")?;
             let version = obj_map.remove("version");
-            if let Some(v) = version && let serde_json::Value::String(vs) = v
+            if let Some(v) = version
+                && let serde_json::Value::String(vs) = v
             {
                 match vs.as_str() {
                     "0.0.0" => {
@@ -312,8 +313,10 @@ fn read_cache_metadata_or_default(cache_metadata_path: &PathBuf) -> Result<Versi
                         // involving numeric keys in hashmaps, see
                         // <https://github.com/serde-rs/serde/issues/1183>.
                         match serde_json::from_slice::<Cache!["0.0.0"]>(&buf) {
-                            Ok(c) => MaybeVersionedCache::Versioned(VersionAnnotatedCache::V0_0_0(c)),
-                            Err(e) => Err(e).context("failed to deserialize cache as v0.0.0")?
+                            Ok(c) => {
+                                MaybeVersionedCache::Versioned(VersionAnnotatedCache::V0_0_0(c))
+                            }
+                            Err(e) => Err(e).context("failed to deserialize cache as v0.0.0")?,
                         }
                     }
                     _ => unimplemented!(),
@@ -323,7 +326,7 @@ fn read_cache_metadata_or_default(cache_metadata_path: &PathBuf) -> Result<Versi
                 // numeric keys in hashmaps, see <https://github.com/serde-rs/serde/issues/1183>.
                 match serde_json::from_slice::<HashMap<String, Box<dyn ModProviderCache>>>(&buf) {
                     Ok(c) => MaybeVersionedCache::Legacy(Cache_v0_0_0 { cache: c }),
-                    Err(e) => Err(e).context("failed to deserialize legacy cache")?
+                    Err(e) => Err(e).context("failed to deserialize legacy cache")?,
                 }
             }
         }
