@@ -4,6 +4,7 @@ use std::{
 };
 
 use anyhow::{bail, Context, Result};
+use patternsleuth_scanner::Pattern;
 use retour::static_detour;
 use windows::Win32::{
     Foundation::HMODULE,
@@ -120,24 +121,30 @@ unsafe fn patch() -> Result<()> {
     }
 
     let patterns = [
-        (Sig::GetServerName, "48 89 5C 24 10 48 89 6C 24 18 48 89 74 24 20 57 41 56 41 57 48 83 EC 30 45 33 FF 4C 8B F2 48 8B D9 44 89 7C 24 50 41 8B FF"),
-        (Sig::Disable, "4C 8B B4 24 48 01 00 00 0F 84"),
-        (Sig::SaveGameToSlot, "48 89 5c 24 08 48 89 74 24 10 57 48 83 ec 40 48 8b da 33 f6 48 8d 54 24 30 48 89 74 24 30 48 89 74 24 38 41 8b f8"),
-        (Sig::LoadGameFromMemory, "40 55 48 8d ac 24 00 ff ff ff 48 81 ec 00 02 00 00 83 79 08 00"),
-        (Sig::LoadGameFromSlot, "48 8b c4 55 57 48 8d a8 d8 fe ff ff 48 81 ec 18 02 00 00"),
-        (Sig::DoesSaveGameExist, "48 89 5C 24 08 57 48 83 EC 20 8B FA 48 8B D9 E8 ?? ?? ?? ?? 48 8B C8 4C 8B 00 41 FF 50 40 48 8B C8 48 85 C0 74 38 83 7B 08 00 74 17 48 8B 00 44 8B C7 48 8B 13 48 8B 5C 24 30 48 83 C4 20 5F 48 FF 60 08 48 8B 00 48 8D ?? ?? ?? ?? ?? 44 8B C7 48 8B 5C 24 30 48 83 C4 20 5F 48 FF 60 08 48 8B 5C 24 30 48 83 C4 20 5F C3"),
-    ].iter().map(|(name, pattern)| Ok((name, patternsleuth_scanner::Pattern::new(pattern)?))).collect::<Result<Vec<_>>>()?;
-    let pattern_refs = patterns
-        .iter()
-        .map(|(name, pattern)| (name, pattern))
-        .collect::<Vec<_>>();
+        (Sig::GetServerName, Pattern::new("48 89 5C 24 10 48 89 6C 24 18 48 89 74 24 20 57 41 56 41 57 48 83 EC 30 45 33 FF 4C 8B F2 48 8B D9 44 89 7C 24 50 41 8B FF").unwrap()),
+        (Sig::Disable, Pattern::new("4C 8B B4 24 48 01 00 00 0F 84").unwrap()),
+        (Sig::SaveGameToSlot, Pattern::new("48 89 5c 24 08 48 89 74 24 10 57 48 83 ec 40 48 8b da 33 f6 48 8d 54 24 30 48 89 74 24 30 48 89 74 24 38 41 8b f8").unwrap()),
+        (Sig::LoadGameFromMemory, Pattern::new("40 55 48 8d ac 24 00 ff ff ff 48 81 ec 00 02 00 00 83 79 08 00").unwrap()),
+        (Sig::LoadGameFromSlot, Pattern::new("48 8b c4 55 57 48 8d a8 d8 fe ff ff 48 81 ec 18 02 00 00").unwrap()),
+        (Sig::DoesSaveGameExist, Pattern::new("48 89 5C 24 08 57 48 83 EC 20 8B FA 48 8B D9 E8 ?? ?? ?? ?? 48 8B C8 4C 8B 00 41 FF 50 40 48 8B C8 48 85 C0 74 38 83 7B 08 00 74 17 48 8B 00 44 8B C7 48 8B 13 48 8B 5C 24 30 48 83 C4 20 5F 48 FF 60 08 48 8B 00 48 8D ?? ?? ?? ?? ?? 44 8B C7 48 8B 5C 24 30 48 83 C4 20 5F 48 FF 60 08 48 8B 5C 24 30 48 83 C4 20 5F C3").unwrap()),
+    ];
+    let pattern_refs = patterns.iter().map(|(_, p)| p).collect::<Vec<_>>();
 
-    let results = patternsleuth_scanner::scan_memchr_lookup(&pattern_refs, 0, memory);
+    let results = patterns
+        .iter()
+        .map(|(s, _)| s)
+        .zip(patternsleuth_scanner::scan_pattern(
+            &pattern_refs,
+            0,
+            memory,
+        ))
+        .collect::<Vec<_>>();
 
     let get_sig = |sig: Sig| {
         results
             .iter()
-            .find_map(|(s, addr)| (***s == sig).then_some(*addr))
+            .find_map(|(s, results)| (**s == sig).then(|| results.first().cloned()))
+            .flatten()
     };
 
     if let Some(rva) = get_sig(Sig::GetServerName) {
