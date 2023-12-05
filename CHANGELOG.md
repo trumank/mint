@@ -4,6 +4,13 @@
 
 ## [Unreleased] - ReleaseDate
 
+- Significantly optimize cache updates (first update will still be a full update)
+- Replace escape menu modding tab with mod integration interface
+- Add light/dark mode toggle to settings menu
+- More mod save file fixes for Windows store version
+- Fix Windows console being full of garbage characters
+- Fix unintentionally linking to libssl on Linux
+
 ## [0.2.10] - 2023-08-18
 
 - Many small improvements to the GUI
