@@ -10,7 +10,6 @@ use tracing::info;
 use uasset_utils::splice::{
     extract_tracked_statements, inject_tracked_statements, walk, AssetVersion, TrackedStatement,
 };
-use unreal_asset::kismet::ExPopExecutionFlow;
 
 use crate::providers::ModInfo;
 use crate::{get_pak_from_data, open_file, DRGInstallation};
@@ -1169,15 +1168,12 @@ fn patch_modding_tab<C: Seek + Read>(asset: &mut Asset<C>) -> Result<()> {
     for (_pi, statements) in statements.iter_mut() {
         for statement in statements {
             walk(&mut statement.ex, &|ex| {
-                if let KismetExpression::ExContext(ctx) = ex {
-                    let a = matches!(&*ctx.object_expression, KismetExpression::ExInstanceVariable(v) if v.variable.new.as_ref().unwrap().path.last().unwrap().get_content(|c| c == "BTN_Modding"));
-                    let b = matches!(&*ctx.context_expression, KismetExpression::ExVirtualFunction(v) if v.virtual_function_name.get_content(|c| c == "SetVisibility"));
-                    if a && b {
-                        info!("patched modding tab visibility");
-                        *ex = ExPopExecutionFlow {
-                            token: EExprToken::ExPopExecutionFlow,
+                if let KismetExpression::ExSetArray(arr) = ex {
+                    if arr.elements.len() == 2 {
+                        arr.elements.retain(|e| !matches!(e, KismetExpression::ExInstanceVariable(v) if v.variable.new.as_ref().unwrap().path.last().unwrap().get_content(|c| c == "BTN_Modding")));
+                        if arr.elements.len() != 2 {
+                            info!("patched modding tab visibility");
                         }
-                        .into()
                     }
                 }
             });
