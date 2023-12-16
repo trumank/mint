@@ -2139,9 +2139,17 @@ name = "hook"
 version = "0.2.10"
 dependencies = [
  "anyhow",
+ "hook_resolvers",
  "patternsleuth",
  "retour",
  "windows 0.52.0",
+]
+
+[[package]]
+name = "hook_resolvers"
+version = "0.2.10"
+dependencies = [
+ "patternsleuth",
 ]
 
 [[package]]

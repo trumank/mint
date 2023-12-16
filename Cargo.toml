@@ -1,6 +1,7 @@
 [workspace]
 members = [
   "hook",
+  "hook_resolvers",
 ]
 
 [workspace.package]
@@ -9,6 +10,10 @@ authors = ["trumank", "jieyouxu"]
 license = "MIT OR Apache-2.0"
 version = "0.2.10"
 edition = "2021"
+
+[workspace.dependencies]
+anyhow = { version = "1.0.75", features = ["backtrace"] }
+patternsleuth = { git = "https://github.com/trumank/patternsleuth" }
 
 [package]
 name = "drg_mod_integration"
@@ -25,7 +30,7 @@ debug = ["egui/deadlock_detection", "egui/extra_debug_asserts", "egui/extra_asse
 
 [dependencies]
 ansi_term = "0.12.1"
-anyhow = { version = "1.0.75", features = ["backtrace"] }
+anyhow.workspace = true
 async-trait = "0.1.74"
 clap = { version = "4.4.8", features = ["derive"] }
 dialoguer = "0.11.0"

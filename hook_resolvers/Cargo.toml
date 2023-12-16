@@ -1,0 +1,10 @@
+[package]
+name = "hook_resolvers"
+repository.workspace = true
+authors.workspace = true
+license.workspace = true
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+patternsleuth.workspace = true
