@@ -5,13 +5,14 @@ use std::path::PathBuf;
 
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
+use mint_lib::DRGInstallation;
 use tracing::{debug, info};
 use tracing_appender::non_blocking::WorkerGuard;
 use tracing_subscriber::filter;
 
 use mint::mod_lints::{run_lints, LintId};
 use mint::providers::ProviderFactory;
-use mint::{gui::gui, providers::ModSpecification, state::State, DRGInstallation};
+use mint::{gui::gui, providers::ModSpecification, state::State};
 use mint::{
     resolve_ordered_with_provider_init, resolve_unordered_and_integrate_with_provider_init, Dirs,
 };

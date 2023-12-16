@@ -22,3 +22,4 @@ windows = { version = "0.52.0", features = [
   "Win32_System_Memory",
   "Win32_System_Threading",
 ] }
+mint_lib = { path = "../mint_lib" }

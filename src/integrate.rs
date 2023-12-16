@@ -5,6 +5,7 @@ use std::io::{self, BufReader, BufWriter, Cursor, ErrorKind, Read, Seek};
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
+use mint_lib::DRGInstallation;
 use repak::PakWriter;
 use tracing::info;
 use uasset_utils::splice::{
@@ -12,7 +13,7 @@ use uasset_utils::splice::{
 };
 
 use crate::providers::ModInfo;
-use crate::{get_pak_from_data, open_file, DRGInstallation};
+use crate::{get_pak_from_data, open_file};
 
 use unreal_asset::{
     exports::ExportBaseTrait,

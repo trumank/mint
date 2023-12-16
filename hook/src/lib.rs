@@ -3,7 +3,8 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result};
+use mint_lib::DRGInstallationType;
 use retour::static_detour;
 use windows::Win32::{
     Foundation::HMODULE,
@@ -43,29 +44,6 @@ extern "system" fn DllMain(dll_module: HMODULE, call_reason: u32, _: *mut ()) ->
         }
 
         true
-    }
-}
-
-// TODO refactor crate layout so this can be shared between the hook and integrator
-#[derive(Debug)]
-pub enum DRGInstallationType {
-    Steam,
-    Xbox,
-}
-
-impl DRGInstallationType {
-    pub fn from_exe_path() -> Result<Self> {
-        let exe_name = std::env::current_exe()
-            .context("could not determine running exe")?
-            .file_name()
-            .context("failed to get exe path")?
-            .to_string_lossy()
-            .to_lowercase();
-        Ok(match exe_name.as_str() {
-            "fsd-win64-shipping.exe" => Self::Steam,
-            "fsd-wingdk-shipping.exe" => Self::Xbox,
-            _ => bail!("unrecognized exe file name: {exe_name}"),
-        })
     }
 }
 

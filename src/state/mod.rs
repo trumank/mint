@@ -8,12 +8,13 @@ use std::{
 };
 
 use anyhow::{bail, Context, Result};
+use mint_lib::DRGInstallation;
 use serde::{Deserialize, Serialize};
 
 use crate::{
     gui::GuiTheme,
     providers::{ModSpecification, ModStore},
-    DRGInstallation, Dirs,
+    Dirs,
 };
 
 use self::config::ConfigWrapper;

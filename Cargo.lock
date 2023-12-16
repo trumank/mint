@@ -2087,6 +2087,7 @@ version = "0.2.10"
 dependencies = [
  "anyhow",
  "hook_resolvers",
+ "mint_lib",
  "patternsleuth",
  "retour",
  "windows 0.52.0",
@@ -2609,6 +2610,7 @@ dependencies = [
  "indexmap 2.1.0",
  "inventory",
  "lazy_static",
+ "mint_lib",
  "mockall",
  "modio",
  "obake",
@@ -2639,6 +2641,14 @@ dependencies = [
  "unreal_asset",
  "url",
  "zip",
+]
+
+[[package]]
+name = "mint_lib"
+version = "0.2.10"
+dependencies = [
+ "anyhow",
+ "steamlocate",
 ]
 
 [[package]]
