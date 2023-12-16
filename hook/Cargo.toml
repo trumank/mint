@@ -1,7 +1,10 @@
 [package]
 name = "hook"
-version = "0.1.0"
-edition = "2021"
+repository.workspace = true
+authors.workspace = true
+license.workspace = true
+version.workspace = true
+edition.workspace = true
 
 [lib]
 path = "src/lib.rs"
