@@ -9,10 +9,10 @@ use tracing::{debug, info};
 use tracing_appender::non_blocking::WorkerGuard;
 use tracing_subscriber::filter;
 
-use drg_mod_integration::mod_lints::{run_lints, LintId};
-use drg_mod_integration::providers::ProviderFactory;
-use drg_mod_integration::{gui::gui, providers::ModSpecification, state::State, DRGInstallation};
-use drg_mod_integration::{
+use mint::mod_lints::{run_lints, LintId};
+use mint::providers::ProviderFactory;
+use mint::{gui::gui, providers::ModSpecification, state::State, DRGInstallation};
+use mint::{
     resolve_ordered_with_provider_init, resolve_unordered_and_integrate_with_provider_init, Dirs,
 };
 
@@ -180,7 +180,7 @@ fn setup_logging(dirs: &Dirs) -> Result<WorkerGuard> {
         }
     }
 
-    let log_path = dirs.data_dir.join("drg-mod-integration.log");
+    let log_path = dirs.data_dir.join("mint.log");
     let f = File::create(&log_path)?;
     let writer = BufWriter::new(f);
     let (log_file_appender, guard) = tracing_appender::non_blocking(writer);
@@ -188,7 +188,7 @@ fn setup_logging(dirs: &Dirs) -> Result<WorkerGuard> {
         .with_writer(log_file_appender)
         .fmt_fields(NewType(Pretty::default()))
         .with_ansi(false)
-        .with_filter(filter::Targets::new().with_target("drg_mod_integration", Level::DEBUG));
+        .with_filter(filter::Targets::new().with_target("mint", Level::DEBUG));
     let stderr_log = fmt::layer()
         .with_writer(std::io::stderr)
         .compact()

@@ -1241,59 +1241,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9ea835d29036a4087793836fa931b08837ad5e957da9e23886b29586fb9b6650"
 
 [[package]]
-name = "drg_mod_integration"
-version = "0.2.10"
-dependencies = [
- "ansi_term",
- "anyhow",
- "async-trait",
- "clap",
- "dialoguer",
- "directories",
- "eframe",
- "egui",
- "egui_commonmark",
- "egui_dnd",
- "futures",
- "hex",
- "hook",
- "image",
- "indexmap 2.1.0",
- "inventory",
- "lazy_static",
- "mockall",
- "modio",
- "obake",
- "opener",
- "path-slash",
- "rayon",
- "regex",
- "repak",
- "reqwest",
- "reqwest-middleware",
- "rfd",
- "rust-ini",
- "self_update",
- "semver",
- "serde",
- "serde_json",
- "sha2",
- "steamlocate",
- "task-local-extensions",
- "tempfile",
- "thiserror",
- "tokio",
- "tracing",
- "tracing-appender",
- "tracing-subscriber",
- "typetag",
- "uasset_utils",
- "unreal_asset",
- "url",
- "zip",
-]
-
-[[package]]
 name = "ecolor"
 version = "0.24.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2639,6 +2586,59 @@ checksum = "e7810e0be55b428ada41041c41f32c9f1a42817901b4ccf45fa3d4b6561e74c7"
 dependencies = [
  "adler",
  "simd-adler32",
+]
+
+[[package]]
+name = "mint"
+version = "0.2.10"
+dependencies = [
+ "ansi_term",
+ "anyhow",
+ "async-trait",
+ "clap",
+ "dialoguer",
+ "directories",
+ "eframe",
+ "egui",
+ "egui_commonmark",
+ "egui_dnd",
+ "futures",
+ "hex",
+ "hook",
+ "image",
+ "indexmap 2.1.0",
+ "inventory",
+ "lazy_static",
+ "mockall",
+ "modio",
+ "obake",
+ "opener",
+ "path-slash",
+ "rayon",
+ "regex",
+ "repak",
+ "reqwest",
+ "reqwest-middleware",
+ "rfd",
+ "rust-ini",
+ "self_update",
+ "semver",
+ "serde",
+ "serde_json",
+ "sha2",
+ "steamlocate",
+ "task-local-extensions",
+ "tempfile",
+ "thiserror",
+ "tokio",
+ "tracing",
+ "tracing-appender",
+ "tracing-subscriber",
+ "typetag",
+ "uasset_utils",
+ "unreal_asset",
+ "url",
+ "zip",
 ]
 
 [[package]]

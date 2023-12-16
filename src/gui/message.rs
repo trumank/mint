@@ -333,9 +333,9 @@ impl CheckUpdates {
 
         async fn req() -> Result<GitHubRelease> {
             Ok(reqwest::Client::builder()
-                .user_agent("trumank/drg-mod-integration")
+                .user_agent("trumank/mint")
                 .build()?
-                .get("https://api.github.com/repos/trumank/drg-mod-integration/releases/latest")
+                .get("https://api.github.com/repos/trumank/mint/releases/latest")
                 .send()
                 .await?
                 .json::<GitHubRelease>()
@@ -661,9 +661,9 @@ async fn self_update_async(
     let client = reqwest::Client::new();
 
     let asset_name = if cfg!(target_os = "windows") {
-        "drg_mod_integration-x86_64-pc-windows-msvc.zip"
+        "mint-x86_64-pc-windows-msvc.zip"
     } else if cfg!(target_os = "linux") {
-        "drg_mod_integration-x86_64-unknown-linux-gnu.zip"
+        "mint-x86_64-unknown-linux-gnu.zip"
     } else {
         unimplemented!("unsupported platform");
     };
@@ -672,7 +672,7 @@ async fn self_update_async(
 
     let response = client
         .get(format!(
-            "https://github.com/trumank/drg-mod-integration/releases/latest/download/{asset_name}"
+            "https://github.com/trumank/mint/releases/latest/download/{asset_name}"
         ))
         .send()
         .await?
@@ -708,9 +708,9 @@ async fn self_update_async(
 
     let original_exe_path = tokio::task::spawn_blocking(move || -> Result<PathBuf> {
         let bin_name = if cfg!(target_os = "windows") {
-            "drg_mod_integration.exe"
+            "mint.exe"
         } else if cfg!(target_os = "linux") {
-            "drg_mod_integration"
+            "mint"
         } else {
             unimplemented!("unsupported platform");
         };

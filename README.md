@@ -1,4 +1,4 @@
-# drg-mod-integration
+# mint
 
 3rd party mod integration tool for Deep Rock Galactic to download and integrate mods completely
 externally of the game. This enables more stable mod usage as well as offline mod usage. Works for
@@ -19,16 +19,16 @@ when prompted.
 Most mods work just as if they were loaded via the official integration, but there are still some
 behavioural differences. If a mod is crashing or otherwise behaving differently than when using the
 official integration, *please* create an
-[issue](https://github.com/trumank/drg-mod-integration/issues/new) so it can be addressed.
+[issue](https://github.com/trumank/mint/issues/new) so it can be addressed.
 
 ## Usage
 
 This section assumes that you are on Windows and is using the steam version of DRG, working with
 either local `.pak`s or mod.io mods.
 
-First, download the [latest release](https://github.com/trumank/drg-mod-integration/releases/latest)
+First, download the [latest release](https://github.com/trumank/mint/releases/latest)
 compatible with your architecture. For windows, this will be the
-`drg_mod_integration-x86_64-pc-windows-msvc.zip`. Extract this to anywhere you'd like to keep the
+`mint-x86_64-pc-windows-msvc.zip`. Extract this to anywhere you'd like to keep the
 executable.
 
 Then, we'll need to perform some first-time setup.
@@ -79,7 +79,7 @@ You can obtain a list of your subscribed mods list using the "Copy Mod URLs"
 button via [A Better Modding Menu](https://mod.io/g/drg/m/a-better-modding-menu)
 in game:
 
-![Copy Mod URLs](https://github.com/trumank/drg-mod-integration/assets/1144160/375f441f-4762-4549-a241-1b54ed391b2f)
+![Copy Mod URLs](https://github.com/trumank/mint/assets/1144160/375f441f-4762-4549-a241-1b54ed391b2f)
 
 #### Adding a local mod
 
@@ -100,4 +100,4 @@ closed.**
 ## Using integrated mod support again
 
 If you want to go back to the integrated mod support again, you must uninstall the mods installed by
-the integration tool. Then, launch the game normally.
+mint. Then, launch the game normally.

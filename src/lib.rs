@@ -31,8 +31,8 @@ pub struct Dirs {
 
 impl Dirs {
     pub fn defauld_xdg() -> Result<Self> {
-        let project_dirs = ProjectDirs::from("", "", "drg-mod-integration")
-            .context("constructing project dirs")?;
+        let project_dirs =
+            ProjectDirs::from("", "", "mint").context("constructing project dirs")?;
 
         Self::from_paths(
             project_dirs.config_dir(),
