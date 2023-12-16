@@ -111,11 +111,15 @@ fn main() -> Result<()> {
         .appdata
         .as_ref()
         .map(Dirs::from_path)
-        .unwrap_or_else(Dirs::defauld_xdg)?;
+        .unwrap_or_else(Dirs::default_xdg)?;
 
     std::env::set_var("RUST_BACKTRACE", "1");
     let _guard = setup_logging(&dirs)?;
     debug!("logging setup complete");
+
+    info!("config dir = {}", dirs.config_dir.display());
+    info!("cache dir = {}", dirs.cache_dir.display());
+    info!("data dir = {}", dirs.data_dir.display());
 
     let rt = tokio::runtime::Runtime::new().expect("Unable to create Runtime");
     debug!("tokio runtime created");

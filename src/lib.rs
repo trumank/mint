@@ -23,6 +23,7 @@ use providers::{ModResolution, ModSpecification, ProviderFactory, ReadSeek};
 use state::State;
 use tracing::{info, warn};
 
+#[derive(Debug)]
 pub struct Dirs {
     pub config_dir: PathBuf,
     pub cache_dir: PathBuf,
@@ -30,14 +31,23 @@ pub struct Dirs {
 }
 
 impl Dirs {
-    pub fn defauld_xdg() -> Result<Self> {
+    pub fn default_xdg() -> Result<Self> {
+        let legacy_dirs = ProjectDirs::from("", "", "drg-mod-integration")
+            .context("constructing project dirs")?;
+
         let project_dirs =
             ProjectDirs::from("", "", "mint").context("constructing project dirs")?;
 
         Self::from_paths(
-            project_dirs.config_dir(),
-            project_dirs.cache_dir(),
-            project_dirs.data_dir(),
+            Some(legacy_dirs.config_dir())
+                .filter(|p| p.exists())
+                .unwrap_or(project_dirs.config_dir()),
+            Some(legacy_dirs.cache_dir())
+                .filter(|p| p.exists())
+                .unwrap_or(project_dirs.cache_dir()),
+            Some(legacy_dirs.data_dir())
+                .filter(|p| p.exists())
+                .unwrap_or(project_dirs.data_dir()),
         )
     }
     pub fn from_path<P: AsRef<Path>>(path: P) -> Result<Self> {

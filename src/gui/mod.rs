@@ -27,7 +27,7 @@ use tokio::{
     sync::mpsc::{self, Receiver, Sender},
     task::JoinHandle,
 };
-use tracing::{debug, info, trace};
+use tracing::{debug, trace};
 
 use crate::mod_lints::{LintId, LintReport, SplitAssetPair};
 use crate::Dirs;
@@ -146,8 +146,6 @@ impl App {
     fn new(cc: &eframe::CreationContext, dirs: Dirs, args: Option<Vec<String>>) -> Result<Self> {
         let (tx, rx) = mpsc::channel(10);
         let state = State::init(dirs)?;
-        info!("config dir = {}", state.dirs.config_dir.display());
-        info!("cache dir = {}", state.dirs.cache_dir.display());
 
         Ok(Self {
             default_visuals: cc
@@ -941,6 +939,13 @@ impl App {
                         ui.label("Cache directory:");
                         if ui.link(cache_dir.display().to_string()).clicked() {
                             opener::open(cache_dir).ok();
+                        }
+                        ui.end_row();
+
+                        let data_dir = &self.state.dirs.data_dir;
+                        ui.label("Data directory:");
+                        if ui.link(data_dir.display().to_string()).clicked() {
+                            opener::open(data_dir).ok();
                         }
                         ui.end_row();
 
