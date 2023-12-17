@@ -169,10 +169,12 @@ pub fn integrate<P: AsRef<Path>>(
         kind: IntegrationErrKind::Generic(e),
     })?;
     let mut fsd_pak_reader = BufReader::new(fsd_pak_file);
-    let fsd_pak = repak::PakReader::new_any(&mut fsd_pak_reader).map_err(|e| IntegrationErr {
-        mod_ctxt: None,
-        kind: IntegrationErrKind::Repak(e),
-    })?;
+    let fsd_pak = repak::PakBuilder::new()
+        .reader(&mut fsd_pak_reader)
+        .map_err(|e| IntegrationErr {
+            mod_ctxt: None,
+            kind: IntegrationErrKind::Repak(e),
+        })?;
 
     #[derive(Debug, Default)]
     struct Dir<'a> {
@@ -309,7 +311,7 @@ pub fn integrate<P: AsRef<Path>>(
         })?;
     }
 
-    let mut mod_pak = repak::PakWriter::new(
+    let mut mod_pak = repak::PakBuilder::new().writer(
         BufWriter::new(
             OpenOptions::new()
                 .write(true)
@@ -362,10 +364,13 @@ pub fn integrate<P: AsRef<Path>>(
                 kind: IntegrationErrKind::Generic(e),
             }
         })?;
-        let pak = repak::PakReader::new_any(&mut buf).map_err(|e| IntegrationErr {
-            mod_ctxt: Some(mod_info.clone()),
-            kind: IntegrationErrKind::Repak(e),
-        })?;
+        let pak = repak::PakBuilder::new()
+            .oodle(repak::oodle_loader::decompress)
+            .reader(&mut buf)
+            .map_err(|e| IntegrationErr {
+                mod_ctxt: Some(mod_info.clone()),
+                kind: IntegrationErrKind::Repak(e),
+            })?;
 
         let mount = Path::new(pak.mount_point());
 
@@ -466,10 +471,12 @@ pub fn integrate<P: AsRef<Path>>(
     patch_deferred(modding_tab_path, patch_modding_tab_item)?;
 
     let mut int_pak_reader = Cursor::new(include_bytes!("../assets/integration.pak"));
-    let int_pak = repak::PakReader::new_any(&mut int_pak_reader).map_err(|e| IntegrationErr {
-        mod_ctxt: None,
-        kind: IntegrationErrKind::Repak(e),
-    })?;
+    let int_pak = repak::PakBuilder::new()
+        .reader(&mut int_pak_reader)
+        .map_err(|e| IntegrationErr {
+            mod_ctxt: None,
+            kind: IntegrationErrKind::Repak(e),
+        })?;
 
     let mount = Path::new(int_pak.mount_point());
     let files = int_pak.files();

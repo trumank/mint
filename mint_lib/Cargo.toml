@@ -9,3 +9,4 @@ edition.workspace = true
 [dependencies]
 anyhow.workspace = true
 steamlocate.workspace = true
+repak.workspace = true

@@ -16,6 +16,7 @@ edition = "2021"
 anyhow = { version = "1.0.75", features = ["backtrace"] }
 patternsleuth = { git = "https://github.com/trumank/patternsleuth" }
 steamlocate = "2.0.0-alpha.0"
+repak = { git = "https://github.com/trumank/repak" }
 
 [package]
 name = "mint"
@@ -76,11 +77,8 @@ uasset_utils = { git = "https://github.com/trumank/uasset_utils" }
 unreal_asset = { git = "https://github.com/trumank/unrealmodding", branch = "patches" }
 url = "2.5.0"
 zip = { version = "0.6.6", default-features = false, features = ["aes-crypto", "deflate", "time"] }
+repak = { workspace = true, features = ["oodle", "oodle_loader"] }
 
-[target.'cfg(windows)'.dependencies]
-repak = { git = "https://github.com/trumank/repak", features = ["oodle"] }
-[target.'cfg(not(windows))'.dependencies]
-repak = { git = "https://github.com/trumank/repak" }
 [target.'cfg(target_env = "msvc")'.dependencies]
 hook = { path = "hook", artifact = "cdylib", optional = true, target = "x86_64-pc-windows-msvc"}
 [target.'cfg(not(target_env = "msvc"))'.dependencies]

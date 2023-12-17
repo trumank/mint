@@ -959,6 +959,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "crc"
+version = "3.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "86ec7a15cbe22e59248fc7eadb1907dab5ba09372595da4d73dd805ed4417dfe"
+dependencies = [
+ "crc-catalog",
+]
+
+[[package]]
+name = "crc-catalog"
+version = "2.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "19d374276b40fb8bbdee95aef7c7fa6b5316ec764510eb64b8dd0e2ed0d7e7f5"
+
+[[package]]
 name = "crc32fast"
 version = "1.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2479,6 +2494,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b5e6163cb8c49088c2c36f57875e58ccd8c87c7427f7fbd50ea6710b2f3f2e8f"
 
 [[package]]
+name = "lzma-rs"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "297e814c836ae64db86b36cf2a557ba54368d03f6afcd7d947c266692f71115e"
+dependencies = [
+ "byteorder",
+ "crc",
+]
+
+[[package]]
 name = "mach"
 version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2648,6 +2673,7 @@ name = "mint_lib"
 version = "0.2.10"
 dependencies = [
  "anyhow",
+ "repak",
  "steamlocate",
 ]
 
@@ -3017,6 +3043,23 @@ name = "once_cell"
 version = "1.18.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "dd8b5dd2ae5ed71462c540258bedcb51965123ad7e7ccf4b9a8cafaa4a63576d"
+
+[[package]]
+name = "oodle_loader"
+version = "0.1.8"
+source = "git+https://github.com/trumank/repak#9362db07e2dbf9676dedbd4619caf11d2bcb4a38"
+dependencies = [
+ "anyhow",
+ "hex",
+ "hex-literal",
+ "libc",
+ "libloading 0.7.4",
+ "lzma-rs",
+ "object",
+ "seq-macro",
+ "sha1",
+ "ureq",
+]
 
 [[package]]
 name = "opener"
@@ -3605,19 +3648,15 @@ dependencies = [
 [[package]]
 name = "repak"
 version = "0.1.8"
-source = "git+https://github.com/trumank/repak#d8e82a2d275282dbc22f71d3155337cd020b78f3"
+source = "git+https://github.com/trumank/repak#9362db07e2dbf9676dedbd4619caf11d2bcb4a38"
 dependencies = [
  "aes",
  "byteorder",
  "flate2",
- "hex",
- "hex-literal",
- "libloading 0.7.4",
- "once_cell",
+ "oodle_loader",
  "sha1",
  "strum 0.24.1",
  "thiserror",
- "ureq",
  "zstd",
 ]
 
@@ -3950,6 +3989,12 @@ name = "semver"
 version = "1.0.20"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "836fa6a3e1e547f9a2c4040802ec865b5d85f4014efe00555d7090a3dcaa1090"
+
+[[package]]
+name = "seq-macro"
+version = "0.3.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a3f0bf26fd526d2a95683cd0f87bf103b8539e2ca1ef48ce002d67aad59aa0b4"
 
 [[package]]
 name = "serde"

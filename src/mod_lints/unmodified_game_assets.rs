@@ -29,7 +29,7 @@ impl Lint for UnmodifiedGameAssetsLint {
         // Adapted from
         // <https://github.com/trumank/repak/blob/a006d9ed6f021687a87b8b2ff9d66083d019824c/repak_cli/src/main.rs#L217>.
         let mut reader = BufReader::new(open_file(game_pak_path)?);
-        let pak = repak::PakReader::new_any(&mut reader)?;
+        let pak = repak::PakBuilder::new().reader(&mut reader)?;
 
         let mount_point = PathBuf::from(pak.mount_point());
 
