@@ -1,6 +1,6 @@
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 #[cfg(test)]
@@ -19,8 +19,9 @@ use super::{
     ModResolution, ModResponse, ModSpecification, ModioTags, ProviderCache, RequiredStatus,
 };
 
-lazy_static::lazy_static! {
-    static ref RE_MOD: regex::Regex = regex::Regex::new("^https://mod.io/g/drg/m/(?P<name_id>[^/#]+)(:?#(?P<mod_id>\\d+)(:?/(?P<modfile_id>\\d+))?)?$").unwrap();
+static RE_MOD: OnceLock<regex::Regex> = OnceLock::new();
+fn re_mod() -> &'static regex::Regex {
+    RE_MOD.get_or_init(|| regex::Regex::new("^https://mod.io/g/drg/m/(?P<name_id>[^/#]+)(:?#(?P<mod_id>\\d+)(:?/(?P<modfile_id>\\d+))?)?$").unwrap())
 }
 
 const MODIO_DRG_ID: u32 = 2475;
@@ -30,7 +31,7 @@ inventory::submit! {
     super::ProviderFactory {
         id: MODIO_PROVIDER_ID,
         new: ModioProvider::<modio::Modio>::new_provider,
-        can_provide: |url| RE_MOD.is_match(url),
+        can_provide: |url| re_mod().is_match(url),
         parameters: &[
             super::ProviderParameter {
                 id: "oauth",
@@ -385,7 +386,7 @@ impl<M: DrgModio + Send + Sync> ModProvider for ModioProvider<M> {
         }
 
         let url = &spec.url;
-        let captures = RE_MOD.captures(url).context("invalid modio URL {url}")?;
+        let captures = re_mod().captures(url).context("invalid modio URL {url}")?;
 
         if let (Some(mod_id), Some(_modfile_id)) =
             (captures.name("mod_id"), captures.name("modfile_id"))
@@ -574,7 +575,7 @@ impl<M: DrgModio + Send + Sync> ModProvider for ModioProvider<M> {
         tx: Option<Sender<FetchProgress>>,
     ) -> Result<PathBuf> {
         let url = &res.url;
-        let captures = RE_MOD
+        let captures = re_mod()
             .captures(&res.url)
             .with_context(|| format!("invalid modio URL {url}"))?;
 
@@ -753,7 +754,7 @@ impl<M: DrgModio + Send + Sync> ModProvider for ModioProvider<M> {
 
     fn get_mod_info(&self, spec: &ModSpecification, cache: ProviderCache) -> Option<ModInfo> {
         let url = &spec.url;
-        let captures = RE_MOD.captures(url)?;
+        let captures = re_mod().captures(url)?;
 
         let cache = cache.read().unwrap();
         let prov = cache.get::<ModioCache>(MODIO_PROVIDER_ID)?;
@@ -798,13 +799,13 @@ impl<M: DrgModio + Send + Sync> ModProvider for ModioProvider<M> {
 
     fn is_pinned(&self, spec: &ModSpecification, _cache: ProviderCache) -> bool {
         let url = &spec.url;
-        let captures = RE_MOD.captures(url).unwrap();
+        let captures = re_mod().captures(url).unwrap();
 
         captures.name("modfile_id").is_some()
     }
     fn get_version_name(&self, spec: &ModSpecification, cache: ProviderCache) -> Option<String> {
         let url = &spec.url;
-        let captures = RE_MOD.captures(url).unwrap();
+        let captures = re_mod().captures(url).unwrap();
 
         let cache = cache.read().unwrap();
         let prov = cache.get::<ModioCache>(MODIO_PROVIDER_ID);

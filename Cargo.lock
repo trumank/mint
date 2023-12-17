@@ -2634,7 +2634,6 @@ dependencies = [
  "image",
  "indexmap 2.1.0",
  "inventory",
- "lazy_static",
  "mint_lib",
  "mockall",
  "modio",

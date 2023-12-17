@@ -47,7 +47,6 @@ hex = "0.4.3"
 image = { version = "0.24.7", default-features = false, features = ["png"] }
 indexmap = { version = "2.1.0", features = ["serde"] }
 inventory = "0.3.13"
-lazy_static = "1.4.0"
 mint_lib = { path = "mint_lib" }
 modio = { git = "https://github.com/trumank/modio-rs.git", branch = "dev", default-features = false, features = ["rustls-tls"] }
 obake = { version = "1.0.5", features = ["serde"] }
