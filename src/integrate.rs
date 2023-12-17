@@ -5,8 +5,10 @@ use std::io::{self, BufReader, BufWriter, Cursor, ErrorKind, Read, Seek};
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
+use mint_lib::mod_info::{ApprovalStatus, Meta, MetaMod};
 use mint_lib::DRGInstallation;
 use repak::PakWriter;
+use serde::Deserialize;
 use tracing::info;
 use uasset_utils::splice::{
     extract_tracked_statements, inject_tracked_statements, walk, AssetVersion, TrackedStatement,
@@ -71,12 +73,12 @@ pub fn uninstall<P: AsRef<Path>>(path_pak: P, modio_mods: HashSet<u32>) -> Resul
 
 #[tracing::instrument(level = "debug")]
 fn uninstall_modio(installation: &DRGInstallation, modio_mods: HashSet<u32>) -> Result<()> {
-    #[derive(Debug, serde::Deserialize)]
+    #[derive(Debug, Deserialize)]
     struct ModioState {
         #[serde(rename = "Mods")]
         mods: Vec<ModioMod>,
     }
-    #[derive(Debug, serde::Deserialize)]
+    #[derive(Debug, Deserialize)]
     struct ModioMod {
         #[serde(rename = "ID")]
         id: u32,
@@ -268,6 +270,12 @@ pub fn integrate<P: AsRef<Path>>(
         )
     }
 
+    let mut other_deferred = vec![];
+    let mut deferred = |path| {
+        other_deferred.push(path);
+        path
+    };
+
     let pcb_path = "FSD/Content/Game/BP_PlayerControllerBase";
     let patch_paths = [
         "FSD/Content/Game/BP_GameInstance",
@@ -277,14 +285,15 @@ pub fn integrate<P: AsRef<Path>>(
         "FSD/Content/UI/Menu_ServerList/_MENU_ServerList",
         "FSD/Content/UI/Menu_ServerList/WND_JoiningModded",
     ];
-    let escape_menu_path = "FSD/Content/UI/Menu_EscapeMenu/MENU_EscapeMenu";
-    let modding_tab_path = "FSD/Content/UI/Menu_EscapeMenu/Modding/MENU_Modding";
+    let escape_menu_path = deferred("FSD/Content/UI/Menu_EscapeMenu/MENU_EscapeMenu");
+    let modding_tab_path = deferred("FSD/Content/UI/Menu_EscapeMenu/Modding/MENU_Modding");
+    let server_list_entry_path = deferred("FSD/Content/UI/Menu_ServerList/ITM_ServerList_Entry");
 
     let mut deferred_assets: HashMap<&str, RawAsset> = HashMap::from_iter(
         [pcb_path]
             .iter()
             .chain(patch_paths.iter())
-            .chain([escape_menu_path, modding_tab_path].iter())
+            .chain(other_deferred.iter())
             .map(|path| (*path, RawAsset::default())),
     );
 
@@ -469,6 +478,7 @@ pub fn integrate<P: AsRef<Path>>(
     }
     patch_deferred(escape_menu_path, patch_modding_tab)?;
     patch_deferred(modding_tab_path, patch_modding_tab_item)?;
+    patch_deferred(server_list_entry_path, patch_server_list_entry)?;
 
     let mut int_pak_reader = Cursor::new(include_bytes!("../assets/integration.pak"));
     let int_pak = repak::PakBuilder::new()
@@ -568,18 +578,40 @@ pub fn integrate<P: AsRef<Path>>(
         kind: IntegrationErrKind::Generic(e.into()),
     })?;
 
-    write_file(&mut mod_pak, &mut int_out.0.into_inner(), int_path.0).map_err(|e| {
-        IntegrationErr {
+    write_file(&mut mod_pak, &int_out.0.into_inner(), int_path.0).map_err(|e| IntegrationErr {
+        mod_ctxt: None,
+        kind: IntegrationErrKind::Generic(e),
+    })?;
+    write_file(&mut mod_pak, &int_out.1.into_inner(), int_path.1).map_err(|e| IntegrationErr {
+        mod_ctxt: None,
+        kind: IntegrationErrKind::Generic(e),
+    })?;
+
+    {
+        let meta = Meta {
+            version: env!("CARGO_PKG_VERSION").into(),
+            mods: mods
+                .iter()
+                .map(|(info, _)| MetaMod {
+                    name: info.name.clone(),
+                    approval: info
+                        .modio_tags
+                        .as_ref()
+                        .map(|t| t.approval_status)
+                        .unwrap_or(ApprovalStatus::Sandbox),
+                })
+                .collect(),
+        };
+        write_file(
+            &mut mod_pak,
+            &serde_json::to_vec(&meta).unwrap(),
+            "meta.json",
+        )
+        .map_err(|e| IntegrationErr {
             mod_ctxt: None,
             kind: IntegrationErrKind::Generic(e),
-        }
-    })?;
-    write_file(&mut mod_pak, &mut int_out.1.into_inner(), int_path.1).map_err(|e| {
-        IntegrationErr {
-            mod_ctxt: None,
-            kind: IntegrationErrKind::Generic(e),
-        }
-    })?;
+        })?;
+    }
 
     mod_pak.write_index().map_err(|e| IntegrationErr {
         mod_ctxt: None,
@@ -1240,6 +1272,85 @@ fn patch_modding_tab_item<C: Seek + Read>(asset: &mut Asset<C>) -> Result<()> {
     };
 
     asset.imports[(-package_index.index - 1) as usize].object_name = new_package;
+
+    Ok(())
+}
+
+fn patch_server_list_entry<C: Seek + Read>(asset: &mut Asset<C>) -> Result<()> {
+    let get_mods_installed = asset
+        .imports
+        .iter()
+        .enumerate()
+        .find(|(_, i)| {
+            i.class_package.get_content(|s| s == "/Script/CoreUObject")
+                && i.class_name.get_content(|s| s == "Function")
+                && i.object_name.get_content(|s| s == "FSDGetModsInstalled")
+        })
+        .map(|(pi, _)| PackageIndex::from_import(pi as i32).unwrap());
+
+    let ver = AssetVersion::new_from(asset);
+    let mut statements = extract_tracked_statements(asset, ver, &None);
+
+    for (_pi, statements) in statements.iter_mut() {
+        for statement in statements {
+            walk(&mut statement.ex, &|ex| {
+                if let KismetExpression::ExCallMath(ex) = ex {
+                    if Some(ex.stack_node) == get_mods_installed && ex.parameters.len() == 2 {
+                        ex.parameters[1] = ExFalse {
+                            token: EExprToken::ExFalse,
+                        }
+                        .into();
+                        info!("patched server list entry");
+                    }
+                }
+            });
+        }
+    }
+    inject_tracked_statements(asset, ver, statements);
+
+    {
+        // swap out tooltip with rebuilt version
+        let itm_tab_modding = get_import(
+            asset,
+            vec![
+                Import::new(
+                    "/Script/CoreUObject",
+                    "Package",
+                    "/Game/UI/Menu_ServerList/TOOLTIP_ServerEntry_Mods",
+                ),
+                Import::new(
+                    "/Script/UMG",
+                    "WidgetBlueprintGeneratedClass",
+                    "TOOLTIP_ServerEntry_Mods_C",
+                ),
+            ],
+        );
+        let itm_tab_modding_cdo = get_import(
+            asset,
+            vec![
+                Import::new(
+                    "/Script/CoreUObject",
+                    "Package",
+                    "/Game/UI/Menu_ServerList/TOOLTIP_ServerEntry_Mods",
+                ),
+                Import::new(
+                    "/Game/UI/Menu_ServerList/TOOLTIP_ServerEntry_Mods",
+                    "TOOLTIP_ServerEntry_Mods_C",
+                    "Default__TOOLTIP_ServerEntry_Mods_C",
+                ),
+            ],
+        );
+        let new_package = asset.add_fname(
+            "/Game/_AssemblyStorm/ModIntegration/RebuiltAssets/TOOLTIP_ServerEntry_Mods",
+        );
+        asset.imports[(-itm_tab_modding_cdo.index - 1) as usize].class_package =
+            new_package.clone();
+        let package_index = {
+            let obj = &mut asset.imports[(-itm_tab_modding.index - 1) as usize];
+            obj.outer_index
+        };
+        asset.imports[(-package_index.index - 1) as usize].object_name = new_package;
+    }
 
     Ok(())
 }

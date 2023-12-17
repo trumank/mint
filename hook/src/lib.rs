@@ -1,10 +1,11 @@
 use std::{
     ffi::{c_void, OsString},
+    io::BufReader,
     path::{Path, PathBuf},
 };
 
 use anyhow::{Context, Result};
-use mint_lib::DRGInstallationType;
+use mint_lib::{mod_info::Meta, DRGInstallationType};
 use retour::static_detour;
 use windows::Win32::{
     Foundation::HMODULE,
@@ -60,9 +61,12 @@ unsafe fn patch() -> Result<()> {
         .and_then(Path::parent)
         .map(|p| p.join("Content/Paks/mods_P.pak"))
         .context("could not determine pak path")?;
-    if !pak_path.exists() {
-        return Ok(());
-    }
+
+    let mut pak_reader = BufReader::new(std::fs::File::open(pak_path)?);
+    let pak = repak::PakBuilder::new().reader(&mut pak_reader)?;
+
+    let meta_buf = pak.get("meta.json", &mut pak_reader)?;
+    let meta: Meta = serde_json::from_slice(&meta_buf)?;
 
     let installation_type = DRGInstallationType::from_exe_path()?;
 
@@ -81,6 +85,47 @@ unsafe fn patch() -> Result<()> {
             .initialize(
                 std::mem::transmute(server_name.get_server_name.0),
                 get_server_name_detour,
+            )?
+            .enable()?;
+    }
+
+    if let Ok(server_mods) = resolution.server_mods {
+        let mods_fname = server_mods.mods_fname.0;
+        let set_fstring = server_mods.set_fstring.0;
+        USessionHandlingFSDFillSessionSetting
+            .initialize(
+                std::mem::transmute(server_mods.fill_session_setting.0),
+                move |world, game_settings, full_server| {
+                    USessionHandlingFSDFillSessionSetting.call(world, game_settings, full_server);
+
+                    #[derive(serde::Serialize)]
+                    struct Wrapper {
+                        name: String,
+                        version: String,
+                        category: i32,
+                    }
+
+                    let s = serde_json::to_string(&vec![Wrapper {
+                        name: meta.to_server_list_string(),
+                        version: "mint".into(),
+                        category: 0,
+                    }])
+                    .unwrap();
+
+                    let buf = s.encode_utf16().chain([0]).collect::<Vec<_>>();
+                    let s = FString::from_slice(&buf);
+
+                    type Fn = unsafe extern "system" fn(
+                        *const c_void,
+                        *const c_void,
+                        *const FString,
+                        u32,
+                    );
+
+                    let f: Fn = std::mem::transmute(set_fstring);
+
+                    f(game_settings, *(mods_fname as *const *const c_void), &s, 3);
+                },
             )?
             .enable()?;
     }
@@ -217,6 +262,8 @@ static_detour! {
     static SaveGameToSlot: unsafe extern "system" fn(*const USaveGame, *const FString, i32) -> bool;
     static LoadGameFromSlot: unsafe extern "system" fn(*const FString, i32) -> *const USaveGame;
     static DoesSaveGameExist: unsafe extern "system" fn(*const FString, i32) -> bool;
+    static USessionHandlingFSDFillSessionSetting: unsafe extern "system" fn(*const c_void, *mut c_void, bool);
+    static FOnlineSessionSettingsSetFString: unsafe extern "system" fn(*const c_void, *const c_void, *const FString, u32);
 }
 
 #[allow(non_upper_case_globals)]

@@ -2,6 +2,7 @@ use patternsleuth::resolvers::futures::future::join_all;
 use patternsleuth::resolvers::unreal::*;
 use patternsleuth::resolvers::*;
 use patternsleuth::scanner::Pattern;
+use patternsleuth::MemoryAccessorTrait;
 
 #[derive(Debug)]
 pub struct GetServerName(pub usize);
@@ -20,6 +21,49 @@ impl_resolver_singleton!(GetServerName, |ctx| async {
             .next()
             .context("expected at least one")?,
     ))
+});
+
+#[derive(Debug)]
+pub struct FOnlineSessionSettingsSetFString(pub usize);
+impl_resolver_singleton!(FOnlineSessionSettingsSetFString, |ctx| async {
+    let patterns = ["48 89 5C 24 ?? 48 89 54 24 ?? 55 56 57 48 83 EC 40 49 8B F8 48 8D 69"];
+    let res = join_all(patterns.iter().map(|p| ctx.scan(Pattern::new(p).unwrap()))).await;
+    Ok(Self(ensure_one(res.into_iter().flatten())?))
+});
+
+#[derive(Debug)]
+pub struct USessionHandlingFSDFillSessionSettting(pub usize);
+impl_resolver_singleton!(USessionHandlingFSDFillSessionSettting, |ctx| async {
+    let patterns = ["48 89 5C 24 ?? 48 89 74 24 ?? 48 89 7C 24 ?? 55 41 54 41 55 41 56 41 57 48 8B EC 48 83 EC 50 48 8B B9"];
+    let res = join_all(patterns.iter().map(|p| ctx.scan(Pattern::new(p).unwrap()))).await;
+    Ok(Self(ensure_one(res.into_iter().flatten())?))
+});
+
+#[derive(Debug)]
+pub struct ModsFName(pub usize);
+impl_resolver_singleton!(ModsFName, |ctx| async {
+    let strings = ctx
+        .scan(
+            Pattern::from_bytes("Mods\0".encode_utf16().flat_map(u16::to_le_bytes).collect())
+                .unwrap(),
+        )
+        .await;
+
+    let refs = join_all(strings.iter().map(|s| {
+        ctx.scan(
+            Pattern::new(format!(
+                "41 b8 01 00 00 00 48 8d 15 X0x{s:X} 48 8d 0d | ?? ?? ?? ?? e9 ?? ?? ?? ??"
+            ))
+            .unwrap(),
+        )
+    }))
+    .await;
+
+    Ok(Self(try_ensure_one(
+        refs.iter()
+            .flatten()
+            .map(|a| Ok(ctx.image().memory.rip4(*a)?)),
+    )?))
 });
 
 #[derive(Debug)]
@@ -55,6 +99,15 @@ impl_resolver_singleton!(FMemoryFree, |ctx| async {
 
 impl_try_collector! {
     #[derive(Debug)]
+    pub struct ServerModsResolution {
+        pub set_fstring: FOnlineSessionSettingsSetFString,
+        pub fill_session_setting: USessionHandlingFSDFillSessionSettting,
+        pub mods_fname: ModsFName,
+    }
+}
+
+impl_try_collector! {
+    #[derive(Debug)]
     pub struct ServerNameResolution {
         pub fmemory_free: FMemoryFree,
         pub resize16: Resize16,
@@ -80,6 +133,7 @@ impl_collector! {
         pub fmemory_free: FMemoryFree,
         pub disable: Disable,
         pub server_name: ServerNameResolution,
+        pub server_mods: ServerModsResolution,
         pub save_game: SaveGameResolution,
     }
 }

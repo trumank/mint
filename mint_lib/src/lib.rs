@@ -1,3 +1,5 @@
+pub mod mod_info;
+
 use std::path::{Path, PathBuf};
 
 use anyhow::{bail, Context, Result};

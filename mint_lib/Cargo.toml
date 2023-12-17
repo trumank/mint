@@ -10,3 +10,6 @@ edition.workspace = true
 anyhow.workspace = true
 steamlocate.workspace = true
 repak.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+itertools.workspace = true
