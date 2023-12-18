@@ -90,6 +90,11 @@ unsafe fn patch() -> Result<()> {
     }
 
     if let Ok(server_mods) = resolution.server_mods {
+        let patch_addr = server_mods.semicolon_h_replace.0 as *mut u8;
+        patch_mem(patch_addr.add(2), [0xC3])?;
+        patch_mem(patch_addr.add(7), [0x0F, 0x1F, 0x44, 0x00, 0x00])?;
+        patch_mem(patch_addr.add(102), [0xEB])?;
+
         let mods_fname = server_mods.mods_fname.0;
         let set_fstring = server_mods.set_fstring.0;
         USessionHandlingFSDFillSessionSetting
@@ -263,7 +268,6 @@ static_detour! {
     static LoadGameFromSlot: unsafe extern "system" fn(*const FString, i32) -> *const USaveGame;
     static DoesSaveGameExist: unsafe extern "system" fn(*const FString, i32) -> bool;
     static USessionHandlingFSDFillSessionSetting: unsafe extern "system" fn(*const c_void, *mut c_void, bool);
-    static FOnlineSessionSettingsSetFString: unsafe extern "system" fn(*const c_void, *const c_void, *const FString, u32);
 }
 
 #[allow(non_upper_case_globals)]

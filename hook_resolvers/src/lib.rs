@@ -67,6 +67,14 @@ impl_resolver_singleton!(ModsFName, |ctx| async {
 });
 
 #[derive(Debug)]
+pub struct SemicolonHReplace(pub usize);
+impl_resolver_singleton!(SemicolonHReplace, |ctx| async {
+    let patterns = ["48 8B CB 48 8D 55 E0 E8 ?? ?? ?? ?? 4D 63 FE 48 8B F0 45 8D 77 01 44 89 75 B8 45 3B F4 7E 18 41 8B D7 48 8D 4D B0 E8 ?? ?? ?? ?? 44 8B 65 BC 44 8B 75 B8 4C 8B 6D B0 33 D2 49 8B CF 48 C1 E1 04 49 03 CD 48 89 11 48 8B 06 48 89 01 48 89 16 8B 46 08 89 41 08 8B 46 0C 89 41 0C 48 89 56 08 48 8B 4D E0 48 85 C9 74 05 E8"];
+    let res = join_all(patterns.iter().map(|p| ctx.scan(Pattern::new(p).unwrap()))).await;
+    Ok(Self(ensure_one(res.into_iter().flatten())?))
+});
+
+#[derive(Debug)]
 pub struct Disable(pub usize);
 impl_resolver_singleton!(Disable, |ctx| async {
     let patterns = ["4C 8B B4 24 48 01 00 00 0F 84"];
@@ -103,6 +111,7 @@ impl_try_collector! {
         pub set_fstring: FOnlineSessionSettingsSetFString,
         pub fill_session_setting: USessionHandlingFSDFillSessionSettting,
         pub mods_fname: ModsFName,
+        pub semicolon_h_replace: SemicolonHReplace,
     }
 }
 
