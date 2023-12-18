@@ -215,6 +215,7 @@ pub fn integrate<P: AsRef<Path>>(
                 Some(Cursor::new(self.uexp.as_ref().unwrap())),
                 unreal_asset::engine_version::EngineVersion::VER_UE4_27,
                 None,
+                false,
             )?)
         }
     }
@@ -548,6 +549,7 @@ pub fn integrate<P: AsRef<Path>>(
             )),
             unreal_asset::engine_version::EngineVersion::VER_UE4_27,
             None,
+            false,
         )
         .map_err(|e| IntegrationErr {
             mod_ctxt: None,

@@ -71,10 +71,17 @@ impl DRGInstallation {
     /// TODO locate Xbox version
     pub fn find() -> Option<Self> {
         steamlocate::SteamDir::locate()
-            .and_then(|mut steamdir| {
+            .ok()
+            .and_then(|steamdir| {
                 steamdir
-                    .app(&548430)
-                    .map(|a| a.path.join("FSD/Content/Paks/FSD-WindowsNoEditor.pak"))
+                    .find_app(548430)
+                    .ok()
+                    .flatten()
+                    .map(|(app, library)| {
+                        library
+                            .resolve_app_dir(&app)
+                            .join("FSD/Content/Paks/FSD-WindowsNoEditor.pak")
+                    })
             })
             .and_then(|path| Self::from_pak_path(path).ok())
     }
@@ -114,11 +121,13 @@ impl DRGInstallation {
                 }
                 #[cfg(target_os = "linux")]
                 {
-                    steamlocate::SteamDir::locate().map(|s| {
-                        s.path.join(
-                            "steamapps/compatdata/548430/pfx/drive_c/users/Public/mod.io/2475",
-                        )
-                    })
+                    steamlocate::SteamDir::locate()
+                        .map(|s| {
+                            s.path().join(
+                                "steamapps/compatdata/548430/pfx/drive_c/users/Public/mod.io/2475",
+                            )
+                        })
+                        .ok()
                 }
             }
             DRGInstallationType::Xbox => None,
