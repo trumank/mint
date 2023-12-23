@@ -135,6 +135,43 @@ unsafe fn patch() -> Result<()> {
             .enable()?;
     }
 
+    if let Ok(gas_fix) = resolution.gas_fix {
+        #[repr(C)]
+        struct UObjectTemperatureComponent {
+            padding: [u8; 0xc8],
+            on_start_burning: u64,
+            unknown: i64,
+            temperature_change_scale: f32,
+            burn_temperature: f32,
+            douse_fire_temperature: f32,
+            cooling_rate: f32,
+            is_heatsource_when_on_fire: bool,
+            on_fire_heat_range: f32,
+            timer_handle: u64,
+            is_object_on_fire: bool,
+            current_temperature: f32,
+        }
+
+        let fn_process_multicast_delegate: unsafe extern "system" fn(*mut c_void, *mut c_void) =
+            std::mem::transmute(gas_fix.process_multicast_delegate.0);
+
+        UObjectTemperatureComponentTimerCallback.initialize(
+            std::mem::transmute(gas_fix.timer_callback.0),
+            move |this| {
+                let obj = &*(this as *const UObjectTemperatureComponent);
+                let on_fire = obj.is_object_on_fire;
+                UObjectTemperatureComponentTimerCallback.call(this);
+                if !on_fire && obj.is_object_on_fire {
+                    fn_process_multicast_delegate(
+                        std::ptr::addr_of!(obj.on_start_burning) as *mut c_void,
+                        std::ptr::null_mut(),
+                    );
+                }
+            },
+        )?;
+        UObjectTemperatureComponentTimerCallback.enable()?;
+    }
+
     match installation_type {
         DRGInstallationType::Steam => {
             if let Ok(address) = resolution.disable {
@@ -268,6 +305,7 @@ static_detour! {
     static LoadGameFromSlot: unsafe extern "system" fn(*const FString, i32) -> *const USaveGame;
     static DoesSaveGameExist: unsafe extern "system" fn(*const FString, i32) -> bool;
     static USessionHandlingFSDFillSessionSetting: unsafe extern "system" fn(*const c_void, *mut c_void, bool);
+    static UObjectTemperatureComponentTimerCallback: unsafe extern "system" fn(*mut c_void);
 }
 
 #[allow(non_upper_case_globals)]
