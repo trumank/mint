@@ -294,7 +294,7 @@ pub(crate) fn get_pak_from_data(mut data: Box<dyn ReadSeek>) -> Result<Box<dyn R
 
 pub(crate) enum PakOrNotPak {
     Pak(Box<dyn ReadSeek>),
-    NotPak(Box<dyn ReadSeek>),
+    NotPak,
 }
 
 pub(crate) enum GetAllFilesFromDataError {
@@ -331,10 +331,7 @@ pub(crate) fn lint_get_all_files_from_data(
                         let mut buf = vec![];
                         file.read_to_end(&mut buf)
                             .map_err(|e| GetAllFilesFromDataError::Other(e.into()))?;
-                        files.push((
-                            p.to_path_buf(),
-                            PakOrNotPak::NotPak(Box::new(Cursor::new(buf))),
-                        ));
+                        files.push((p.to_path_buf(), PakOrNotPak::NotPak));
                     }
                 }
             }

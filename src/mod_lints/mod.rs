@@ -85,7 +85,7 @@ impl LintCtxt {
                 .into_iter()
                 .filter_map(|(_, pak_or_non_pak)| match pak_or_non_pak {
                     PakOrNotPak::Pak(individual_pak_reader) => Some(individual_pak_reader),
-                    PakOrNotPak::NotPak(_) => None,
+                    PakOrNotPak::NotPak => None,
                 })
                 .collect::<Vec<_>>();
 
