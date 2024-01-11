@@ -321,22 +321,24 @@ pub fn integrate<P: AsRef<Path>>(
         })?;
     }
 
-    let mut mod_pak = repak::PakBuilder::new().writer(
-        BufWriter::new(
-            OpenOptions::new()
-                .write(true)
-                .create(true)
-                .truncate(true)
-                .open(&path_mod_pak)
-                .map_err(|e| IntegrationErr {
-                    mod_ctxt: None,
-                    kind: IntegrationErrKind::Generic(e.into()),
-                })?,
-        ),
-        repak::Version::V11,
-        "../../../".to_string(),
-        None,
-    );
+    let mut mod_pak = repak::PakBuilder::new()
+        .compression([repak::Compression::Zlib])
+        .writer(
+            BufWriter::new(
+                OpenOptions::new()
+                    .write(true)
+                    .create(true)
+                    .truncate(true)
+                    .open(&path_mod_pak)
+                    .map_err(|e| IntegrationErr {
+                        mod_ctxt: None,
+                        kind: IntegrationErrKind::Generic(e.into()),
+                    })?,
+            ),
+            repak::Version::V11,
+            "../../../".to_string(),
+            None,
+        );
 
     #[cfg(feature = "hook")]
     {
