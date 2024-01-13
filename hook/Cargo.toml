@@ -27,3 +27,5 @@ windows = { version = "0.52.0", features = [
   "Win32_System_Threading",
 ] }
 mint_lib = { path = "../mint_lib" }
+bitflags = "2.4.1"
+widestring = "1.0.2"

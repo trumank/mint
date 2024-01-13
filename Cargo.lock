@@ -2198,6 +2198,7 @@ name = "hook"
 version = "0.2.10"
 dependencies = [
  "anyhow",
+ "bitflags 2.4.1",
  "hook_resolvers",
  "mint_lib",
  "patternsleuth",
@@ -2206,6 +2207,7 @@ dependencies = [
  "retour",
  "serde",
  "serde_json",
+ "widestring",
  "windows 0.52.0",
 ]
 
@@ -3295,14 +3297,14 @@ checksum = "1e91099d4268b0e11973f036e885d652fb0b21fedcf69738c627f94db6a44f42"
 [[package]]
 name = "patternsleuth"
 version = "0.1.0"
-source = "git+https://github.com/trumank/patternsleuth#4b99b771e2a55ecafa6a0c3837679a69f8ce128c"
+source = "git+https://github.com/trumank/patternsleuth#651c3c6a6365add1b1dc1844ebe4f03940503258"
 dependencies = [
  "anyhow",
  "futures",
  "futures-scopes",
  "iced-x86",
  "inventory",
- "itertools 0.11.0",
+ "itertools 0.12.0",
  "libc",
  "memchr",
  "object",
@@ -3315,7 +3317,7 @@ dependencies = [
 [[package]]
 name = "patternsleuth_scanner"
 version = "0.1.0"
-source = "git+https://github.com/trumank/patternsleuth#4b99b771e2a55ecafa6a0c3837679a69f8ce128c"
+source = "git+https://github.com/trumank/patternsleuth#651c3c6a6365add1b1dc1844ebe4f03940503258"
 dependencies = [
  "anyhow",
  "memchr",
@@ -5405,6 +5407,12 @@ name = "webpki-roots"
 version = "0.25.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1778a42e8b3b90bff8d0f5032bf22250792889a5cdc752aa0020c84abe3aaf10"
+
+[[package]]
+name = "widestring"
+version = "1.0.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "653f141f39ec16bba3c5abe400a0c60da7468261cc2cbf36805022876bc721a8"
 
 [[package]]
 name = "winapi"
