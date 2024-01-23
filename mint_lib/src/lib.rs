@@ -129,6 +129,10 @@ impl DRGInstallation {
                         })
                         .ok()
                 }
+                #[cfg(not(any(target_os = "windows", target_os = "linux")))]
+                {
+                    unimplemented!("unsupported platform")
+                }
             }
             DRGInstallationType::Xbox => None,
         }
