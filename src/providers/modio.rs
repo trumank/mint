@@ -239,13 +239,23 @@ impl DrgModio for modio::Modio {
         use modio::filter::NotEq;
         use modio::mods::filters::Id;
 
-        let files = self
+        let files = match self
             .game(MODIO_DRG_ID)
             .mod_(id)
             .files()
             .search(Id::ne(0))
             .collect()
-            .await?;
+            .await
+        {
+            Ok(files) => files,
+            // See <https://docs.mod.io/#response-codes>.
+            Err(modio_err) if matches!(modio_err.error_ref(), Some(15024)) => {
+                return Err(anyhow::Error::new(modio_err)
+                    .context(format!("The mod with id {} may have been deleted", id)));
+            }
+            Err(e) => return Err(e.into()),
+        };
+
         let mod_ = self.game(MODIO_DRG_ID).mod_(id).get().await?;
 
         Ok(ModioMod::new(mod_, files))
