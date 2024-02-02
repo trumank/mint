@@ -766,8 +766,12 @@ impl<M: DrgModio + Send + Sync> ModProvider for ModioProvider<M> {
         } else {
             None
         }?;
-
         let mod_ = prov.mods.get(&mod_id)?;
+        let modfile_id = if let Some(modfile_id) = captures.name("modfile_id") {
+            modfile_id.as_str().parse::<u32>().ok()
+        } else {
+            mod_.modfiles.last().map(|f| f.id)
+        }?;
 
         let deps = prov
             .dependencies
@@ -789,7 +793,11 @@ impl<M: DrgModio + Send + Sync> ModProvider for ModioProvider<M> {
                 .iter()
                 .map(|f| format_spec(&mod_.name_id, mod_id, Some(f.id)))
                 .collect(),
-            resolution: ModResolution::resolvable(url.to_owned()),
+            resolution: ModResolution::resolvable(
+                format_spec(&mod_.name_id, mod_id, Some(modfile_id))
+                    .url
+                    .into(),
+            ),
             suggested_require: mod_.tags.contains("RequiredByAll"),
             suggested_dependencies: deps,
             modio_tags: Some(process_modio_tags(&mod_.tags)),
