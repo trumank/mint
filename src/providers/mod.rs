@@ -218,7 +218,7 @@ impl ModStore {
 
     pub async fn fetch_mods(
         &self,
-        mods: &[&ModResolution],
+        mods: &[ModResolution],
         update: bool,
         tx: Option<Sender<FetchProgress>>,
     ) -> Result<Vec<PathBuf>> {
@@ -258,7 +258,7 @@ impl ModStore {
         update: bool,
         tx: Option<Sender<FetchProgress>>,
     ) -> Result<PathBuf> {
-        self.get_provider(&res.url)?
+        self.get_provider(&res.url.0)?
             .fetch_mod(
                 res,
                 update,

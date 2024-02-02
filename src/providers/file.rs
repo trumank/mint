@@ -52,7 +52,7 @@ impl ModProvider for FileProvider {
             spec: spec.clone(),
             versions: vec![],
             resolution: ModResolution::unresolvable(
-                path.to_string_lossy().to_string(),
+                path.to_string_lossy().as_ref().into(),
                 path.file_name()
                     .map(|p| p.to_string_lossy().to_string())
                     .unwrap_or_else(|| "unknown".to_string()),
@@ -79,7 +79,7 @@ impl ModProvider for FileProvider {
             .await
             .unwrap();
         }
-        Ok(PathBuf::from(&res.url))
+        Ok(PathBuf::from(&res.url.0))
     }
 
     async fn update_cache(&self, _cache: ProviderCache) -> Result<()> {
@@ -102,7 +102,7 @@ impl ModProvider for FileProvider {
             spec: spec.clone(),
             versions: vec![],
             resolution: ModResolution::unresolvable(
-                path.to_string_lossy().to_string(),
+                path.to_string_lossy().as_ref().into(),
                 path.file_name()
                     .map(|p| p.to_string_lossy().to_string())
                     .unwrap_or_else(|| "unknown".to_string()),

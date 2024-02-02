@@ -112,7 +112,7 @@ pub async fn resolve_unordered_and_integrate<P: AsRef<Path>>(
 
     let mods_set = mod_specs
         .iter()
-        .flat_map(|m| [&mods[m].spec.url, &mods[m].resolution.url])
+        .flat_map(|m| [&mods[m].spec.url, &mods[m].resolution.url.0])
         .collect::<HashSet<_>>();
 
     // TODO need more rebust way of detecting whether dependencies are missing
@@ -138,7 +138,7 @@ pub async fn resolve_unordered_and_integrate<P: AsRef<Path>>(
         .collect::<Vec<_>>();
     let urls = to_integrate
         .iter()
-        .map(|m| &m.resolution)
+        .map(|m| m.resolution.clone())
         .collect::<Vec<_>>();
 
     info!("fetching mods...");
@@ -166,7 +166,7 @@ async fn resolve_into_urls<'b>(
 
     let mods_set = mod_specs
         .iter()
-        .flat_map(|m| [&mods[m].spec.url, &mods[m].resolution.url])
+        .flat_map(|m| [&mods[m].spec.url, &mods[m].resolution.url.0])
         .collect::<HashSet<_>>();
 
     // TODO need more rebust way of detecting whether dependencies are missing
@@ -200,7 +200,6 @@ pub async fn resolve_ordered(
     mod_specs: &[ModSpecification],
 ) -> Result<Vec<PathBuf>> {
     let urls = resolve_into_urls(state, mod_specs).await?;
-    let urls = urls.iter().collect::<Vec<_>>();
     state.store.fetch_mods(&urls, false, None).await
 }
 

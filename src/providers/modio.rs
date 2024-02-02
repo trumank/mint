@@ -386,7 +386,9 @@ impl<M: DrgModio + Send + Sync> ModProvider for ModioProvider<M> {
         }
 
         let url = &spec.url;
-        let captures = re_mod().captures(url).context("invalid modio URL {url}")?;
+        let captures = re_mod()
+            .captures(url)
+            .context("invalid modio URL {url:?}")?;
 
         if let (Some(mod_id), Some(_modfile_id)) =
             (captures.name("mod_id"), captures.name("modfile_id"))
@@ -478,7 +480,7 @@ impl<M: DrgModio + Send + Sync> ModProvider for ModioProvider<M> {
                     .into_iter()
                     .map(|f| format_spec(&mod_.name_id, mod_id, Some(f.id)))
                     .collect(),
-                resolution: ModResolution::resolvable(url.to_owned()),
+                resolution: ModResolution::resolvable(url.as_str().into()),
                 suggested_require: mod_.tags.contains("RequiredByAll"),
                 suggested_dependencies: deps,
                 modio_tags: Some(process_modio_tags(&mod_.tags)),
@@ -576,8 +578,8 @@ impl<M: DrgModio + Send + Sync> ModProvider for ModioProvider<M> {
     ) -> Result<PathBuf> {
         let url = &res.url;
         let captures = re_mod()
-            .captures(&res.url)
-            .with_context(|| format!("invalid modio URL {url}"))?;
+            .captures(&res.url.0)
+            .with_context(|| format!("invalid modio URL {url:?}"))?;
 
         if let (Some(_name_id), Some(mod_id), Some(modfile_id)) = (
             captures.name("name_id"),
@@ -611,7 +613,7 @@ impl<M: DrgModio + Send + Sync> ModProvider for ModioProvider<M> {
                     let size = file.filesize;
                     let download: modio::download::DownloadAction = file.into();
 
-                    info!("downloading mod {url}...");
+                    info!("downloading mod {url:?}...");
 
                     use futures::stream::TryStreamExt;
                     use tokio::io::AsyncWriteExt;

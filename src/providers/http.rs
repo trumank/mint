@@ -87,7 +87,7 @@ impl ModProvider for HttpProvider {
             name,
             spec: spec.clone(),
             versions: vec![],
-            resolution: ModResolution::resolvable(spec.url.to_owned()),
+            resolution: ModResolution::resolvable(spec.url.as_str().into()),
             suggested_require: false,
             suggested_dependencies: vec![],
             modio_tags: None,
@@ -112,7 +112,7 @@ impl ModProvider for HttpProvider {
                     .read()
                     .unwrap()
                     .get::<HttpProviderCache>(HTTP_PROVIDER_ID)
-                    .and_then(|c| c.url_blobs.get(url))
+                    .and_then(|c| c.url_blobs.get(&url.0))
                     .and_then(|r| blob_cache.get_path(r))
             } {
                 if let Some(tx) = tx {
@@ -124,8 +124,8 @@ impl ModProvider for HttpProvider {
                 }
                 path
             } else {
-                info!("downloading mod {url}...");
-                let response = self.client.get(url).send().await?.error_for_status()?;
+                info!("downloading mod {url:?}...");
+                let response = self.client.get(&url.0).send().await?.error_for_status()?;
                 let size = response.content_length(); // TODO will be incorrect if compressed
                 if let Some(mime) = response
                     .headers()
@@ -164,7 +164,7 @@ impl ModProvider for HttpProvider {
                     .unwrap()
                     .get_mut::<HttpProviderCache>(HTTP_PROVIDER_ID)
                     .url_blobs
-                    .insert(url.to_owned(), blob);
+                    .insert(url.0.to_owned(), blob);
 
                 if let Some(tx) = tx {
                     tx.send(FetchProgress::Complete {
@@ -197,7 +197,7 @@ impl ModProvider for HttpProvider {
             name,
             spec: spec.clone(),
             versions: vec![],
-            resolution: ModResolution::resolvable(spec.url.to_owned()),
+            resolution: ModResolution::resolvable(spec.url.as_str().into()),
             suggested_require: false,
             suggested_dependencies: vec![],
             modio_tags: None,

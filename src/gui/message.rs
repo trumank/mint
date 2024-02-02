@@ -410,8 +410,8 @@ async fn integrate_async(
         .collect();
     let urls = to_integrate
         .iter()
-        .map(|m| &m.resolution)
-        .collect::<Vec<&ModResolution>>();
+        .map(|m| m.resolution.clone())
+        .collect::<Vec<ModResolution>>();
 
     let (tx, mut rx) = mpsc::channel::<FetchProgress>(10);
 

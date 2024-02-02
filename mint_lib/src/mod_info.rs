@@ -77,18 +77,18 @@ impl ModSpecification {
 /// Points to a specific version of a specific mod
 #[derive(Debug, Clone, Eq, Ord, PartialEq, PartialOrd, Hash)]
 pub struct ModResolution {
-    pub url: String,
+    pub url: ModIdentifier,
     pub status: ResolvableStatus,
 }
 
 impl ModResolution {
-    pub fn resolvable(url: String) -> Self {
+    pub fn resolvable(url: ModIdentifier) -> Self {
         Self {
             url,
             status: ResolvableStatus::Resolvable,
         }
     }
-    pub fn unresolvable(url: String, name: String) -> Self {
+    pub fn unresolvable(url: ModIdentifier, name: String) -> Self {
         Self {
             url,
             status: ResolvableStatus::Unresolvable(name),
@@ -97,9 +97,29 @@ impl ModResolution {
     /// Used to get the URL if resolvable or just return the mod name if not
     pub fn get_resolvable_url_or_name(&self) -> &str {
         match &self.status {
-            ResolvableStatus::Resolvable => &self.url,
+            ResolvableStatus::Resolvable => &self.url.0,
             ResolvableStatus::Unresolvable(name) => name,
         }
+    }
+}
+
+/// Mod identifier used for tracking gameplay affecting status.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+pub struct ModIdentifier(pub String);
+
+impl ModIdentifier {
+    pub fn new(s: String) -> Self {
+        Self(s)
+    }
+}
+impl From<String> for ModIdentifier {
+    fn from(value: String) -> Self {
+        Self::new(value)
+    }
+}
+impl From<&str> for ModIdentifier {
+    fn from(value: &str) -> Self {
+        Self::new(value.to_owned())
     }
 }
 
