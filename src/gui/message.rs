@@ -8,7 +8,7 @@ use std::{
 };
 
 use anyhow::Result;
-use mint_lib::mod_info::MetaConfig;
+use mint_lib::mod_info::{MetaConfig, ModIdentifier};
 use tokio::{
     sync::mpsc::{self, Sender},
     task::JoinHandle,
@@ -180,7 +180,7 @@ impl ResolveMods {
 #[derive(Debug)]
 pub struct Integrate {
     rid: RequestID,
-    result: Result<(), IntegrationErr>,
+    result: Result<HashMap<ModIdentifier, bool>, IntegrationErr>,
 }
 
 impl Integrate {
@@ -211,7 +211,15 @@ impl Integrate {
     fn receive(self, app: &mut App) {
         if Some(self.rid) == app.integrate_rid.as_ref().map(|r| r.rid) {
             match self.result {
-                Ok(()) => {
+                Ok(res) => {
+                    let resolution_gameplay_affecting_map =
+                        res.into_iter().collect::<HashMap<_, _>>();
+                    debug!(?resolution_gameplay_affecting_map);
+
+                    for (res, stat) in resolution_gameplay_affecting_map {
+                        app.state.store.update_gameplay_affecting_status(res, stat);
+                    }
+
                     info!("integration complete");
                     app.last_action_status =
                         LastActionStatus::Success("integration complete".to_string());
@@ -389,7 +397,7 @@ async fn integrate_async(
     config: MetaConfig,
     rid: RequestID,
     message_tx: Sender<Message>,
-) -> Result<(), IntegrationErr> {
+) -> Result<HashMap<ModIdentifier, bool>, IntegrationErr> {
     let update = false;
 
     let mods = store
@@ -439,7 +447,7 @@ async fn integrate_async(
             kind: IntegrationErrKind::Generic(e),
         })?;
 
-    tokio::task::spawn_blocking(|| {
+    let gameplay_affecting_results = tokio::task::spawn_blocking(|| {
         crate::integrate::integrate(
             fsd_pak,
             config,
@@ -452,7 +460,7 @@ async fn integrate_async(
         kind: IntegrationErrKind::Generic(e.into()),
     })??;
 
-    Ok(())
+    Ok(gameplay_affecting_results)
 }
 
 #[derive(Debug)]

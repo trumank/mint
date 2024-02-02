@@ -73,9 +73,9 @@ pub struct ModData {
     pub active_profile: String,
     #[obake(cfg("0.0.0"))]
     pub profiles: BTreeMap<String, ModProfile!["0.0.0"]>,
-    #[obake(cfg("0.1.0"))]
+    #[obake(cfg(">=0.1.0"))]
     pub profiles: BTreeMap<String, ModProfile!["0.1.0"]>,
-    #[obake(cfg("0.1.0"))]
+    #[obake(cfg(">=0.1.0"))]
     pub groups: BTreeMap<String, ModGroup>,
 }
 
@@ -294,7 +294,9 @@ impl Deref for VersionAnnotatedModData {
 
     fn deref(&self) -> &Self::Target {
         match self {
-            VersionAnnotatedModData::V0_0_0(_) => unreachable!(),
+            VersionAnnotatedModData::V0_0_0(_) => {
+                unreachable!()
+            }
             VersionAnnotatedModData::V0_1_0(md) => md,
         }
     }
@@ -303,7 +305,9 @@ impl Deref for VersionAnnotatedModData {
 impl DerefMut for VersionAnnotatedModData {
     fn deref_mut(&mut self) -> &mut Self::Target {
         match self {
-            VersionAnnotatedModData::V0_0_0(_) => unreachable!(),
+            VersionAnnotatedModData::V0_0_0(_) => {
+                unreachable!()
+            }
             VersionAnnotatedModData::V0_1_0(md) => md,
         }
     }

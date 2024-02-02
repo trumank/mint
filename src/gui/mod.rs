@@ -24,7 +24,7 @@ use eframe::{
     epaint::{text::LayoutJob, Color32, Stroke},
 };
 use egui_commonmark::{CommonMarkCache, CommonMarkViewer};
-use mint_lib::mod_info::{ModioTags, RequiredStatus};
+use mint_lib::mod_info::{ModIdentifier, ModioTags, RequiredStatus};
 use tokio::{
     sync::mpsc::{self, Receiver, Sender},
     task::JoinHandle,
@@ -135,6 +135,7 @@ struct LintOptions {
     non_asset_files: bool,
     split_asset_pairs: bool,
     unmodified_game_assets: bool,
+    auto_verification: bool,
 }
 
 enum LastActionStatus {
@@ -232,6 +233,68 @@ impl App {
                 })
                 .collect::<Vec<_>>();
 
+            let mk_searchable_tag = |ctx: &mut Ctx,
+                                     tag_str: &str,
+                                     ui: &mut Ui,
+                                     color: Option<egui::Color32>,
+                                     hover_str: Option<&str>| {
+                let text_color = if color.is_some() {
+                    Color32::BLACK
+                } else {
+                    Color32::GRAY
+                };
+                let mut job = LayoutJob::default();
+                let mut is_match = false;
+                if let Some(search_string) = &self.search_string {
+                    for (m, chunk) in find_string::FindString::new(tag_str, search_string) {
+                        let background = if m {
+                            is_match = true;
+                            TextFormat {
+                                background: Color32::YELLOW,
+                                color: text_color,
+                                ..Default::default()
+                            }
+                        } else {
+                            TextFormat {
+                                color: text_color,
+                                ..Default::default()
+                            }
+                        };
+                        job.append(chunk, 0.0, background);
+                    }
+                } else {
+                    job.append(
+                        tag_str,
+                        0.0,
+                        TextFormat {
+                            color: text_color,
+                            ..Default::default()
+                        },
+                    );
+                }
+
+                let button = if let Some(color) = color {
+                    egui::Button::new(job)
+                        .small()
+                        .fill(color)
+                        .stroke(egui::Stroke::NONE)
+                } else {
+                    egui::Button::new(job).small().stroke(egui::Stroke::NONE)
+                };
+
+                let res = if let Some(hover_str) = hover_str {
+                    ui.add_enabled(false, button)
+                        .on_disabled_hover_text(hover_str)
+                } else {
+                    ui.add_enabled(false, button)
+                };
+
+                if is_match && self.scroll_to_match {
+                    res.scroll_to_me(None);
+                    ctx.scroll_to_match = false;
+                }
+            };
+
             let ui_mod_tags = |ctx: &mut Ctx, ui: &mut Ui, info: &ModInfo| {
                 if let Some(ModioTags {
                     qol,
@@ -244,73 +307,10 @@ impl App {
                     versions: _,
                 }) = info.modio_tags.as_ref()
                 {
-                    let mut mk_searchable_modio_tag =
-                        |tag_str: &str,
-                         ui: &mut Ui,
-                         color: Option<egui::Color32>,
-                         hover_str: Option<&str>| {
-                            let text_color = if color.is_some() {
-                                Color32::BLACK
-                            } else {
-                                Color32::GRAY
-                            };
-                            let mut job = LayoutJob::default();
-                            let mut is_match = false;
-                            if let Some(search_string) = &self.search_string {
-                                for (m, chunk) in
-                                    find_string::FindString::new(tag_str, search_string)
-                                {
-                                    let background = if m {
-                                        is_match = true;
-                                        TextFormat {
-                                            background: Color32::YELLOW,
-                                            color: text_color,
-                                            ..Default::default()
-                                        }
-                                    } else {
-                                        TextFormat {
-                                            color: text_color,
-                                            ..Default::default()
-                                        }
-                                    };
-                                    job.append(chunk, 0.0, background);
-                                }
-                            } else {
-                                job.append(
-                                    tag_str,
-                                    0.0,
-                                    TextFormat {
-                                        color: text_color,
-                                        ..Default::default()
-                                    },
-                                );
-                            }
-
-                            let button = if let Some(color) = color {
-                                egui::Button::new(job)
-                                    .small()
-                                    .fill(color)
-                                    .stroke(egui::Stroke::NONE)
-                            } else {
-                                egui::Button::new(job).small().stroke(egui::Stroke::NONE)
-                            };
-
-                            let res = if let Some(hover_str) = hover_str {
-                                ui.add_enabled(false, button)
-                                    .on_disabled_hover_text(hover_str)
-                            } else {
-                                ui.add_enabled(false, button)
-                            };
-
-                            if is_match && self.scroll_to_match {
-                                res.scroll_to_me(None);
-                                ctx.scroll_to_match = false;
-                            }
-                        };
-
                     match approval_status {
                         ApprovalStatus::Verified => {
-                            mk_searchable_modio_tag(
+                            mk_searchable_tag(
+                                ctx,
                                 "Verified",
                                 ui,
                                 Some(egui::Color32::LIGHT_GREEN),
@@ -318,7 +318,8 @@ impl App {
                             );
                         }
                         ApprovalStatus::Approved => {
-                            mk_searchable_modio_tag(
+                            mk_searchable_tag(
+                                ctx,
                                 "Approved",
                                 ui,
                                 Some(egui::Color32::LIGHT_BLUE),
@@ -326,13 +327,14 @@ impl App {
                             );
                         }
                         ApprovalStatus::Sandbox => {
-                            mk_searchable_modio_tag("Sandbox", ui, Some(egui::Color32::LIGHT_YELLOW), Some("Contains significant, possibly progression breaking, changes to gameplay"));
+                            mk_searchable_tag(ctx, "Sandbox", ui, Some(egui::Color32::LIGHT_YELLOW), Some("Contains significant, possibly progression breaking, changes to gameplay"));
                         }
                     }
 
                     match required_status {
                         RequiredStatus::RequiredByAll => {
-                            mk_searchable_modio_tag(
+                            mk_searchable_tag(
+                                ctx,
                                 "RequiredByAll",
                                 ui,
                                 Some(egui::Color32::LIGHT_RED),
@@ -342,7 +344,8 @@ impl App {
                             );
                         }
                         RequiredStatus::Optional => {
-                            mk_searchable_modio_tag(
+                            mk_searchable_tag(
+                                ctx,
                                 "Optional",
                                 ui,
                                 None,
@@ -352,20 +355,49 @@ impl App {
                     }
 
                     if *qol {
-                        mk_searchable_modio_tag("QoL", ui, None, None);
+                        mk_searchable_tag(ctx, "QoL", ui, None, None);
                     }
                     if *gameplay {
-                        mk_searchable_modio_tag("Gameplay", ui, None, None);
+                        mk_searchable_tag(ctx, "Gameplay", ui, None, None);
                     }
                     if *audio {
-                        mk_searchable_modio_tag("Audio", ui, None, None);
+                        mk_searchable_tag(ctx, "Audio", ui, None, None);
                     }
                     if *visual {
-                        mk_searchable_modio_tag("Visual", ui, None, None);
+                        mk_searchable_tag(ctx, "Visual", ui, None, None);
                     }
                     if *framework {
-                        mk_searchable_modio_tag("Framework", ui, None, None);
+                        mk_searchable_tag(ctx, "Framework", ui, None, None);
                     }
+                } else if let Some(status) = self
+                    .state
+                    .store
+                    .get_gameplay_affecting_status(&info.resolution.url)
+                {
+                    match status {
+                        false => mk_searchable_tag(
+                            ctx,
+                            "Verified",
+                            ui,
+                            Some(egui::Color32::LIGHT_GREEN),
+                            Some("Does not contain any gameplay affecting features or changes"),
+                        ),
+                        true => mk_searchable_tag(
+                            ctx,
+                            "Not Verified",
+                            ui,
+                            Some(egui::Color32::LIGHT_RED),
+                            Some("Contains gameplay affecting features or changes, or cannot be auto-verified"),
+                        ),
+                    }
+                } else {
+                    mk_searchable_tag(
+                        ctx,
+                        "Not Verified",
+                        ui,
+                        Some(egui::Color32::LIGHT_RED),
+                        Some("Contains gameplay affecting features or changes, or cannot be auto-verified"),
+                    );
                 }
             };
 
@@ -1069,6 +1101,17 @@ impl App {
                                 "This lint requires DRG pak path to be specified",
                             );
                             ui.end_row();
+
+                            ui.label("Check if mods can be auto-verified");
+                            ui.add_enabled(
+                                self.state.config.drg_pak_path.is_some(),
+                                toggle_switch(&mut self.lint_options.auto_verification),
+                            )
+                            .on_disabled_hover_text(
+                                "This lint requires DRG pak path to be specified",
+                            );
+
+                            ui.end_row();
                         });
                     });
 
@@ -1114,6 +1157,10 @@ impl App {
                                 (
                                     LintId::UNMODIFIED_GAME_ASSETS,
                                     self.lint_options.unmodified_game_assets,
+                                ),
+                                (
+                                    LintId::AUTO_VERIFICATION,
+                                    self.lint_options.auto_verification,
                                 ),
                             ]);
 
@@ -1438,6 +1485,34 @@ impl App {
                                         });
                                     }
                                 }
+
+                                if let Some(auto_verification_failed_mods) = &report.auto_verification_failed_mods {
+                                    if !auto_verification_failed_mods.is_empty() {
+                                        CollapsingHeader::new(
+                                            RichText::new(
+                                                "⚠ Mod(s) with files that cannot be auto-verified detected",
+                                            )
+                                            .color(AMBER),
+                                        )
+                                        .default_open(true)
+                                        .show(ui, |ui| {
+                                            auto_verification_failed_mods.iter().for_each(|(r#mod, files)| {
+                                                CollapsingHeader::new(
+                                                    RichText::new(format!(
+                                                        "⚠ {} includes files that cannot be auto-verified",
+                                                        r#mod.url
+                                                    ))
+                                                    .color(AMBER),
+                                                )
+                                                .show(ui, |ui| {
+                                                    files.iter().for_each(|file| {
+                                                        ui.label(file);
+                                                    });
+                                                });
+                                            });
+                                        });
+                                    }
+                                }
                             });
                     } else {
                         ui.spinner();
@@ -1735,7 +1810,41 @@ impl eframe::App for App {
             );
             // profile selection
 
-            let buttons = |ui: &mut Ui, mod_data: &mut ModData| {
+            let extra_ui = |ui: &mut Ui, mod_data: &mut ModData| {
+                let mut mod_ids = Vec::new();
+                mod_data.for_each_mod(&mod_data.active_profile, |mc| {
+                    let mod_id = self
+                        .state
+                        .store
+                        .get_mod_info(&mc.spec)
+                        .map(|mi| mi.resolution.url)
+                        .unwrap_or_else(|| ModIdentifier(mc.spec.url.clone()));
+                    mod_ids.push(mod_id);
+                });
+
+                let mut profile_is_verified = true;
+                for mod_id in mod_ids {
+                    debug!(?mod_id);
+                    // FIXME: cached version has `/mod-file-id` appended, but not the mod_id fed
+                    // here from the GUI.
+                    profile_is_verified &= !self
+                        .state
+                        .store
+                        .get_gameplay_affecting_status(&mod_id)
+                        .unwrap_or(true)
+                }
+
+                if profile_is_verified {
+                    ui.add_enabled(false, egui::Button::new(RichText::new("Verified").color(egui::Color32::BLACK))
+                        .fill(Color32::LIGHT_GREEN)
+                        .stroke(egui::Stroke::NONE));
+                } else {
+                     ui.add_enabled(false, egui::Button::new(RichText::new("Not Verified").color(egui::Color32::BLACK))
+                        .fill(Color32::LIGHT_RED)
+                        .stroke(egui::Stroke::NONE))
+                        .on_hover_text_at_pointer("The profile may contain non-veerified mods or verification status has not yet been determined.");
+                }
+
                 if ui
                     .button("📋")
                     .on_hover_text_at_pointer("Copy profile mods")
@@ -1766,7 +1875,7 @@ impl eframe::App for App {
                 ui,
                 "profile",
                 self.state.mod_data.deref_mut().deref_mut(),
-                Some(buttons),
+                Some(extra_ui),
             ) {
                 self.state.mod_data.save().unwrap();
             }

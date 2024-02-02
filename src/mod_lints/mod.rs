@@ -1,6 +1,7 @@
 mod archive_multiple_paks;
 mod archive_only_non_pak_files;
 mod asset_register_bin;
+mod auto_verification;
 mod conflicting_mods;
 mod empty_archive;
 mod non_asset_files;
@@ -25,6 +26,7 @@ use crate::{lint_get_all_files_from_data, open_file, GetAllFilesFromDataError, P
 use self::archive_multiple_paks::ArchiveMultiplePaksLint;
 use self::archive_only_non_pak_files::ArchiveOnlyNonPakFilesLint;
 use self::asset_register_bin::AssetRegisterBinLint;
+use self::auto_verification::AutoVerificationLint;
 use self::empty_archive::EmptyArchiveLint;
 use self::non_asset_files::NonAssetFilesLint;
 use self::outdated_pak_version::OutdatedPakVersionLint;
@@ -47,6 +49,10 @@ impl LintCtxt {
         Ok(Self { mods, fsd_pak_path })
     }
 
+    /// Function F takes:
+    /// - `ModSpecification`
+    /// - `&mut Box<dyn ReadSeek>`: a seekable reader of the first pak in a mod
+    /// - `&PakReader`: a simple reader of the first pak in a mod
     pub fn for_each_mod<F, EmptyArchiveHandler, OnlyNonPakFilesHandler, MultiplePakFilesHandler>(
         &self,
         mut f: F,
@@ -187,6 +193,9 @@ impl LintId {
     pub const UNMODIFIED_GAME_ASSETS: Self = LintId {
         name: "unmodified_game_assets",
     };
+    pub const AUTO_VERIFICATION: Self = LintId {
+        name: "auto_verification",
+    };
 }
 
 #[derive(Default, Debug)]
@@ -202,6 +211,7 @@ pub struct LintReport {
     pub split_asset_pairs_mods:
         Option<BTreeMap<ModSpecification, BTreeMap<String, SplitAssetPair>>>,
     pub unmodified_game_assets_mods: Option<BTreeMap<ModSpecification, BTreeSet<String>>>,
+    pub auto_verification_failed_mods: Option<BTreeMap<ModSpecification, BTreeSet<String>>>,
 }
 
 pub fn run_lints(
@@ -253,6 +263,10 @@ pub fn run_lints(
             LintId::UNMODIFIED_GAME_ASSETS => {
                 let res = UnmodifiedGameAssetsLint.check_mods(&lint_ctxt)?;
                 lint_report.unmodified_game_assets_mods = Some(res);
+            }
+            LintId::AUTO_VERIFICATION => {
+                let res = AutoVerificationLint.check_mods(&lint_ctxt)?;
+                lint_report.auto_verification_failed_mods = Some(res);
             }
             _ => unimplemented!(),
         }

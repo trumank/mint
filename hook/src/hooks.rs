@@ -62,7 +62,9 @@ pub unsafe fn initialize() -> Result<()> {
     )?;
     HookUFunctionBind.enable()?;
 
-    if let Ok(server_name) = &globals().resolution.server_name {
+    if let Ok(server_name) = &globals().resolution.server_name
+        && globals().meta.mods.iter().any(|m| m.gameplay_affecting)
+    {
         GetServerName
             .initialize(
                 std::mem::transmute(server_name.get_server_name.0),

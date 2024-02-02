@@ -5,14 +5,17 @@ use std::io::{self, BufReader, BufWriter, Cursor, ErrorKind, Read, Seek};
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
-use mint_lib::mod_info::{ApprovalStatus, Meta, MetaConfig, MetaMod, SemverVersion};
+use mint_lib::mod_info::{
+    ApprovalStatus, Meta, MetaConfig, MetaMod, ModIdentifier, ModioTags, SemverVersion,
+};
 use mint_lib::DRGInstallation;
 use repak::PakWriter;
 use serde::Deserialize;
-use tracing::info;
+use tracing::{debug, info};
 use uasset_utils::splice::{
     extract_tracked_statements, inject_tracked_statements, walk, AssetVersion, TrackedStatement,
 };
+use unreal_asset::reader::ArchiveTrait;
 
 use crate::providers::ModInfo;
 use crate::{get_pak_from_data, open_file};
@@ -163,7 +166,7 @@ pub fn integrate<P: AsRef<Path>>(
     path_pak: P,
     config: MetaConfig,
     mods: Vec<(ModInfo, PathBuf)>,
-) -> Result<(), IntegrationErr> {
+) -> Result<HashMap<ModIdentifier, bool>, IntegrationErr> {
     let installation = DRGInstallation::from_pak_path(&path_pak).map_err(|e| IntegrationErr {
         mod_ctxt: None,
         kind: IntegrationErrKind::Generic(e),
@@ -193,6 +196,13 @@ pub fn integrate<P: AsRef<Path>>(
         .into_iter()
         .map(PathBuf::from)
         .collect::<Vec<_>>();
+
+    let fsd_lowercase_path_map = fsd_pak
+        .files()
+        .into_iter()
+        .map(|p| (p.to_ascii_lowercase(), p))
+        .collect::<HashMap<_, _>>();
+
     let mut directories: HashMap<OsString, Dir> = HashMap::new();
     for f in &paths {
         let mut dir = &mut directories;
@@ -369,23 +379,50 @@ pub fn integrate<P: AsRef<Path>>(
 
     let mut added_paths = HashSet::new();
 
+    let mut gameplay_affecting_results = HashMap::default();
+
     for (mod_info, path) in &mods {
         let raw_mod_file = open_file(path).map_err(|e| IntegrationErr {
             mod_ctxt: Some(mod_info.clone()),
             kind: IntegrationErrKind::Generic(e),
         })?;
+
         let mut buf = get_pak_from_data(Box::new(BufReader::new(raw_mod_file))).map_err(|e| {
             IntegrationErr {
                 mod_ctxt: Some(mod_info.clone()),
                 kind: IntegrationErrKind::Generic(e),
             }
         })?;
+
         let pak = repak::PakBuilder::new()
             .reader(&mut buf)
             .map_err(|e| IntegrationErr {
                 mod_ctxt: Some(mod_info.clone()),
                 kind: IntegrationErrKind::Repak(e),
             })?;
+
+        let gameplay_affecting = if let Some(ModioTags {
+            approval_status, ..
+        }) = mod_info.modio_tags
+        {
+            approval_status != ApprovalStatus::Verified
+        } else {
+            check_gameplay_affecting(
+                &fsd_lowercase_path_map,
+                &mut fsd_pak_reader,
+                &fsd_pak,
+                &mut buf,
+                &pak,
+            )
+            .map_err(|e| IntegrationErr {
+                mod_ctxt: Some(mod_info.clone()),
+                kind: IntegrationErrKind::Generic(e),
+            })?
+        };
+
+        debug!(?mod_info, ?gameplay_affecting);
+
+        gameplay_affecting_results.insert(mod_info.resolution.url.clone(), gameplay_affecting);
 
         let mount = Path::new(pak.mount_point());
 
@@ -588,6 +625,16 @@ pub fn integrate<P: AsRef<Path>>(
                         .as_ref()
                         .map(|t| t.approval_status)
                         .unwrap_or(ApprovalStatus::Sandbox),
+                    gameplay_affecting: match info.modio_tags.as_ref().map(|t| t.approval_status) {
+                        Some(ApprovalStatus::Verified) => false,
+                        Some(_) => true,
+                        None => gameplay_affecting_results
+                            .iter()
+                            .find_map(|(ident, res)| {
+                                (*ident == info.resolution.url).then_some(*res)
+                            })
+                            .unwrap_or(true),
+                    },
                 })
                 .collect(),
         };
@@ -610,7 +657,115 @@ pub fn integrate<P: AsRef<Path>>(
         path_mod_pak.display()
     );
 
-    Ok(())
+    Ok(gameplay_affecting_results)
+}
+
+pub fn check_gameplay_affecting<F, M>(
+    fsd_lowercase_path_map: &HashMap<String, String>,
+    fsd_pak: &mut F,
+    fsd_pak_reader: &repak::PakReader,
+    mod_pak: &mut M,
+    mod_pak_reader: &repak::PakReader,
+) -> Result<bool>
+where
+    F: Read + Seek,
+    M: Read + Seek,
+{
+    debug!("check_gameplay_affecting");
+
+    let mount = Path::new(mod_pak_reader.mount_point());
+
+    let whitelist = [
+        "SoundWave",
+        "SoundCue",
+        "SoundClass",
+        "SoundMix",
+        "MaterialInstanceConstant",
+        "Material",
+        "SkeletalMesh",
+        "StaticMesh",
+        "Texture2D",
+        "AnimSequence",
+        "Skeleton",
+        "StringTable",
+    ]
+    .into_iter()
+    .collect::<HashSet<_>>();
+
+    let check_asset = |data: Vec<u8>| -> Result<bool> {
+        debug!("check_asset");
+        let asset = unreal_asset::AssetBuilder::new(
+            Cursor::new(data),
+            unreal_asset::engine_version::EngineVersion::VER_UE4_27,
+        )
+        .skip_data(true)
+        .build()?;
+
+        for export in &asset.asset_data.exports {
+            let base = export.get_base_export();
+            // don't care about exported classes in this case
+            if base.outer_index.index == 0
+                && base.class_index.is_import()
+                && !asset
+                    .get_import(base.class_index)
+                    .map(|import| import.object_name.get_content(|c| whitelist.contains(c)))
+                    .unwrap_or(false)
+            {
+                // invalid import or import name is not whitelisted, unknown
+                return Ok(true);
+            };
+        }
+
+        Ok(false)
+    };
+
+    let mod_lowercase_path_map = mod_pak_reader
+        .files()
+        .into_iter()
+        .map(|p| -> Result<(String, String)> {
+            let j = mount.join(&p);
+            let new_path = j
+                .strip_prefix("../../../")
+                .context("prefix does not match")?;
+            let new_path_str = &new_path.to_string_lossy().replace('\\', "/");
+
+            Ok((new_path_str.to_ascii_lowercase(), p))
+        })
+        .collect::<Result<HashMap<_, _>>>()?;
+
+    for lower in mod_lowercase_path_map.keys() {
+        if let Some((base, ext)) = lower.rsplit_once('.') {
+            if ["uasset", "uexp", "umap", "ubulk", "ufont"].contains(&ext) {
+                let key_uasset = format!("{base}.uasset");
+                let key_umap = format!("{base}.umap");
+                // check mod pak for uasset or umap
+                // if not found, check fsd pak for uasset or umap
+                let asset = if let Some(path) = mod_lowercase_path_map.get(&key_uasset) {
+                    mod_pak_reader.get(path, mod_pak)?
+                } else if let Some(path) = mod_lowercase_path_map.get(&key_umap) {
+                    mod_pak_reader.get(path, mod_pak)?
+                } else if let Some(path) = fsd_lowercase_path_map.get(&key_uasset) {
+                    fsd_pak_reader.get(path, fsd_pak)?
+                } else if let Some(path) = fsd_lowercase_path_map.get(&key_umap) {
+                    fsd_pak_reader.get(path, fsd_pak)?
+                } else {
+                    // not found, unknown
+                    return Ok(true);
+                };
+
+                let asset_result = check_asset(asset.clone())?;
+                debug!(?asset_result);
+
+                if asset_result {
+                    debug!("GameplayAffecting: true");
+                    debug!("{:#?}", asset.clone());
+                    return Ok(true);
+                }
+            }
+        }
+    }
+
+    Ok(false)
 }
 
 type ImportChain<'a> = Vec<Import<'a>>;

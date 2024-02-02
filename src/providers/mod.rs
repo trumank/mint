@@ -9,7 +9,7 @@ use crate::write_file;
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc::Sender;
-use tracing::info;
+use tracing::{debug, info};
 
 use std::collections::{HashMap, HashSet};
 use std::io::{Read, Seek};
@@ -25,9 +25,13 @@ pub type ProviderCache = Arc<RwLock<ConfigWrapper<VersionAnnotatedCache>>>;
 
 #[obake::versioned]
 #[obake(version("0.0.0"))]
+#[obake(version("0.1.0"))]
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct Cache {
+    #[obake(cfg(">=0.0.0"))]
     cache: HashMap<String, Box<dyn ModProviderCache>>,
+    #[obake(cfg(">=0.1.0"))]
+    gameplay_affecting_cache: HashMap<ModIdentifier, bool>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -35,20 +39,32 @@ pub struct Cache {
 pub enum VersionAnnotatedCache {
     #[serde(rename = "0.0.0")]
     V0_0_0(Cache!["0.0.0"]),
+    #[serde(rename = "0.1.0")]
+    V0_1_0(Cache!["0.1.0"]),
+}
+
+impl From<Cache!["0.0.0"]> for Cache!["0.1.0"] {
+    fn from(legacy: Cache!["0.0.0"]) -> Self {
+        Self {
+            cache: legacy.cache,
+            gameplay_affecting_cache: Default::default(),
+        }
+    }
 }
 
 impl Default for VersionAnnotatedCache {
     fn default() -> Self {
-        VersionAnnotatedCache::V0_0_0(Default::default())
+        VersionAnnotatedCache::V0_1_0(Default::default())
     }
 }
 
 impl Deref for VersionAnnotatedCache {
-    type Target = Cache!["0.0.0"];
+    type Target = Cache!["0.1.0"];
 
     fn deref(&self) -> &Self::Target {
         match self {
-            VersionAnnotatedCache::V0_0_0(c) => c,
+            VersionAnnotatedCache::V0_0_0(_) => unreachable!(),
+            VersionAnnotatedCache::V0_1_0(c) => c,
         }
     }
 }
@@ -56,7 +72,8 @@ impl Deref for VersionAnnotatedCache {
 impl DerefMut for VersionAnnotatedCache {
     fn deref_mut(&mut self) -> &mut Self::Target {
         match self {
-            VersionAnnotatedCache::V0_0_0(c) => c,
+            VersionAnnotatedCache::V0_0_0(_) => unreachable!(),
+            VersionAnnotatedCache::V0_1_0(c) => c,
         }
     }
 }
@@ -295,6 +312,23 @@ impl ModStore {
             .unwrap()
             .get_version_name(spec, self.cache.clone())
     }
+
+    pub fn update_gameplay_affecting_status(&self, id: ModIdentifier, stat: bool) {
+        self.cache
+            .write()
+            .unwrap()
+            .gameplay_affecting_cache
+            .insert(id, stat);
+    }
+
+    pub fn get_gameplay_affecting_status(&self, id: &ModIdentifier) -> Option<bool> {
+        self.cache
+            .read()
+            .unwrap()
+            .gameplay_affecting_cache
+            .get(id)
+            .copied()
+    }
 }
 
 fn read_cache_metadata_or_default(cache_metadata_path: &PathBuf) -> Result<VersionAnnotatedCache> {
@@ -306,6 +340,7 @@ fn read_cache_metadata_or_default(cache_metadata_path: &PathBuf) -> Result<Versi
                 .as_object_mut()
                 .context("failed to deserialize cache metadata into object map")?;
             let version = obj_map.remove("version");
+            debug!(?version);
             if let Some(v) = version
                 && let serde_json::Value::String(vs) = v
             {
@@ -316,9 +351,22 @@ fn read_cache_metadata_or_default(cache_metadata_path: &PathBuf) -> Result<Versi
                         // <https://github.com/serde-rs/serde/issues/1183>.
                         match serde_json::from_slice::<Cache!["0.0.0"]>(&buf) {
                             Ok(c) => {
+                                debug!("read as cache version v0.0.0");
                                 MaybeVersionedCache::Versioned(VersionAnnotatedCache::V0_0_0(c))
                             }
                             Err(e) => Err(e).context("failed to deserialize cache as v0.0.0")?,
+                        }
+                    }
+                    "0.1.0" => {
+                        // HACK: workaround a serde issue relating to flattening with tags
+                        // involving numeric keys in hashmaps, see
+                        // <https://github.com/serde-rs/serde/issues/1183>.
+                        match serde_json::from_slice::<Cache!["0.1.0"]>(&buf) {
+                            Ok(c) => {
+                                debug!("read as cache version v0.1.0");
+                                MaybeVersionedCache::Versioned(VersionAnnotatedCache::V0_1_0(c))
+                            }
+                            Err(e) => Err(e).context("failed to deserialize cache as v0.1.0")?,
                         }
                     }
                     _ => unimplemented!(),
@@ -338,7 +386,8 @@ fn read_cache_metadata_or_default(cache_metadata_path: &PathBuf) -> Result<Versi
 
     let cache: VersionAnnotatedCache = match cache {
         MaybeVersionedCache::Versioned(v) => match v {
-            VersionAnnotatedCache::V0_0_0(v) => VersionAnnotatedCache::V0_0_0(v),
+            VersionAnnotatedCache::V0_0_0(v) => VersionAnnotatedCache::V0_1_0(v.into()),
+            VersionAnnotatedCache::V0_1_0(v) => VersionAnnotatedCache::V0_1_0(v),
         },
         MaybeVersionedCache::Legacy(legacy) => VersionAnnotatedCache::V0_0_0(legacy),
     };

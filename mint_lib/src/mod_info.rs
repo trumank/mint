@@ -29,7 +29,7 @@ pub enum ApprovalStatus {
 }
 
 /// Whether a mod can be resolved by clients or not
-#[derive(Debug, Clone, Eq, Ord, PartialEq, PartialOrd, Hash)]
+#[derive(Debug, Clone, Eq, Ord, PartialEq, PartialOrd, Hash, Serialize, Deserialize)]
 pub enum ResolvableStatus {
     Unresolvable(String),
     Resolvable,
@@ -134,6 +134,7 @@ pub struct Meta {
 pub struct MetaConfig {
     pub disable_fix_exploding_gas: bool,
 }
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct SemverVersion {
     pub major: u32,
@@ -153,7 +154,9 @@ pub struct MetaMod {
     pub author: String,
     pub approval: ApprovalStatus,
     pub required: bool,
+    pub gameplay_affecting: bool,
 }
+
 impl Meta {
     pub fn to_server_list_string(&self) -> String {
         use itertools::Itertools;

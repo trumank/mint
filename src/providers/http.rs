@@ -32,6 +32,7 @@ inventory::submit! {
 pub struct HttpProviderCache {
     url_blobs: HashMap<String, BlobRef>,
 }
+
 #[typetag::serde]
 impl ModProviderCache for HttpProviderCache {
     fn new() -> Self {
