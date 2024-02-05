@@ -1,3 +1,5 @@
+#![feature(result_option_inspect)]
+
 use std::collections::BTreeSet;
 use std::fs::File;
 use std::io::BufWriter;
@@ -111,8 +113,10 @@ fn main() -> Result<()> {
     let dirs = args
         .appdata
         .as_ref()
+        .inspect(|p| debug!("args.app_data = `{:?}`", p))
         .map(Dirs::from_path)
-        .unwrap_or_else(Dirs::default_xdg)?;
+        .unwrap_or_else(Dirs::default_xdg)
+        .inspect(|d| debug!("dirs = {:?}", d))?;
 
     std::env::set_var("RUST_BACKTRACE", "1");
     let _guard = setup_logging(&dirs)?;
