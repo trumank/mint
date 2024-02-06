@@ -21,7 +21,11 @@ behavioural differences. If a mod is crashing or otherwise behaving differently 
 official integration, *please* create an
 [issue](https://github.com/trumank/mint/issues/new) so it can be addressed.
 
-## Usage
+## User Guide
+
+See [`docs/`](./docs/) for a more detailed user guide.
+
+## Basic Usage
 
 This section assumes that you are on Windows and is using the steam version of DRG, working with
 either local `.pak`s or mod.io mods.
