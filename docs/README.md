@@ -17,8 +17,8 @@ mod.io authorization details and path to the game.
 Mint supports both Windows and Linux platforms. You can download the latest version of Mint at
 <https://github.com/trumank/mint/releases/latest>.
 
-- For Windows users, download and extract `drg_mod_integration-x86_64-pc-windows-msvc.zip`.
-- For Linux users, download and extract `drg_mod_integration-x86_64-unknown-linux-gnu.tar.xz`.
+- For Windows users, download and extract `mint-x86_64-pc-windows-msvc.zip`.
+- For Linux users, download and extract `mint-x86_64-unknown-linux-gnu.zip`.
 
 The executable `drg_mod_integration.exe` can be placed anywhere you like.
 
@@ -64,7 +64,7 @@ you would like to use.
 Mint supports mods from 3 kinds of sources:
 
 1. mod.io mods: e.g. `https://mod.io/g/drg/m/sandbox-utilities`.
-2. Network mods: e.g. `https://random-link.com/random-mod.pak`.
+2. Network mods: e.g. `https://example.org/random-mod.pak`.
 3. Local mods: e.g. `C:\Downloads\RandomMod.pak`
 
 You can add mod.io and network mods by copying and pasting the mod.io or network link to the mod
@@ -78,7 +78,7 @@ File Explorer on to the Mint window.
 
 #### Migrating from mod.io
 
-You can make the migration from the official mod.io implementation by:
+You can make the migration from the official mod integration by:
 
 - Subscribing to the *A Better Modding Menu* mod: <https://mod.io/g/drg/m/a-better-modding-menu>.
 - Clicking the "Copy Mod URLs" button in game.
@@ -104,9 +104,9 @@ then press enter.
   (`mod_P.pak`) next to the `FSD-WindowsNoEditor.pak` within your *Deep Rock Galactic* installation.
   If you toggled a mod's enabled/disabled status, changed a mod's preferred version, changed a
   profile, added/removed a mod from the active profile, etc., then you need to press Install Mods
-  again for the changes to take effect. This will also disable the official mod.io support system.
-- (8) Uninstall mods. This will remove the hook and mod bundle, and reenable the official mod.io
-  support system.
+  again for the changes to take effect. This will also disable the official mod integration system.
+- (8) Uninstall mods. This will remove the hook and mod bundle, and reenable the official mod
+  integration system.
 - (9) Update cache. Mint maintains a *cache* (a snapshot) of your mods' current versions. If a
   mod.io mod has a new version, you will need to press Update Cache to rebuild the snapshot. The
   cache is needed to support offline usage and avoid having to redownload everything every time
@@ -148,12 +148,12 @@ Then A will win and overwrite files previously modified by B.
 ## Mod Lints
 
 *Mod Lints* are a collection of tools that can help to detect *potential* problems such as
-compatibilty issues (e.g. conflicting files) with the mods in the current profile.
+compatibility issues (e.g. conflicting files) with the mods in the current profile.
 
 ![Lint toggle](./img/lint-toggle.png)
 ![Lint report](./img/lint-report.png)
 
-Currently implement lints include (may be non-exhaustive):
+Currently implement lints include (maybe non-exhaustive):
 
 - Archive with multiple paks: an archive may contain more than one mod `.pak`, but Mint will
   only load the first encountered `.pak` within the archive.
@@ -167,7 +167,7 @@ Currently implement lints include (may be non-exhaustive):
   the mods may need to be removed.
 - Mods containing empty archives: a mod may contain an empty archive (the mod does nothing). Helpful
   to detect packaging errors when developing a mod locally.
-- Mods containing oudated pak version: a mod may be cooked for an old pak version. May help to
+- Mods containing outdated pak version: a mod may be cooked for an old pak version. May help to
   detect outdated mods or incorrect packaging settings.
 - Mods containing shader files: sometimes a mod may contain shader files which can cause issues
   in-game. Also useful for catching incorrect packaging settings when developing mods locally.
@@ -185,26 +185,34 @@ Currently implement lints include (may be non-exhaustive):
 Mint stores the user's configuration, mod data (profiles and its mods) and cache under these
 directories on Windows:
 
-- Config and log directory: `C:\Users\<username>\AppData\Roaming\drg-mod-integration\config`.
+- Config and log directory: `C:\Users\<username>\AppData\Roaming\mint\config`.
   Noteable files:
     - Configuration file: `config.json`. **Do not** share this file with another person unless you
       removed the mod.io OAuth token from your mod.io account.
-    - Log file: `drg-mod-integration.log`. Please try to include the log file when trying to report
+    - Log file: `mint.log`. Please try to include the log file when trying to report
       bugs as it helps us to diagnose the issue.
-- Cache directory: `C:\Users\<username>\AppData\Local\drg-mod-integration\cache`. Noteable file:
+- Cache directory: `C:\Users\<username>\AppData\Local\mint\cache`. Noteable file:
     - Cache index: `cache.json`.
-- Data directory: `C:\Users\<username>\AppData\Roaming\drg-mod-integration\data`.
+- Data directory: `C:\Users\<username>\AppData\Roaming\mint\data`.
+
+### Note for users migrating from older versions of mint
+
+Previously, these directories were:
+
+- `C:\Users\<username>\AppData\Roaming\drg-mod-integration\config`
+- `C:\Users\<username>\AppData\Local\drg-mod-integration\cache`
+- `C:\Users\<username>\AppData\Roaming\drg-mod-integration\data`
 
 ## Common Errors and Troubleshooting
 
 ### Mod Compatibility Issues
 
-Some mods may work under official mod.io support but not in mint. This can be because:
+Some mods may work under official mod integration but not in mint. This can be because:
 
-- Official mod.io implementation does not load all the files in a mod, but Mint does. Additionally
+- Official mod integration does not load all the files in a mod, but Mint does. Additionally
   loaded files may cause issues in game.
     - May require the mod to be updated to remove extra files.
-- The mod interacts with `AssetRegister.bin`. The official mod.io implementation partially handles
+- The mod interacts with `AssetRegister.bin`. The official mod integration partially handles
   `AssetRegister.bin` merging, but Mint currently does not implement it.
 
 ### Failure While Updating Cache (403, 404)
@@ -257,12 +265,12 @@ come with Simplified Chinese as well as potentially other community-contributed 
 
 ### Is there an active mod limit?
 
-Unlike the official mod.io support system, Mint does not impose mod limits.
+Unlike the official mod integration, Mint does not impose mod limits.
 
 ### Why does it say modding disabled due to launch options
 
-Mint disables the official mod.io support system when you click Install Mods. To restore the
-official mod.io support system, you will need to click Uninstall Mods.
+Mint disables the official mod integration system when you click Install Mods. To restore the
+official mod integration system, you will need to click Uninstall Mods.
 
 ### Will mod XXX work for clients?
 
@@ -282,7 +290,7 @@ Mint does not attempt to force a sandbox save. If you use gameplay affecting mod
 judgement on if it is acceptable to affect the normal saves. It is also recommended to make a
 backup of your normal saves (even without Mint, this is a good idea).
 
-### what's the black console showing up when mint launched?
+### What's the black console showing up when mint launched?
 
 This console window is used for logging and debugging purposes, to help us diagnose errors that you
 run into while using Mint.
