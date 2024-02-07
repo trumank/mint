@@ -20,7 +20,7 @@ Mint supports both Windows and Linux platforms. You can download the latest vers
 - For Windows users, download and extract `mint-x86_64-pc-windows-msvc.zip`.
 - For Linux users, download and extract `mint-x86_64-unknown-linux-gnu.zip`.
 
-The executable `drg_mod_integration.exe` can be placed anywhere you like.
+The executable `mint.exe` can be placed anywhere you like.
 
 ### Configuring Mint
 
