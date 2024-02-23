@@ -156,6 +156,9 @@ pub enum IntegrationErrKind {
     UnrealAsset(unreal_asset::Error),
 }
 
+static INTEGRATION_DIR: include_dir::Dir<'_> =
+    include_dir::include_dir!("$CARGO_MANIFEST_DIR/assets/integration");
+
 pub fn integrate<P: AsRef<Path>>(
     path_pak: P,
     mods: Vec<(ModInfo, PathBuf)>,
@@ -483,80 +486,50 @@ pub fn integrate<P: AsRef<Path>>(
     patch_deferred(modding_tab_path, patch_modding_tab_item)?;
     patch_deferred(server_list_entry_path, patch_server_list_entry)?;
 
-    let mut int_pak_reader = Cursor::new(include_bytes!("../assets/integration.pak"));
-    let int_pak = repak::PakBuilder::new()
-        .reader(&mut int_pak_reader)
-        .map_err(|e| IntegrationErr {
-            mod_ctxt: None,
-            kind: IntegrationErrKind::Repak(e),
-        })?;
-
-    let mount = Path::new(int_pak.mount_point());
-    let files = int_pak.files();
-    let mut int_files = files
-        .iter()
-        .map(|p| {
-            (
-                mount
-                    .join(p)
-                    .strip_prefix("../../../")
-                    .expect("prefix does not match")
-                    .to_string_lossy()
-                    .replace('\\', "/"),
-                p,
-            )
-        })
-        .collect::<HashMap<_, _>>();
+    fn collect_dir_files(dir: &'static include_dir::Dir, collect: &mut HashMap<String, &[u8]>) {
+        for entry in dir.entries() {
+            match entry {
+                include_dir::DirEntry::Dir(dir) => {
+                    collect_dir_files(dir, collect);
+                }
+                include_dir::DirEntry::File(file) => {
+                    collect.insert(
+                        file.path().to_str().unwrap().replace('\\', "/"),
+                        file.contents(),
+                    );
+                }
+            }
+        }
+    }
+    let mut int_files = HashMap::new();
+    collect_dir_files(&INTEGRATION_DIR, &mut int_files);
 
     let int_path = (
         "FSD/Content/_AssemblyStorm/ModIntegration/MI_SpawnMods.uasset",
         "FSD/Content/_AssemblyStorm/ModIntegration/MI_SpawnMods.uexp",
     );
 
-    int_files.remove(int_path.0);
-    int_files.remove(int_path.1);
-
-    for (p, new_path) in int_files {
-        write_file(
-            &mut mod_pak,
-            &int_pak
-                .get(&p, &mut int_pak_reader)
-                .map_err(|e| IntegrationErr {
-                    mod_ctxt: None,
-                    kind: IntegrationErrKind::Repak(e),
-                })?,
-            new_path,
-        )
-        .map_err(|e| IntegrationErr {
+    for (path, data) in &int_files {
+        if path == int_path.0 || path == int_path.1 {
+            continue;
+        }
+        write_file(&mut mod_pak, data, path).map_err(|e| IntegrationErr {
             mod_ctxt: None,
             kind: IntegrationErrKind::Generic(e),
         })?;
     }
 
-    let mut int_asset =
-        unreal_asset::Asset::new(
-            Cursor::new(int_pak.get(int_path.0, &mut int_pak_reader).map_err(|e| {
-                IntegrationErr {
-                    mod_ctxt: None,
-                    kind: IntegrationErrKind::Repak(e),
-                }
-            })?),
-            Some(Cursor::new(
-                int_pak
-                    .get(int_path.1, &mut int_pak_reader)
-                    .map_err(|e| IntegrationErr {
-                        mod_ctxt: None,
-                        kind: IntegrationErrKind::Repak(e),
-                    })?,
-            )),
-            unreal_asset::engine_version::EngineVersion::VER_UE4_27,
-            None,
-            false,
-        )
-        .map_err(|e| IntegrationErr {
-            mod_ctxt: None,
-            kind: IntegrationErrKind::UnrealAsset(e),
-        })?;
+    let mut int_asset = unreal_asset::Asset::new(
+        Cursor::new(int_files[int_path.0]),
+        Some(Cursor::new(int_files[int_path.1])),
+        unreal_asset::engine_version::EngineVersion::VER_UE4_27,
+        None,
+        false,
+    )
+    .map_err(|e| IntegrationErr {
+        mod_ctxt: None,
+        kind: IntegrationErrKind::UnrealAsset(e),
+    })?;
 
     inject_init_actors(
         &mut int_asset,
