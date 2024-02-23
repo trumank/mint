@@ -7,6 +7,7 @@ mod toggle_switch;
 //#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")] // hide console window on Windows in release
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::ops::Deref;
 use std::time::{Duration, SystemTime};
 use std::{
     collections::{HashMap, HashSet},
@@ -1603,6 +1604,7 @@ impl eframe::App for App {
                                     self.state.store.clone(),
                                     mods,
                                     self.state.config.drg_pak_path.as_ref().unwrap().clone(),
+                                    self.state.config.deref().into(),
                                     self.tx.clone(),
                                     ctx.clone(),
                                 ));

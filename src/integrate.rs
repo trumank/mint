@@ -5,7 +5,7 @@ use std::io::{self, BufReader, BufWriter, Cursor, ErrorKind, Read, Seek};
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
-use mint_lib::mod_info::{ApprovalStatus, Meta, MetaMod};
+use mint_lib::mod_info::{ApprovalStatus, Meta, MetaConfig, MetaMod};
 use mint_lib::DRGInstallation;
 use repak::PakWriter;
 use serde::Deserialize;
@@ -161,6 +161,7 @@ static INTEGRATION_DIR: include_dir::Dir<'_> =
 
 pub fn integrate<P: AsRef<Path>>(
     path_pak: P,
+    config: MetaConfig,
     mods: Vec<(ModInfo, PathBuf)>,
 ) -> Result<(), IntegrationErr> {
     let installation = DRGInstallation::from_pak_path(&path_pak).map_err(|e| IntegrationErr {
@@ -567,6 +568,7 @@ pub fn integrate<P: AsRef<Path>>(
     {
         let meta = Meta {
             version: env!("CARGO_PKG_VERSION").into(),
+            config,
             mods: mods
                 .iter()
                 .map(|(info, _)| MetaMod {

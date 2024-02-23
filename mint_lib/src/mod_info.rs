@@ -108,6 +108,11 @@ impl ModResolution {
 pub struct Meta {
     pub version: String,
     pub mods: Vec<MetaMod>,
+    pub config: MetaConfig,
+}
+#[derive(Debug, Serialize, Deserialize)]
+pub struct MetaConfig {
+    pub disable_fix_exploding_gas: bool,
 }
 #[derive(Debug, Serialize, Deserialize)]
 pub struct MetaMod {
