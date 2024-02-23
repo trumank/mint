@@ -15,6 +15,7 @@ anyhow.workspace = true
 repak.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+postcard.workspace = true
 patternsleuth = { workspace = true, features = ["process-internal"] }
 retour = { version = "0.3.1", features = ["static-detour"] }
 hook_resolvers = { path = "../hook_resolvers" }

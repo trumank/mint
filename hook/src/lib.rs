@@ -65,8 +65,8 @@ unsafe fn patch() -> Result<()> {
     let mut pak_reader = BufReader::new(std::fs::File::open(pak_path)?);
     let pak = repak::PakBuilder::new().reader(&mut pak_reader)?;
 
-    let meta_buf = pak.get("meta.json", &mut pak_reader)?;
-    let meta: Meta = serde_json::from_slice(&meta_buf)?;
+    let meta_buf = pak.get("meta", &mut pak_reader)?;
+    let meta: Meta = postcard::from_bytes(&meta_buf)?;
 
     let installation_type = DRGInstallationType::from_exe_path()?;
 

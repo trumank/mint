@@ -579,14 +579,11 @@ pub fn integrate<P: AsRef<Path>>(
                 })
                 .collect(),
         };
-        write_file(
-            &mut mod_pak,
-            &serde_json::to_vec(&meta).unwrap(),
-            "meta.json",
-        )
-        .map_err(|e| IntegrationErr {
-            mod_ctxt: None,
-            kind: IntegrationErrKind::Generic(e),
+        write_file(&mut mod_pak, &postcard::to_allocvec(&meta).unwrap(), "meta").map_err(|e| {
+            IntegrationErr {
+                mod_ctxt: None,
+                kind: IntegrationErrKind::Generic(e),
+            }
         })?;
     }
 
