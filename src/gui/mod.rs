@@ -19,11 +19,12 @@ use anyhow::{anyhow, Context, Result};
 use eframe::egui::{Button, CollapsingHeader, RichText, Visuals};
 use eframe::epaint::{Pos2, Vec2};
 use eframe::{
-    egui::{self, FontSelection, Layout, TextFormat, Ui},
+    egui::{FontSelection, Layout, TextFormat, Ui},
     emath::{Align, Align2},
     epaint::{text::LayoutJob, Color32, Stroke},
 };
 use egui_commonmark::{CommonMarkCache, CommonMarkViewer};
+use mint_lib::mod_info::{ModioTags, RequiredStatus};
 use tokio::{
     sync::mpsc::{self, Receiver, Sender},
     task::JoinHandle,
@@ -36,8 +37,7 @@ use crate::{
     integrate::uninstall,
     is_drg_pak,
     providers::{
-        ApprovalStatus, FetchProgress, ModInfo, ModSpecification, ModStore, ModioTags,
-        ProviderFactory, RequiredStatus,
+        ApprovalStatus, FetchProgress, ModInfo, ModSpecification, ModStore, ProviderFactory,
     },
     state::{ModConfig, ModData_v0_1_0 as ModData, ModOrGroup, ModProfile, State},
 };

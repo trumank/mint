@@ -8,7 +8,6 @@ use std::{
 };
 
 use anyhow::Result;
-use eframe::egui;
 use mint_lib::mod_info::MetaConfig;
 use tokio::{
     sync::mpsc::{self, Sender},

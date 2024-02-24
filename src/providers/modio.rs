@@ -882,7 +882,7 @@ fn process_modio_tags(set: &HashSet<String>) -> ModioTags {
 
 #[cfg(test)]
 mod test {
-    use std::sync::{OnceLock, RwLock};
+    use std::sync::RwLock;
 
     use crate::{providers::VersionAnnotatedCache, state::config::ConfigWrapper};
 

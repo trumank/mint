@@ -88,13 +88,6 @@ pub struct FMallocVTable {
     pub get_descriptive_name: *const (),
 }
 
-#[derive(Debug, Clone, Copy)]
-#[repr(C)]
-pub struct FWeakObjectPtr {
-    object_index: i32,
-    object_serial_number: i32,
-}
-
 bitflags::bitflags! {
     #[derive(Debug, Clone)]
     pub struct EObjectFlags: u32 {
@@ -293,20 +286,6 @@ pub struct FName {
 #[repr(C)]
 pub struct FNameEntryId {
     pub value: u32,
-}
-
-#[derive(Debug)]
-#[repr(C)]
-pub struct TSharedPtr<T> {
-    pub object: *const T,
-    pub reference_controller: *const FReferenceControllerBase,
-}
-
-#[derive(Debug)]
-#[repr(C)]
-pub struct FReferenceControllerBase {
-    pub shared_reference_count: i32,
-    pub weak_reference_count: i32,
 }
 
 pub type FString = TArray<u16>;
