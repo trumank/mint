@@ -1,16 +1,15 @@
 use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet};
-use std::fs::File;
 use std::io::BufReader;
 use std::path::PathBuf;
 
 use anyhow::{bail, Result};
+use fs_err as fs;
 use path_slash::PathExt;
 use rayon::prelude::*;
 use sha2::Digest;
 use tracing::trace;
 
-use crate::open_file;
 use crate::providers::ModSpecification;
 
 use super::{Lint, LintCtxt};
@@ -28,7 +27,7 @@ impl Lint for UnmodifiedGameAssetsLint {
 
         // Adapted from
         // <https://github.com/trumank/repak/blob/a006d9ed6f021687a87b8b2ff9d66083d019824c/repak_cli/src/main.rs#L217>.
-        let mut reader = BufReader::new(open_file(game_pak_path)?);
+        let mut reader = BufReader::new(fs::File::open(game_pak_path)?);
         let pak = repak::PakBuilder::new().reader(&mut reader)?;
 
         let mount_point = PathBuf::from(pak.mount_point());
@@ -48,7 +47,7 @@ impl Lint for UnmodifiedGameAssetsLint {
         > = Default::default();
 
         full_paths.par_iter().zip(stripped).try_for_each_init(
-            || (game_file_hashes.clone(), File::open(game_pak_path)),
+            || (game_file_hashes.clone(), fs::File::open(game_pak_path)),
             |(hashes, file), ((_full_path, path), stripped)| -> Result<(), repak::Error> {
                 let mut hasher = sha2::Sha256::new();
                 pak.read_file(
