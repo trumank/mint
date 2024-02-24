@@ -381,7 +381,6 @@ pub fn integrate<P: AsRef<Path>>(
             }
         })?;
         let pak = repak::PakBuilder::new()
-            .oodle(repak::oodle_loader::decompress)
             .reader(&mut buf)
             .map_err(|e| IntegrationErr {
                 mod_ctxt: Some(mod_info.clone()),

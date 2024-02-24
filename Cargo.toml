@@ -31,8 +31,9 @@ version.workspace = true
 edition.workspace = true
 
 [features]
-default = ["hook"]
+default = ["hook", "oodle"]
 hook = ["dep:hook"]
+oodle = ["repak/oodle_implicit_dynamic"]
 debug = ["egui/deadlock_detection", "egui/extra_debug_asserts", "egui/extra_asserts"]
 
 [dependencies]
@@ -80,7 +81,7 @@ uasset_utils = { git = "https://github.com/trumank/uasset_utils" }
 unreal_asset = { git = "https://github.com/trumank/unrealmodding", branch = "patches" }
 url = "2.5.0"
 zip = { version = "0.6.6", default-features = false, features = ["aes-crypto", "deflate", "time"] }
-repak = { workspace = true, features = ["oodle", "oodle_loader"] }
+repak.workspace = true
 include_dir = "0.7.3"
 postcard.workspace = true
 
