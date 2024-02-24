@@ -742,7 +742,7 @@ async fn self_update_async(
         {
             info!("setting executable permission on new executable");
             use std::os::unix::fs::PermissionsExt;
-            std::fs::set_permissions(&original_exe_path, std::fs::Permissions::from_mode(0o755))
+            std::fs::set_permissions(&original_exe_path, fs::Permissions::from_mode(0o755))
                 .unwrap();
         }
 

@@ -1,10 +1,11 @@
+use fs::OpenOptions;
 use std::collections::{HashMap, HashSet};
 use std::ffi::{OsStr, OsString};
-use std::fs::OpenOptions;
 use std::io::{self, BufReader, BufWriter, Cursor, ErrorKind, Read, Seek};
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
+use fs_err as fs;
 use mint_lib::mod_info::{ApprovalStatus, Meta, MetaConfig, MetaMod, SemverVersion};
 use mint_lib::DRGInstallation;
 use repak::PakWriter;
@@ -14,8 +15,8 @@ use uasset_utils::splice::{
     extract_tracked_statements, inject_tracked_statements, walk, AssetVersion, TrackedStatement,
 };
 
+use crate::get_pak_from_data;
 use crate::providers::ModInfo;
-use crate::{get_pak_from_data, open_file};
 
 use unreal_asset::{
     exports::ExportBaseTrait,
@@ -49,7 +50,7 @@ use unreal_asset::{
 pub fn uninstall<P: AsRef<Path>>(path_pak: P, modio_mods: HashSet<u32>) -> Result<()> {
     let installation = DRGInstallation::from_pak_path(path_pak)?;
     let path_mods_pak = installation.paks_path().join("mods_P.pak");
-    match std::fs::remove_file(&path_mods_pak) {
+    match fs::remove_file(&path_mods_pak) {
         Ok(()) => Ok(()),
         Err(e) if e.kind() == ErrorKind::NotFound => Ok(()),
         Err(e) => Err(e),
@@ -60,7 +61,7 @@ pub fn uninstall<P: AsRef<Path>>(path_pak: P, modio_mods: HashSet<u32>) -> Resul
         let path_hook_dll = installation
             .binaries_directory()
             .join(installation.installation_type.hook_dll_name());
-        match std::fs::remove_file(&path_hook_dll) {
+        match fs::remove_file(&path_hook_dll) {
             Ok(()) => Ok(()),
             Err(e) if e.kind() == ErrorKind::NotFound => Ok(()),
             Err(e) => Err(e),
@@ -87,7 +88,7 @@ fn uninstall_modio(installation: &DRGInstallation, modio_mods: HashSet<u32>) -> 
         return Ok(());
     };
     let modio_state: ModioState = serde_json::from_reader(std::io::BufReader::new(
-        std::fs::File::open(modio_dir.join("metadata/state.json"))?,
+        fs::File::open(modio_dir.join("metadata/state.json"))?,
     ))?;
     let config_path = installation
         .root
@@ -170,9 +171,9 @@ pub fn integrate<P: AsRef<Path>>(
     })?;
     let path_mod_pak = installation.paks_path().join("mods_P.pak");
 
-    let fsd_pak_file = open_file(path_pak).map_err(|e| IntegrationErr {
+    let fsd_pak_file = fs::File::open(path_pak.as_ref()).map_err(|e| IntegrationErr {
         mod_ctxt: None,
-        kind: IntegrationErrKind::Generic(e),
+        kind: IntegrationErrKind::Generic(e.into()),
     })?;
     let mut fsd_pak_reader = BufReader::new(fsd_pak_file);
     let fsd_pak = repak::PakBuilder::new()
@@ -355,7 +356,7 @@ pub fn integrate<P: AsRef<Path>>(
             .map(|m| m.len() != hook_dll.len() as u64)
             .unwrap_or(true)
         {
-            std::fs::write(&path_hook_dll, hook_dll)
+            fs::write(&path_hook_dll, hook_dll)
                 .with_context(|| format!("failed to write hook to {}", path_hook_dll.display()))
                 .map_err(|e| IntegrationErr {
                     mod_ctxt: None,
@@ -370,9 +371,9 @@ pub fn integrate<P: AsRef<Path>>(
     let mut added_paths = HashSet::new();
 
     for (mod_info, path) in &mods {
-        let raw_mod_file = open_file(path).map_err(|e| IntegrationErr {
+        let raw_mod_file = fs::File::open(path).map_err(|e| IntegrationErr {
             mod_ctxt: Some(mod_info.clone()),
-            kind: IntegrationErrKind::Generic(e),
+            kind: IntegrationErrKind::Generic(e.into()),
         })?;
         let mut buf = get_pak_from_data(Box::new(BufReader::new(raw_mod_file))).map_err(|e| {
             IntegrationErr {

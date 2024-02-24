@@ -14,13 +14,14 @@ use std::io::BufReader;
 use std::path::PathBuf;
 
 use anyhow::{Context, Result};
+use fs_err as fs;
 use indexmap::IndexSet;
 use repak::PakReader;
 use tracing::trace;
 
 use crate::mod_lints::conflicting_mods::ConflictingModsLint;
 use crate::providers::{ModSpecification, ReadSeek};
-use crate::{lint_get_all_files_from_data, open_file, GetAllFilesFromDataError, PakOrNotPak};
+use crate::{lint_get_all_files_from_data, GetAllFilesFromDataError, PakOrNotPak};
 
 use self::archive_multiple_paks::ArchiveMultiplePaksLint;
 use self::archive_only_non_pak_files::ArchiveOnlyNonPakFilesLint;
@@ -61,7 +62,7 @@ impl LintCtxt {
         MultiplePakFilesHandler: FnMut(ModSpecification),
     {
         for (mod_spec, mod_pak_path) in &self.mods {
-            let maybe_archive_reader = Box::new(BufReader::new(open_file(mod_pak_path)?));
+            let maybe_archive_reader = Box::new(BufReader::new(fs::File::open(mod_pak_path)?));
             let bufs = match lint_get_all_files_from_data(maybe_archive_reader) {
                 Ok(bufs) => bufs,
                 Err(e) => match e {

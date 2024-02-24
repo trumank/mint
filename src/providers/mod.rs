@@ -4,9 +4,9 @@ pub mod modio;
 
 use crate::error::IntegrationError;
 use crate::state::config::ConfigWrapper;
-use crate::write_file;
 
 use anyhow::{Context, Result};
+use fs_err as fs;
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc::Sender;
 use tracing::info;
@@ -298,7 +298,7 @@ impl ModStore {
 }
 
 fn read_cache_metadata_or_default(cache_metadata_path: &PathBuf) -> Result<VersionAnnotatedCache> {
-    let cache: MaybeVersionedCache = match std::fs::read(cache_metadata_path) {
+    let cache: MaybeVersionedCache = match fs::read(cache_metadata_path) {
         Ok(buf) => {
             let mut dyn_value = serde_json::from_slice::<serde_json::Value>(&buf)
                 .context("failed to deserialize cache metadata into dynamic json value")?;
@@ -463,7 +463,7 @@ pub struct BlobCache {
 
 impl BlobCache {
     fn new<P: AsRef<Path>>(path: P) -> Self {
-        std::fs::create_dir(&path).ok();
+        fs::create_dir(&path).ok();
         Self {
             path: path.as_ref().to_path_buf(),
         }
@@ -477,8 +477,8 @@ impl BlobCache {
         let hash = hex::encode(hasher.finalize());
 
         let tmp = self.path.join(format!(".{hash}"));
-        write_file(&tmp, blob)?;
-        std::fs::rename(tmp, self.path.join(&hash))?;
+        fs::write(&tmp, blob)?;
+        fs::rename(tmp, self.path.join(&hash))?;
 
         Ok(BlobRef(hash))
     }
