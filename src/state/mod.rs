@@ -8,6 +8,7 @@ use std::{
 };
 
 use anyhow::{bail, Context, Result};
+use fs_err as fs;
 use mint_lib::{mod_info::MetaConfig, DRGInstallation};
 use serde::{Deserialize, Serialize};
 
@@ -441,7 +442,7 @@ impl State {
 }
 
 fn read_config_or_default(config_path: &PathBuf) -> Result<VersionAnnotatedConfig> {
-    Ok(match std::fs::read(config_path) {
+    Ok(match fs::read(config_path) {
         Ok(buf) => {
             let config = serde_json::from_slice::<MaybeVersionedConfig>(&buf)
                 .context("failed to deserialize user config into maybe versioned config")?;
@@ -468,15 +469,15 @@ fn read_mod_data_or_default(
     mod_data_path: &PathBuf,
     legacy_mod_profiles_path: PathBuf,
 ) -> Result<VersionAnnotatedModData> {
-    let mod_data = match std::fs::read(mod_data_path) {
+    let mod_data = match fs::read(mod_data_path) {
         Ok(buf) => serde_json::from_slice::<MaybeVersionedModData>(&buf)
             .context("failed to deserialize existing `mod_data.json`")?,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-            match std::fs::read(&legacy_mod_profiles_path) {
+            match fs::read(&legacy_mod_profiles_path) {
                 Ok(buf) => {
                     let mod_data = serde_json::from_slice::<MaybeVersionedModData>(&buf)
                         .context("failed to deserialize legacy `profiles.json`")?;
-                    std::fs::remove_file(&legacy_mod_profiles_path)
+                    fs::remove_file(&legacy_mod_profiles_path)
                         .context("failed to remove legacy `profiles.json` while migrating")?;
                     mod_data
                 }

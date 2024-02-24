@@ -19,6 +19,7 @@ use anyhow::{Context, Result};
 
 use directories::ProjectDirs;
 use error::IntegrationError;
+use fs_err as fs;
 use integrate::IntegrationErr;
 use providers::{ModResolution, ModSpecification, ProviderFactory, ReadSeek};
 use state::State;
@@ -59,9 +60,9 @@ impl Dirs {
         )
     }
     fn from_paths<P: AsRef<Path>>(config_dir: P, cache_dir: P, data_dir: P) -> Result<Self> {
-        std::fs::create_dir_all(&config_dir)?;
-        std::fs::create_dir_all(&cache_dir)?;
-        std::fs::create_dir_all(&data_dir)?;
+        fs::create_dir_all(&config_dir)?;
+        fs::create_dir_all(&cache_dir)?;
+        fs::create_dir_all(&data_dir)?;
 
         Ok(Self {
             config_dir: config_dir.as_ref().to_path_buf(),
@@ -71,25 +72,8 @@ impl Dirs {
     }
 }
 
-/// File::open with the file path included in any error messages
-pub fn open_file<P: AsRef<Path>>(path: P) -> Result<std::fs::File> {
-    std::fs::File::open(&path)
-        .with_context(|| format!("Could not open file {}", path.as_ref().display()))
-}
-
-/// fs::read with the file path included in any error messages
-pub fn read_file<P: AsRef<Path>>(path: P) -> Result<Vec<u8>> {
-    std::fs::read(&path).with_context(|| format!("Could not read file {}", path.as_ref().display()))
-}
-
-/// fs::write with the file path included in any error messages
-pub fn write_file<P: AsRef<Path>, C: AsRef<[u8]>>(path: P, data: C) -> Result<()> {
-    std::fs::write(&path, data)
-        .with_context(|| format!("Could not write to file {}", path.as_ref().display()))
-}
-
 pub fn is_drg_pak<P: AsRef<Path>>(path: P) -> Result<()> {
-    let mut reader = std::io::BufReader::new(open_file(path)?);
+    let mut reader = std::io::BufReader::new(fs::File::open(path.as_ref())?);
     let pak = repak::PakBuilder::new().reader(&mut reader)?;
     pak.get("FSD/FSD.uproject", &mut reader)?;
     Ok(())
