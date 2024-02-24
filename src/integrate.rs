@@ -5,7 +5,7 @@ use std::io::{self, BufReader, BufWriter, Cursor, ErrorKind, Read, Seek};
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
-use mint_lib::mod_info::{ApprovalStatus, Meta, MetaConfig, MetaMod};
+use mint_lib::mod_info::{ApprovalStatus, Meta, MetaConfig, MetaMod, SemverVersion};
 use mint_lib::DRGInstallation;
 use repak::PakWriter;
 use serde::Deserialize;
@@ -566,13 +566,24 @@ pub fn integrate<P: AsRef<Path>>(
     })?;
 
     {
+        let mut split = env!("CARGO_PKG_VERSION").split('.');
+        let version = SemverVersion {
+            major: split.next().unwrap().parse().unwrap(),
+            minor: split.next().unwrap().parse().unwrap(),
+            patch: split.next().unwrap().parse().unwrap(),
+        };
+
         let meta = Meta {
-            version: env!("CARGO_PKG_VERSION").into(),
+            version,
             config,
             mods: mods
                 .iter()
                 .map(|(info, _)| MetaMod {
                     name: info.name.clone(),
+                    version: "TODO".into(), // TODO
+                    author: "TODO".into(),  // TODO
+                    required: info.suggested_require,
+                    url: info.resolution.get_resolvable_url_or_name().to_string(),
                     approval: info
                         .modio_tags
                         .as_ref()
