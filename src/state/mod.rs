@@ -337,6 +337,7 @@ pub struct Config {
     pub gui_theme: Option<GuiTheme>,
     #[serde(default, skip_serializing_if = "is_false")]
     pub disable_fix_exploding_gas: bool,
+    pub cache_dir: Option<PathBuf>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -389,6 +390,8 @@ impl DerefMut for VersionAnnotatedConfig {
 
 impl Default for Config!["0.0.0"] {
     fn default() -> Self {
+        let default_dirs = Dirs::default_xdg().expect("Failed to get default directories");
+
         Self {
             provider_parameters: Default::default(),
             drg_pak_path: DRGInstallation::find()
@@ -396,6 +399,7 @@ impl Default for Config!["0.0.0"] {
                 .map(DRGInstallation::main_pak),
             gui_theme: None,
             disable_fix_exploding_gas: false,
+            cache_dir: Some(default_dirs.cache_dir),
         }
     }
 }
