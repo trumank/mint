@@ -1,10 +1,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use anyhow::Result;
-
 use crate::providers::ModSpecification;
 
-use super::{Lint, LintCtxt};
+use super::{Lint, LintCtxt, LintError};
 
 #[derive(Default)]
 pub struct NonAssetFilesLint;
@@ -22,7 +20,7 @@ const ENDS_WITH_WHITE_LIST: [&str; 7] = [
 impl Lint for NonAssetFilesLint {
     type Output = BTreeMap<ModSpecification, BTreeSet<String>>;
 
-    fn check_mods(&mut self, lcx: &LintCtxt) -> Result<Self::Output> {
+    fn check_mods(&mut self, lcx: &LintCtxt) -> Result<Self::Output, LintError> {
         let mut non_asset_files = BTreeMap::new();
 
         lcx.for_each_mod_file(|mod_spec, _, _, _, normalized_path| {

@@ -1,9 +1,8 @@
-use anyhow::Result;
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::providers::ModSpecification;
 
-use super::{Lint, LintCtxt};
+use super::{Lint, LintCtxt, LintError};
 
 #[derive(Default)]
 pub struct AssetRegisterBinLint;
@@ -11,7 +10,7 @@ pub struct AssetRegisterBinLint;
 impl Lint for AssetRegisterBinLint {
     type Output = BTreeMap<ModSpecification, BTreeSet<String>>;
 
-    fn check_mods(&mut self, lcx: &LintCtxt) -> Result<Self::Output> {
+    fn check_mods(&mut self, lcx: &LintCtxt) -> Result<Self::Output, LintError> {
         let mut asset_register_bin_mods = BTreeMap::new();
 
         lcx.for_each_mod_file(|mod_spec, _, _, raw_path, normalized_path| {

@@ -3,7 +3,6 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::io::BufReader;
 use std::path::PathBuf;
 
-use anyhow::{bail, Result};
 use fs_err as fs;
 use path_slash::PathExt;
 use rayon::prelude::*;
@@ -12,7 +11,7 @@ use tracing::trace;
 
 use crate::providers::ModSpecification;
 
-use super::{Lint, LintCtxt};
+use super::{InvalidGamePathSnafu, Lint, LintCtxt, LintError};
 
 #[derive(Default)]
 pub struct UnmodifiedGameAssetsLint;
@@ -20,9 +19,9 @@ pub struct UnmodifiedGameAssetsLint;
 impl Lint for UnmodifiedGameAssetsLint {
     type Output = BTreeMap<ModSpecification, BTreeSet<String>>;
 
-    fn check_mods(&mut self, lcx: &LintCtxt) -> Result<Self::Output> {
+    fn check_mods(&mut self, lcx: &LintCtxt) -> Result<Self::Output, LintError> {
         let Some(game_pak_path) = &lcx.fsd_pak_path else {
-            bail!("UnmodifiedGameAssetsLint requires specifying a valid game pak path");
+            InvalidGamePathSnafu.fail()?
         };
 
         // Adapted from

@@ -2,7 +2,7 @@ use std::collections::BTreeSet;
 
 use crate::providers::ModSpecification;
 
-use super::{Lint, LintCtxt};
+use super::{Lint, LintCtxt, LintError};
 
 #[derive(Default)]
 pub struct ArchiveOnlyNonPakFilesLint;
@@ -10,7 +10,7 @@ pub struct ArchiveOnlyNonPakFilesLint;
 impl Lint for ArchiveOnlyNonPakFilesLint {
     type Output = BTreeSet<ModSpecification>;
 
-    fn check_mods(&mut self, lcx: &LintCtxt) -> anyhow::Result<Self::Output> {
+    fn check_mods(&mut self, lcx: &LintCtxt) -> Result<Self::Output, LintError> {
         let mut archive_only_non_pak_files_mods = BTreeSet::new();
         lcx.for_each_mod(
             |_, _, _| Ok(()),

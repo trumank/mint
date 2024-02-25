@@ -3,9 +3,9 @@ use std::ops::{Deref, DerefMut};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, RwLock};
 
-use anyhow::{Context, Result};
 use fs_err as fs;
 use serde::{Deserialize, Serialize};
+use snafu::prelude::*;
 
 use crate::state::config::ConfigWrapper;
 
@@ -96,16 +96,48 @@ impl Default for MaybeVersionedCache {
     }
 }
 
+#[derive(Debug, Snafu)]
+pub enum CacheError {
+    #[snafu(display("failed to read cache.json with provided path {}", search_path.display()))]
+    CacheJsonReadFailed {
+        source: std::io::Error,
+        search_path: PathBuf,
+    },
+    #[snafu(display("failed to deserialize cache.json into dynamic JSON value: {reason}"))]
+    DeserializeJsonFailed {
+        #[snafu(source(false))]
+        source: Option<serde_json::Error>,
+        reason: &'static str,
+    },
+    #[snafu(display("failed attempt to deserialize as legacy cache format"))]
+    DeserializeLegacyCacheFailed { source: serde_json::Error },
+    #[snafu(display("failed to deserialize as cache {version} format"))]
+    DeserializeVersionedCacheFailed {
+        source: serde_json::Error,
+        version: &'static str,
+    },
+}
+
 pub(crate) fn read_cache_metadata_or_default(
     cache_metadata_path: &PathBuf,
-) -> Result<VersionAnnotatedCache> {
+) -> Result<VersionAnnotatedCache, CacheError> {
     let cache: MaybeVersionedCache = match fs::read(cache_metadata_path) {
         Ok(buf) => {
-            let mut dyn_value = serde_json::from_slice::<serde_json::Value>(&buf)
-                .context("failed to deserialize cache metadata into dynamic json value")?;
-            let obj_map = dyn_value
-                .as_object_mut()
-                .context("failed to deserialize cache metadata into object map")?;
+            let mut dyn_value = match serde_json::from_slice::<serde_json::Value>(&buf) {
+                Ok(dyn_value) => dyn_value,
+                Err(e) => {
+                    return Err(CacheError::DeserializeJsonFailed {
+                        source: Some(e),
+                        reason: "malformed JSON",
+                    })
+                }
+            };
+            let Some(obj_map) = dyn_value.as_object_mut() else {
+                return Err(CacheError::DeserializeJsonFailed {
+                    source: None,
+                    reason: "failed to deserialize into object map",
+                });
+            };
             let version = obj_map.remove("version");
             if let Some(v) = version
                 && let serde_json::Value::String(vs) = v
@@ -119,7 +151,9 @@ pub(crate) fn read_cache_metadata_or_default(
                             Ok(c) => {
                                 MaybeVersionedCache::Versioned(VersionAnnotatedCache::V0_0_0(c))
                             }
-                            Err(e) => Err(e).context("failed to deserialize cache as v0.0.0")?,
+                            Err(e) => Err(e).context(DeserializeVersionedCacheFailedSnafu {
+                                version: "v0.0.0",
+                            })?,
                         }
                     }
                     _ => unimplemented!(),
@@ -129,12 +163,14 @@ pub(crate) fn read_cache_metadata_or_default(
                 // numeric keys in hashmaps, see <https://github.com/serde-rs/serde/issues/1183>.
                 match serde_json::from_slice::<HashMap<String, Box<dyn ModProviderCache>>>(&buf) {
                     Ok(c) => MaybeVersionedCache::Legacy(Cache_v0_0_0 { cache: c }),
-                    Err(e) => Err(e).context("failed to deserialize legacy cache")?,
+                    Err(e) => Err(e).context(DeserializeLegacyCacheFailedSnafu)?,
                 }
             }
         }
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => MaybeVersionedCache::default(),
-        Err(e) => Err(e).context("failed to read `cache.json`")?,
+        Err(e) => Err(e).context(CacheJsonReadFailedSnafu {
+            search_path: cache_metadata_path.to_owned(),
+        })?,
     };
 
     let cache: VersionAnnotatedCache = match cache {
@@ -150,6 +186,13 @@ pub(crate) fn read_cache_metadata_or_default(
 #[derive(Debug, Serialize, Deserialize)]
 pub struct BlobRef(String);
 
+#[derive(Debug, Snafu)]
+#[snafu(display("blob cache {kind} failed"))]
+pub struct BlobCacheError {
+    source: std::io::Error,
+    kind: &'static str,
+}
+
 #[derive(Debug, Clone)]
 pub struct BlobCache {
     path: PathBuf,
@@ -163,7 +206,7 @@ impl BlobCache {
         }
     }
 
-    pub(super) fn write(&self, blob: &[u8]) -> Result<BlobRef> {
+    pub(super) fn write(&self, blob: &[u8]) -> Result<BlobRef, BlobCacheError> {
         use sha2::{Digest, Sha256};
 
         let mut hasher = Sha256::new();
@@ -171,8 +214,8 @@ impl BlobCache {
         let hash = hex::encode(hasher.finalize());
 
         let tmp = self.path.join(format!(".{hash}"));
-        fs::write(&tmp, blob)?;
-        fs::rename(tmp, self.path.join(&hash))?;
+        fs::write(&tmp, blob).context(BlobCacheSnafu { kind: "write" })?;
+        fs::rename(tmp, self.path.join(&hash)).context(BlobCacheSnafu { kind: "rename" })?;
 
         Ok(BlobRef(hash))
     }

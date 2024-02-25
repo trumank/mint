@@ -4,7 +4,7 @@ use tracing::trace;
 
 use crate::providers::ModSpecification;
 
-use super::{Lint, LintCtxt};
+use super::{Lint, LintCtxt, LintError};
 
 #[derive(Default)]
 pub struct SplitAssetPairsLint;
@@ -18,7 +18,7 @@ pub enum SplitAssetPair {
 impl Lint for SplitAssetPairsLint {
     type Output = BTreeMap<ModSpecification, BTreeMap<String, SplitAssetPair>>;
 
-    fn check_mods(&mut self, lcx: &LintCtxt) -> anyhow::Result<Self::Output> {
+    fn check_mods(&mut self, lcx: &LintCtxt) -> Result<Self::Output, LintError> {
         let mut per_mod_path_without_final_ext_to_exts_map = BTreeMap::new();
 
         lcx.for_each_mod_file(|mod_spec, _, _, _, normalized_path| {

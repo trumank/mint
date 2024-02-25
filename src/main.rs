@@ -1,7 +1,7 @@
 use std::collections::BTreeSet;
 use std::path::PathBuf;
 
-use anyhow::{Context, Result};
+use anyhow::{anyhow, Context, Result};
 use clap::{Parser, Subcommand};
 use tracing::{debug, info};
 
@@ -10,6 +10,7 @@ use mint::providers::ProviderFactory;
 use mint::{gui::gui, providers::ModSpecification, state::State};
 use mint::{
     resolve_ordered_with_provider_init, resolve_unordered_and_integrate_with_provider_init, Dirs,
+    MintError,
 };
 
 /// Command line integration tool.
@@ -155,7 +156,11 @@ fn main() -> Result<()> {
 }
 
 #[tracing::instrument(skip(state))]
-fn init_provider(state: &mut State, url: String, factory: &ProviderFactory) -> Result<()> {
+fn init_provider(
+    state: &mut State,
+    url: String,
+    factory: &ProviderFactory,
+) -> Result<(), MintError> {
     info!("initializing provider for {:?}", url);
 
     let params = state
@@ -174,7 +179,7 @@ fn init_provider(state: &mut State, url: String, factory: &ProviderFactory) -> R
             params.insert(p.id.to_owned(), value);
         }
     }
-    state.store.add_provider(factory, params)
+    Ok(state.store.add_provider(factory, params)?)
 }
 
 fn get_pak_path(state: &State, arg: &Option<PathBuf>) -> Result<PathBuf> {
@@ -203,6 +208,7 @@ async fn action_integrate(dirs: Dirs, action: ActionIntegrate) -> Result<()> {
         init_provider,
     )
     .await
+    .map_err(|e| anyhow!("{}", e))
 }
 
 async fn action_integrate_profile(dirs: Dirs, action: ActionIntegrateProfile) -> Result<()> {
@@ -223,6 +229,7 @@ async fn action_integrate_profile(dirs: Dirs, action: ActionIntegrateProfile) ->
         init_provider,
     )
     .await
+    .map_err(|e| anyhow!("{}", e))
 }
 
 async fn action_lint(dirs: Dirs, action: ActionLint) -> Result<()> {
