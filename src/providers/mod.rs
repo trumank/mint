@@ -1,6 +1,8 @@
 pub mod file;
 pub mod http;
 pub mod modio;
+#[macro_use]
+pub mod cache;
 
 use crate::error::IntegrationError;
 use crate::state::config::ConfigWrapper;
@@ -13,66 +15,13 @@ use tracing::info;
 
 use std::collections::{HashMap, HashSet};
 use std::io::{Read, Seek};
-use std::ops::{Deref, DerefMut};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, RwLock};
 
+pub use cache::*;
 pub use mint_lib::mod_info::*;
 
 type Providers = RwLock<HashMap<&'static str, Arc<dyn ModProvider>>>;
-
-pub type ProviderCache = Arc<RwLock<ConfigWrapper<VersionAnnotatedCache>>>;
-
-#[obake::versioned]
-#[obake(version("0.0.0"))]
-#[derive(Debug, Default, Serialize, Deserialize)]
-pub struct Cache {
-    cache: HashMap<String, Box<dyn ModProviderCache>>,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-#[serde(tag = "version")]
-pub enum VersionAnnotatedCache {
-    #[serde(rename = "0.0.0")]
-    V0_0_0(Cache!["0.0.0"]),
-}
-
-impl Default for VersionAnnotatedCache {
-    fn default() -> Self {
-        VersionAnnotatedCache::V0_0_0(Default::default())
-    }
-}
-
-impl Deref for VersionAnnotatedCache {
-    type Target = Cache!["0.0.0"];
-
-    fn deref(&self) -> &Self::Target {
-        match self {
-            VersionAnnotatedCache::V0_0_0(c) => c,
-        }
-    }
-}
-
-impl DerefMut for VersionAnnotatedCache {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        match self {
-            VersionAnnotatedCache::V0_0_0(c) => c,
-        }
-    }
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-#[serde(untagged)]
-pub enum MaybeVersionedCache {
-    Versioned(VersionAnnotatedCache),
-    Legacy(Cache!["0.0.0"]),
-}
-
-impl Default for MaybeVersionedCache {
-    fn default() -> Self {
-        MaybeVersionedCache::Versioned(Default::default())
-    }
-}
 
 pub struct ModStore {
     providers: Providers,
@@ -297,55 +246,6 @@ impl ModStore {
     }
 }
 
-fn read_cache_metadata_or_default(cache_metadata_path: &PathBuf) -> Result<VersionAnnotatedCache> {
-    let cache: MaybeVersionedCache = match fs::read(cache_metadata_path) {
-        Ok(buf) => {
-            let mut dyn_value = serde_json::from_slice::<serde_json::Value>(&buf)
-                .context("failed to deserialize cache metadata into dynamic json value")?;
-            let obj_map = dyn_value
-                .as_object_mut()
-                .context("failed to deserialize cache metadata into object map")?;
-            let version = obj_map.remove("version");
-            if let Some(v) = version
-                && let serde_json::Value::String(vs) = v
-            {
-                match vs.as_str() {
-                    "0.0.0" => {
-                        // HACK: workaround a serde issue relating to flattening with tags
-                        // involving numeric keys in hashmaps, see
-                        // <https://github.com/serde-rs/serde/issues/1183>.
-                        match serde_json::from_slice::<Cache!["0.0.0"]>(&buf) {
-                            Ok(c) => {
-                                MaybeVersionedCache::Versioned(VersionAnnotatedCache::V0_0_0(c))
-                            }
-                            Err(e) => Err(e).context("failed to deserialize cache as v0.0.0")?,
-                        }
-                    }
-                    _ => unimplemented!(),
-                }
-            } else {
-                // HACK: workaround a serde issue relating to flattening with tags involving
-                // numeric keys in hashmaps, see <https://github.com/serde-rs/serde/issues/1183>.
-                match serde_json::from_slice::<HashMap<String, Box<dyn ModProviderCache>>>(&buf) {
-                    Ok(c) => MaybeVersionedCache::Legacy(Cache_v0_0_0 { cache: c }),
-                    Err(e) => Err(e).context("failed to deserialize legacy cache")?,
-                }
-            }
-        }
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => MaybeVersionedCache::default(),
-        Err(e) => Err(e).context("failed to read `cache.json`")?,
-    };
-
-    let cache: VersionAnnotatedCache = match cache {
-        MaybeVersionedCache::Versioned(v) => match v {
-            VersionAnnotatedCache::V0_0_0(v) => VersionAnnotatedCache::V0_0_0(v),
-        },
-        MaybeVersionedCache::Legacy(legacy) => VersionAnnotatedCache::V0_0_0(legacy),
-    };
-
-    Ok(cache)
-}
-
 pub trait ReadSeek: Read + Seek + Send {}
 impl<T: Seek + Read + Send> ReadSeek for T {}
 
@@ -360,6 +260,7 @@ pub enum FetchProgress {
         resolution: ModResolution,
     },
 }
+
 impl FetchProgress {
     pub fn resolution(&self) -> &ModResolution {
         match self {
@@ -417,40 +318,6 @@ pub struct ProviderParameter<'a> {
     pub name: &'a str,
     pub description: &'a str,
     pub link: Option<&'a str>,
-}
-
-#[typetag::serde(tag = "type")]
-pub trait ModProviderCache: Sync + Send + std::fmt::Debug {
-    fn new() -> Self
-    where
-        Self: Sized;
-    fn as_any(&self) -> &dyn std::any::Any;
-    fn as_any_mut(&mut self) -> &mut dyn std::any::Any;
-}
-
-impl Cache {
-    fn has<T: ModProviderCache + 'static>(&self, id: &str) -> bool {
-        self.cache
-            .get(id)
-            .and_then(|c| c.as_any().downcast_ref::<T>())
-            .is_none()
-    }
-
-    fn get<T: ModProviderCache + 'static>(&self, id: &str) -> Option<&T> {
-        self.cache
-            .get(id)
-            .and_then(|c| c.as_any().downcast_ref::<T>())
-    }
-
-    fn get_mut<T: ModProviderCache + 'static>(&mut self, id: &str) -> &mut T {
-        if self.has::<T>(id) {
-            self.cache.insert(id.to_owned(), Box::new(T::new()));
-        }
-        self.cache
-            .get_mut(id)
-            .and_then(|c| c.as_any_mut().downcast_mut::<T>())
-            .unwrap()
-    }
 }
 
 #[derive(Debug, Serialize, Deserialize)]
