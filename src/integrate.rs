@@ -3,11 +3,10 @@ use std::ffi::{OsStr, OsString};
 use std::fs::OpenOptions;
 use std::io::{self, BufReader, BufWriter, Cursor, ErrorKind, Read, Seek};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use anyhow::{Context, Result};
-use mint_lib::mod_info::{
-    ApprovalStatus, Meta, MetaConfig, MetaMod, ModIdentifier, ModioTags, SemverVersion,
-};
+use mint_lib::mod_info::{ApprovalStatus, Meta, MetaConfig, MetaMod, ModioTags, SemverVersion};
 use mint_lib::DRGInstallation;
 use repak::PakWriter;
 use serde::Deserialize;
@@ -17,7 +16,7 @@ use uasset_utils::splice::{
 };
 use unreal_asset::reader::ArchiveTrait;
 
-use crate::providers::ModInfo;
+use crate::providers::{ModInfo, ModStore};
 use crate::{get_pak_from_data, open_file};
 
 use unreal_asset::{
@@ -165,8 +164,9 @@ static INTEGRATION_DIR: include_dir::Dir<'_> =
 pub fn integrate<P: AsRef<Path>>(
     path_pak: P,
     config: MetaConfig,
+    store: Arc<ModStore>,
     mods: Vec<(ModInfo, PathBuf)>,
-) -> Result<HashMap<ModIdentifier, bool>, IntegrationErr> {
+) -> Result<(), IntegrationErr> {
     let installation = DRGInstallation::from_pak_path(&path_pak).map_err(|e| IntegrationErr {
         mod_ctxt: None,
         kind: IntegrationErrKind::Generic(e),
@@ -379,7 +379,7 @@ pub fn integrate<P: AsRef<Path>>(
 
     let mut added_paths = HashSet::new();
 
-    let mut gameplay_affecting_results = HashMap::default();
+    let mut gameplay_affecting_results = HashMap::new();
 
     for (mod_info, path) in &mods {
         let raw_mod_file = open_file(path).map_err(|e| IntegrationErr {
@@ -423,6 +423,7 @@ pub fn integrate<P: AsRef<Path>>(
         debug!(?mod_info, ?gameplay_affecting);
 
         gameplay_affecting_results.insert(mod_info.resolution.url.clone(), gameplay_affecting);
+        store.update_gameplay_affecting_status(mod_info.resolution.url.clone(), gameplay_affecting);
 
         let mount = Path::new(pak.mount_point());
 
@@ -628,12 +629,9 @@ pub fn integrate<P: AsRef<Path>>(
                     gameplay_affecting: match info.modio_tags.as_ref().map(|t| t.approval_status) {
                         Some(ApprovalStatus::Verified) => false,
                         Some(_) => true,
-                        None => gameplay_affecting_results
-                            .iter()
-                            .find_map(|(ident, res)| {
-                                (*ident == info.resolution.url).then_some(*res)
-                            })
-                            .unwrap_or(true),
+                        None => *gameplay_affecting_results
+                            .get(&info.resolution.url)
+                            .unwrap_or(&true),
                     },
                 })
                 .collect(),
@@ -657,7 +655,7 @@ pub fn integrate<P: AsRef<Path>>(
         path_mod_pak.display()
     );
 
-    Ok(gameplay_affecting_results)
+    Ok(())
 }
 
 pub fn check_gameplay_affecting<F, M>(

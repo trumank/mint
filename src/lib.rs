@@ -154,10 +154,9 @@ pub async fn resolve_unordered_and_integrate<P: AsRef<Path>>(
     integrate::integrate(
         game_path,
         state.config.deref().into(),
+        state.store.clone(),
         to_integrate.into_iter().zip(paths).collect(),
-    )?;
-
-    Ok(())
+    )
 }
 
 async fn resolve_into_urls<'b>(

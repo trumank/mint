@@ -8,7 +8,7 @@ use std::{
 };
 
 use anyhow::Result;
-use mint_lib::mod_info::{MetaConfig, ModIdentifier};
+use mint_lib::mod_info::MetaConfig;
 use tokio::{
     sync::mpsc::{self, Sender},
     task::JoinHandle,
@@ -180,7 +180,7 @@ impl ResolveMods {
 #[derive(Debug)]
 pub struct Integrate {
     rid: RequestID,
-    result: Result<HashMap<ModIdentifier, bool>, IntegrationErr>,
+    result: Result<(), IntegrationErr>,
 }
 
 impl Integrate {
@@ -211,15 +211,7 @@ impl Integrate {
     fn receive(self, app: &mut App) {
         if Some(self.rid) == app.integrate_rid.as_ref().map(|r| r.rid) {
             match self.result {
-                Ok(res) => {
-                    let resolution_gameplay_affecting_map =
-                        res.into_iter().collect::<HashMap<_, _>>();
-                    debug!(?resolution_gameplay_affecting_map);
-
-                    for (res, stat) in resolution_gameplay_affecting_map {
-                        app.state.store.update_gameplay_affecting_status(res, stat);
-                    }
-
+                Ok(()) => {
                     info!("integration complete");
                     app.last_action_status =
                         LastActionStatus::Success("integration complete".to_string());
@@ -397,7 +389,7 @@ async fn integrate_async(
     config: MetaConfig,
     rid: RequestID,
     message_tx: Sender<Message>,
-) -> Result<HashMap<ModIdentifier, bool>, IntegrationErr> {
+) -> Result<(), IntegrationErr> {
     let update = false;
 
     let mods = store
@@ -447,10 +439,11 @@ async fn integrate_async(
             kind: IntegrationErrKind::Generic(e),
         })?;
 
-    let gameplay_affecting_results = tokio::task::spawn_blocking(|| {
+    tokio::task::spawn_blocking(|| {
         crate::integrate::integrate(
             fsd_pak,
             config,
+            store,
             to_integrate.into_iter().zip(paths).collect(),
         )
     })
@@ -460,7 +453,7 @@ async fn integrate_async(
         kind: IntegrationErrKind::Generic(e.into()),
     })??;
 
-    Ok(gameplay_affecting_results)
+    Ok(())
 }
 
 #[derive(Debug)]
