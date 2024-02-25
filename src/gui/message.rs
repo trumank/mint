@@ -8,7 +8,7 @@ use std::{
 };
 
 use anyhow::Result;
-use eframe::egui;
+use mint_lib::mod_info::MetaConfig;
 use tokio::{
     sync::mpsc::{self, Sender},
     task::JoinHandle,
@@ -189,6 +189,7 @@ impl Integrate {
         store: Arc<ModStore>,
         mods: Vec<ModSpecification>,
         fsd_pak: PathBuf,
+        config: MetaConfig,
         tx: Sender<Message>,
         ctx: egui::Context,
     ) -> MessageHandle<HashMap<ModSpecification, SpecFetchProgress>> {
@@ -196,7 +197,9 @@ impl Integrate {
         MessageHandle {
             rid,
             handle: tokio::task::spawn(async move {
-                let res = integrate_async(store, ctx.clone(), mods, fsd_pak, rid, tx.clone()).await;
+                let res =
+                    integrate_async(store, ctx.clone(), mods, fsd_pak, config, rid, tx.clone())
+                        .await;
                 tx.send(Message::Integrate(Integrate { rid, result: res }))
                     .await
                     .unwrap();
@@ -383,6 +386,7 @@ async fn integrate_async(
     ctx: egui::Context,
     mod_specs: Vec<ModSpecification>,
     fsd_pak: PathBuf,
+    config: MetaConfig,
     rid: RequestID,
     message_tx: Sender<Message>,
 ) -> Result<(), IntegrationErr> {
@@ -436,7 +440,11 @@ async fn integrate_async(
         })?;
 
     tokio::task::spawn_blocking(|| {
-        crate::integrate::integrate(fsd_pak, to_integrate.into_iter().zip(paths).collect())
+        crate::integrate::integrate(
+            fsd_pak,
+            config,
+            to_integrate.into_iter().zip(paths).collect(),
+        )
     })
     .await
     .map_err(|e| IntegrationErr {

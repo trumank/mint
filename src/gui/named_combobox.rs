@@ -1,8 +1,4 @@
-use std;
-
 use super::{colors, custom_popup_above_or_below_widget, is_committed};
-
-use eframe::egui;
 
 use crate::state::{ModData_v0_1_0 as ModData, ModProfile_v0_1_0 as ModProfile};
 
@@ -23,9 +19,6 @@ impl Default for NamePopup {
 
 pub trait NamedEntries<E> {
     fn len(&self) -> usize;
-    fn is_empty(&self) -> bool {
-        self.len() == 0
-    }
     fn contains(&self, name: &str) -> bool;
     fn select(&mut self, name: String);
     fn selected_name(&self) -> &str;

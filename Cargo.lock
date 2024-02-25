@@ -867,6 +867,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "cobs"
+version = "0.2.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "67ba02a97a2bd10f4b59b25c7973101c79642302776489e030cd13cdab09ed15"
+
+[[package]]
 name = "cocoa"
 version = "0.25.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1488,6 +1494,12 @@ dependencies = [
  "bytemuck",
  "serde",
 ]
+
+[[package]]
+name = "embedded-io"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ef1a6892d9eef45c8fa6b9e0086428a2cca8491aca8f787c534a3d6d0bcb3ced"
 
 [[package]]
 name = "encode_unicode"
@@ -2186,13 +2198,16 @@ name = "hook"
 version = "0.2.10"
 dependencies = [
  "anyhow",
+ "bitflags 2.4.1",
  "hook_resolvers",
  "mint_lib",
  "patternsleuth",
+ "postcard",
  "repak",
  "retour",
  "serde",
  "serde_json",
+ "widestring",
  "windows 0.52.0",
 ]
 
@@ -2346,6 +2361,25 @@ dependencies = [
  "num-rational",
  "num-traits",
  "png",
+]
+
+[[package]]
+name = "include_dir"
+version = "0.7.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "18762faeff7122e89e0857b02f7ce6fcc0d101d5e9ad2ad7846cc01d61b7f19e"
+dependencies = [
+ "include_dir_macros",
+]
+
+[[package]]
+name = "include_dir_macros"
+version = "0.7.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b139284b5cf57ecfa712bcc66950bb635b31aff41c188e8a4cfc758eca374a3f"
+dependencies = [
+ "proc-macro2",
+ "quote",
 ]
 
 [[package]]
@@ -2712,6 +2746,7 @@ dependencies = [
  "hex",
  "hook",
  "image",
+ "include_dir",
  "indexmap 2.1.0",
  "inventory",
  "mint_lib",
@@ -2720,6 +2755,7 @@ dependencies = [
  "obake",
  "opener",
  "path-slash",
+ "postcard",
  "rayon",
  "regex",
  "repak",
@@ -2755,7 +2791,6 @@ dependencies = [
  "itertools 0.12.0",
  "repak",
  "serde",
- "serde_json",
  "steamlocate",
 ]
 
@@ -3111,7 +3146,7 @@ checksum = "3fdb12b2476b595f9358c5161aa467c2438859caa136dec86c26fdd2efe17b92"
 [[package]]
 name = "oodle_loader"
 version = "0.2.1"
-source = "git+https://github.com/trumank/repak#f8c345d37ed52056739a63801ee2cec84ce29a64"
+source = "git+https://github.com/trumank/repak#96410d664ac46c87cf451a3c5bad38d8cf42dda5"
 dependencies = [
  "anyhow",
  "hex",
@@ -3262,14 +3297,14 @@ checksum = "1e91099d4268b0e11973f036e885d652fb0b21fedcf69738c627f94db6a44f42"
 [[package]]
 name = "patternsleuth"
 version = "0.1.0"
-source = "git+https://github.com/trumank/patternsleuth#4b99b771e2a55ecafa6a0c3837679a69f8ce128c"
+source = "git+https://github.com/trumank/patternsleuth#651c3c6a6365add1b1dc1844ebe4f03940503258"
 dependencies = [
  "anyhow",
  "futures",
  "futures-scopes",
  "iced-x86",
  "inventory",
- "itertools 0.11.0",
+ "itertools 0.12.0",
  "libc",
  "memchr",
  "object",
@@ -3282,7 +3317,7 @@ dependencies = [
 [[package]]
 name = "patternsleuth_scanner"
 version = "0.1.0"
-source = "git+https://github.com/trumank/patternsleuth#4b99b771e2a55ecafa6a0c3837679a69f8ce128c"
+source = "git+https://github.com/trumank/patternsleuth#651c3c6a6365add1b1dc1844ebe4f03940503258"
 dependencies = [
  "anyhow",
  "memchr",
@@ -3465,6 +3500,17 @@ name = "portable-atomic"
 version = "1.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7170ef9988bc169ba16dd36a7fa041e5c4cbeb6a35b76d4c03daded371eae7c0"
+
+[[package]]
+name = "postcard"
+version = "1.0.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a55c51ee6c0db07e68448e336cf8ea4131a620edefebf9893e759b2d793420f8"
+dependencies = [
+ "cobs",
+ "embedded-io",
+ "serde",
+]
 
 [[package]]
 name = "powerfmt"
@@ -3727,7 +3773,7 @@ dependencies = [
 [[package]]
 name = "repak"
 version = "0.2.1"
-source = "git+https://github.com/trumank/repak#f8c345d37ed52056739a63801ee2cec84ce29a64"
+source = "git+https://github.com/trumank/repak#96410d664ac46c87cf451a3c5bad38d8cf42dda5"
 dependencies = [
  "aes",
  "byteorder",
@@ -5361,6 +5407,12 @@ name = "webpki-roots"
 version = "0.25.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1778a42e8b3b90bff8d0f5032bf22250792889a5cdc752aa0020c84abe3aaf10"
+
+[[package]]
+name = "widestring"
+version = "1.0.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "653f141f39ec16bba3c5abe400a0c60da7468261cc2cbf36805022876bc721a8"
 
 [[package]]
 name = "winapi"

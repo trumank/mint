@@ -5,7 +5,7 @@ use std::io::{self, BufReader, BufWriter, Cursor, ErrorKind, Read, Seek};
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
-use mint_lib::mod_info::{ApprovalStatus, Meta, MetaMod};
+use mint_lib::mod_info::{ApprovalStatus, Meta, MetaConfig, MetaMod, SemverVersion};
 use mint_lib::DRGInstallation;
 use repak::PakWriter;
 use serde::Deserialize;
@@ -156,8 +156,12 @@ pub enum IntegrationErrKind {
     UnrealAsset(unreal_asset::Error),
 }
 
+static INTEGRATION_DIR: include_dir::Dir<'_> =
+    include_dir::include_dir!("$CARGO_MANIFEST_DIR/assets/integration");
+
 pub fn integrate<P: AsRef<Path>>(
     path_pak: P,
+    config: MetaConfig,
     mods: Vec<(ModInfo, PathBuf)>,
 ) -> Result<(), IntegrationErr> {
     let installation = DRGInstallation::from_pak_path(&path_pak).map_err(|e| IntegrationErr {
@@ -377,7 +381,6 @@ pub fn integrate<P: AsRef<Path>>(
             }
         })?;
         let pak = repak::PakBuilder::new()
-            .oodle(repak::oodle_loader::decompress)
             .reader(&mut buf)
             .map_err(|e| IntegrationErr {
                 mod_ctxt: Some(mod_info.clone()),
@@ -483,80 +486,50 @@ pub fn integrate<P: AsRef<Path>>(
     patch_deferred(modding_tab_path, patch_modding_tab_item)?;
     patch_deferred(server_list_entry_path, patch_server_list_entry)?;
 
-    let mut int_pak_reader = Cursor::new(include_bytes!("../assets/integration.pak"));
-    let int_pak = repak::PakBuilder::new()
-        .reader(&mut int_pak_reader)
-        .map_err(|e| IntegrationErr {
-            mod_ctxt: None,
-            kind: IntegrationErrKind::Repak(e),
-        })?;
-
-    let mount = Path::new(int_pak.mount_point());
-    let files = int_pak.files();
-    let mut int_files = files
-        .iter()
-        .map(|p| {
-            (
-                mount
-                    .join(p)
-                    .strip_prefix("../../../")
-                    .expect("prefix does not match")
-                    .to_string_lossy()
-                    .replace('\\', "/"),
-                p,
-            )
-        })
-        .collect::<HashMap<_, _>>();
+    fn collect_dir_files(dir: &'static include_dir::Dir, collect: &mut HashMap<String, &[u8]>) {
+        for entry in dir.entries() {
+            match entry {
+                include_dir::DirEntry::Dir(dir) => {
+                    collect_dir_files(dir, collect);
+                }
+                include_dir::DirEntry::File(file) => {
+                    collect.insert(
+                        file.path().to_str().unwrap().replace('\\', "/"),
+                        file.contents(),
+                    );
+                }
+            }
+        }
+    }
+    let mut int_files = HashMap::new();
+    collect_dir_files(&INTEGRATION_DIR, &mut int_files);
 
     let int_path = (
         "FSD/Content/_AssemblyStorm/ModIntegration/MI_SpawnMods.uasset",
         "FSD/Content/_AssemblyStorm/ModIntegration/MI_SpawnMods.uexp",
     );
 
-    int_files.remove(int_path.0);
-    int_files.remove(int_path.1);
-
-    for (p, new_path) in int_files {
-        write_file(
-            &mut mod_pak,
-            &int_pak
-                .get(&p, &mut int_pak_reader)
-                .map_err(|e| IntegrationErr {
-                    mod_ctxt: None,
-                    kind: IntegrationErrKind::Repak(e),
-                })?,
-            new_path,
-        )
-        .map_err(|e| IntegrationErr {
+    for (path, data) in &int_files {
+        if path == int_path.0 || path == int_path.1 {
+            continue;
+        }
+        write_file(&mut mod_pak, data, path).map_err(|e| IntegrationErr {
             mod_ctxt: None,
             kind: IntegrationErrKind::Generic(e),
         })?;
     }
 
-    let mut int_asset =
-        unreal_asset::Asset::new(
-            Cursor::new(int_pak.get(int_path.0, &mut int_pak_reader).map_err(|e| {
-                IntegrationErr {
-                    mod_ctxt: None,
-                    kind: IntegrationErrKind::Repak(e),
-                }
-            })?),
-            Some(Cursor::new(
-                int_pak
-                    .get(int_path.1, &mut int_pak_reader)
-                    .map_err(|e| IntegrationErr {
-                        mod_ctxt: None,
-                        kind: IntegrationErrKind::Repak(e),
-                    })?,
-            )),
-            unreal_asset::engine_version::EngineVersion::VER_UE4_27,
-            None,
-            false,
-        )
-        .map_err(|e| IntegrationErr {
-            mod_ctxt: None,
-            kind: IntegrationErrKind::UnrealAsset(e),
-        })?;
+    let mut int_asset = unreal_asset::Asset::new(
+        Cursor::new(int_files[int_path.0]),
+        Some(Cursor::new(int_files[int_path.1])),
+        unreal_asset::engine_version::EngineVersion::VER_UE4_27,
+        None,
+        false,
+    )
+    .map_err(|e| IntegrationErr {
+        mod_ctxt: None,
+        kind: IntegrationErrKind::UnrealAsset(e),
+    })?;
 
     inject_init_actors(
         &mut int_asset,
@@ -592,12 +565,24 @@ pub fn integrate<P: AsRef<Path>>(
     })?;
 
     {
+        let mut split = env!("CARGO_PKG_VERSION").split('.');
+        let version = SemverVersion {
+            major: split.next().unwrap().parse().unwrap(),
+            minor: split.next().unwrap().parse().unwrap(),
+            patch: split.next().unwrap().parse().unwrap(),
+        };
+
         let meta = Meta {
-            version: env!("CARGO_PKG_VERSION").into(),
+            version,
+            config,
             mods: mods
                 .iter()
                 .map(|(info, _)| MetaMod {
                     name: info.name.clone(),
+                    version: "TODO".into(), // TODO
+                    author: "TODO".into(),  // TODO
+                    required: info.suggested_require,
+                    url: info.resolution.get_resolvable_url_or_name().to_string(),
                     approval: info
                         .modio_tags
                         .as_ref()
@@ -606,14 +591,11 @@ pub fn integrate<P: AsRef<Path>>(
                 })
                 .collect(),
         };
-        write_file(
-            &mut mod_pak,
-            &serde_json::to_vec(&meta).unwrap(),
-            "meta.json",
-        )
-        .map_err(|e| IntegrationErr {
-            mod_ctxt: None,
-            kind: IntegrationErrKind::Generic(e),
+        write_file(&mut mod_pak, &postcard::to_allocvec(&meta).unwrap(), "meta").map_err(|e| {
+            IntegrationErr {
+                mod_ctxt: None,
+                kind: IntegrationErrKind::Generic(e),
+            }
         })?;
     }
 

@@ -8,7 +8,7 @@ use std::{
 };
 
 use anyhow::{bail, Context, Result};
-use mint_lib::DRGInstallation;
+use mint_lib::{mod_info::MetaConfig, DRGInstallation};
 use serde::{Deserialize, Serialize};
 
 use crate::{
@@ -324,6 +324,10 @@ impl ModData!["0.1.0"] {
     }
 }
 
+fn is_false(value: &bool) -> bool {
+    !value
+}
+
 #[obake::versioned]
 #[obake(version("0.0.0"))]
 #[obake(version("0.1.0"))]
@@ -338,8 +342,8 @@ pub struct Config {
     #[obake(cfg("0.0.0"))]
     #[obake(cfg("0.1.0"))]
     pub gui_theme: Option<GuiTheme>,
-
-    #[obake(cfg("0.1.0"))]
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub disable_fix_exploding_gas: bool,
     pub cache_dir: Option<PathBuf>,
 }
 
@@ -407,7 +411,16 @@ impl Default for Config!["0.1.0"] {
                 .as_ref()
                 .map(DRGInstallation::main_pak),
             gui_theme: None,
+            disable_fix_exploding_gas: false,
             cache_dir: Some(default_dirs.cache_dir),
+        }
+    }
+}
+
+impl From<&VersionAnnotatedConfig> for MetaConfig {
+    fn from(value: &VersionAnnotatedConfig) -> Self {
+        MetaConfig {
+            disable_fix_exploding_gas: value.disable_fix_exploding_gas,
         }
     }
 }
@@ -472,7 +485,7 @@ fn read_config_or_default(config_path: &PathBuf) -> Result<VersionAnnotatedConfi
                     VersionAnnotatedConfig::V0_0_0(Config_v0_0_0 {
                         provider_parameters: legacy.provider_parameters,
                         drg_pak_path: legacy.drg_pak_path,
-                        gui_theme: None,
+                        ..Default::default()
                     })
                 }
             }

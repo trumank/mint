@@ -20,6 +20,7 @@ repak = { git = "https://github.com/trumank/repak" }
 serde = { version = "1.0.195", features = ["derive"] }
 serde_json = "1.0.111"
 itertools = "0.12.0"
+postcard = { version = "1.0.8", default-features = false, features = ["alloc"] }
 
 [package]
 name = "mint"
@@ -30,8 +31,9 @@ version.workspace = true
 edition.workspace = true
 
 [features]
-default = ["hook"]
+default = ["hook", "oodle"]
 hook = ["dep:hook"]
+oodle = ["repak/oodle_implicit_dynamic"]
 debug = ["egui/deadlock_detection", "egui/extra_debug_asserts", "egui/extra_asserts"]
 
 [dependencies]
@@ -79,7 +81,9 @@ uasset_utils = { git = "https://github.com/trumank/uasset_utils" }
 unreal_asset = { git = "https://github.com/trumank/unrealmodding", branch = "patches" }
 url = "2.5.0"
 zip = { version = "0.6.6", default-features = false, features = ["aes-crypto", "deflate", "time"] }
-repak = { workspace = true, features = ["oodle", "oodle_loader"] }
+repak.workspace = true
+include_dir = "0.7.3"
+postcard.workspace = true
 
 [target.'cfg(target_env = "msvc")'.dependencies]
 hook = { path = "hook", artifact = "cdylib", optional = true, target = "x86_64-pc-windows-msvc"}

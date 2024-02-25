@@ -7,6 +7,7 @@ mod toggle_switch;
 //#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")] // hide console window on Windows in release
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::ops::Deref;
 use std::time::{Duration, SystemTime};
 use std::{
     collections::{HashMap, HashSet},
@@ -19,11 +20,12 @@ use anyhow::{anyhow, Result};
 use eframe::egui::{Button, CollapsingHeader, RichText, Visuals};
 use eframe::epaint::{Pos2, Vec2};
 use eframe::{
-    egui::{self, FontSelection, Layout, TextFormat, Ui},
+    egui::{FontSelection, Layout, TextFormat, Ui},
     emath::{Align, Align2},
     epaint::{text::LayoutJob, Color32, Stroke},
 };
 use egui_commonmark::{CommonMarkCache, CommonMarkViewer};
+use mint_lib::mod_info::{ModioTags, RequiredStatus};
 use tokio::{
     sync::mpsc::{self, Receiver, Sender},
     task::JoinHandle,
@@ -37,8 +39,7 @@ use crate::{
     integrate::uninstall,
     is_drg_pak, is_valid_directory,
     providers::{
-        ApprovalStatus, FetchProgress, ModInfo, ModSpecification, ModStore, ModioTags,
-        ProviderFactory, RequiredStatus,
+        ApprovalStatus, FetchProgress, ModInfo, ModSpecification, ModStore, ProviderFactory,
     },
     state::{ModConfig, ModData_v0_1_0 as ModData, ModOrGroup, ModProfile, State},
 };
@@ -1645,6 +1646,7 @@ impl eframe::App for App {
                                     self.state.store.clone(),
                                     mods,
                                     self.state.config.drg_pak_path.as_ref().unwrap().clone(),
+                                    self.state.config.deref().into(),
                                     self.tx.clone(),
                                     ctx.clone(),
                                 ));

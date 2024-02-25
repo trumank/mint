@@ -1,4 +1,4 @@
-use std::collections::BTreeSet;
+use std::{collections::BTreeSet, fmt::Display};
 
 use serde::{Deserialize, Serialize};
 
@@ -106,19 +106,39 @@ impl ModResolution {
 /// Stripped down mod info stored in the mod pak to be used in game
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Meta {
-    pub version: String,
+    pub version: SemverVersion,
     pub mods: Vec<MetaMod>,
+    pub config: MetaConfig,
+}
+#[derive(Debug, Serialize, Deserialize)]
+pub struct MetaConfig {
+    pub disable_fix_exploding_gas: bool,
+}
+#[derive(Debug, Serialize, Deserialize)]
+pub struct SemverVersion {
+    pub major: u32,
+    pub minor: u32,
+    pub patch: u32,
+}
+impl Display for SemverVersion {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}.{}.{}", self.major, self.minor, self.patch)
+    }
 }
 #[derive(Debug, Serialize, Deserialize)]
 pub struct MetaMod {
     pub name: String,
+    pub version: String,
+    pub url: String,
+    pub author: String,
     pub approval: ApprovalStatus,
+    pub required: bool,
 }
 impl Meta {
     pub fn to_server_list_string(&self) -> String {
         use itertools::Itertools;
 
-        ["mint".into(), self.version.clone()]
+        ["mint".into(), self.version.to_string()]
             .into_iter()
             .chain(
                 self.mods

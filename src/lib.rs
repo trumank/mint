@@ -7,8 +7,9 @@ pub mod mod_lints;
 pub mod providers;
 pub mod state;
 
+use std::io::{Cursor, Read};
+use std::ops::Deref;
 use std::fs::{self, copy, create_dir_all};
-use std::io::{self, Cursor, Read};
 use std::str::FromStr;
 use std::{
     collections::HashSet,
@@ -208,7 +209,11 @@ pub async fn resolve_unordered_and_integrate<P: AsRef<Path>>(
             kind: integrate::IntegrationErrKind::Generic(e),
         })?;
 
-    integrate::integrate(game_path, to_integrate.into_iter().zip(paths).collect())
+    integrate::integrate(
+        game_path,
+        state.config.deref().into(),
+        to_integrate.into_iter().zip(paths).collect(),
+    )
 }
 
 async fn resolve_into_urls<'b>(
