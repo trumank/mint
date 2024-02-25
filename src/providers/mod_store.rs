@@ -1,19 +1,11 @@
-use std::collections::{HashMap, HashSet};
-use std::path::{Path, PathBuf};
-use std::sync::{Arc, RwLock};
+use std::collections::HashSet;
+use std::path::Path;
 
-use anyhow::{Context, Result};
-use tokio::sync::mpsc::Sender;
+use snafu::prelude::*;
 use tracing::*;
 
-use crate::error::IntegrationError;
+use crate::providers::*;
 use crate::state::config::ConfigWrapper;
-use mint_lib::mod_info::{ModInfo, ModResolution, ModResponse, ModSpecification};
-
-use super::{
-    read_cache_metadata_or_default, BlobCache, FetchProgress, ModProvider, ProviderCache,
-    ProviderFactory, Providers,
-};
 
 pub struct ModStore {
     providers: Providers,
@@ -25,16 +17,20 @@ impl ModStore {
     pub fn new<P: AsRef<Path>>(
         cache_path: P,
         parameters: &HashMap<String, HashMap<String, String>>,
-    ) -> Result<Self> {
-        let providers = inventory::iter::<ProviderFactory>()
-            .flat_map(|f| {
-                let params = parameters.get(f.id).cloned().unwrap_or_default();
-                f.parameters
-                    .iter()
-                    .all(|p| params.contains_key(p.id))
-                    .then(|| ((f.new)(&params).map(|p| (f.id, p))))
-            })
-            .collect::<Result<HashMap<_, _>>>()?;
+    ) -> Result<Self, ProviderError> {
+        let mut providers = HashMap::new();
+        for prov in Self::get_provider_factories() {
+            let params = parameters.get(prov.id).cloned().unwrap_or_default();
+            if prov.parameters.iter().all(|p| params.contains_key(p.id)) {
+                let Ok(provider) = (prov.new)(&params) else {
+                    return Err(ProviderError::InitProviderFailed {
+                        id: prov.id,
+                        parameters: params.to_owned(),
+                    });
+                };
+                providers.insert(prov.id, provider);
+            }
+        }
 
         let cache_metadata_path = cache_path.as_ref().join("cache.json");
 
@@ -57,7 +53,7 @@ impl ModStore {
         &self,
         provider_factory: &ProviderFactory,
         parameters: &HashMap<String, String>,
-    ) -> Result<()> {
+    ) -> Result<(), ProviderError> {
         let provider = (provider_factory.new)(parameters)?;
         self.providers
             .write()
@@ -70,7 +66,7 @@ impl ModStore {
         &self,
         provider_factory: &ProviderFactory,
         parameters: &HashMap<String, String>,
-    ) -> Result<()> {
+    ) -> Result<(), ProviderError> {
         let provider = (provider_factory.new)(parameters)?;
         provider.check().await?;
         self.providers
@@ -80,20 +76,20 @@ impl ModStore {
         Ok(())
     }
 
-    pub fn get_provider(&self, url: &str) -> Result<Arc<dyn ModProvider>> {
-        let factory = inventory::iter::<ProviderFactory>()
+    pub fn get_provider(&self, url: &str) -> Result<Arc<dyn ModProvider>, ProviderError> {
+        let factory = Self::get_provider_factories()
             .find(|f| (f.can_provide)(url))
-            .with_context(|| format!("Could not find mod provider for {:?}", url))?;
+            .context(ProviderNotFoundSnafu {
+                url: url.to_string(),
+            })?;
         let lock = self.providers.read().unwrap();
         Ok(match lock.get(factory.id) {
             Some(e) => e.clone(),
-            None => {
-                return Err(IntegrationError::NoProvider {
-                    url: url.to_string(),
-                    factory,
-                }
-                .into())
+            None => NoProviderSnafu {
+                url: url.to_string(),
+                factory,
             }
+            .fail()?,
         })
     }
 
@@ -101,7 +97,7 @@ impl ModStore {
         &self,
         mods: &[ModSpecification],
         update: bool,
-    ) -> Result<HashMap<ModSpecification, ModInfo>> {
+    ) -> Result<HashMap<ModSpecification, ModInfo>, ProviderError> {
         use futures::stream::{self, StreamExt, TryStreamExt};
 
         let mut to_resolve = mods.iter().cloned().collect::<HashSet<ModSpecification>>();
@@ -141,7 +137,7 @@ impl ModStore {
         &self,
         original_spec: ModSpecification,
         update: bool,
-    ) -> Result<(ModSpecification, ModInfo)> {
+    ) -> Result<(ModSpecification, ModInfo), ProviderError> {
         let mut spec = original_spec.clone();
         loop {
             match self
@@ -162,7 +158,7 @@ impl ModStore {
         mods: &[ModResolution],
         update: bool,
         tx: Option<Sender<FetchProgress>>,
-    ) -> Result<Vec<PathBuf>> {
+    ) -> Result<Vec<PathBuf>, ProviderError> {
         use futures::stream::{self, StreamExt, TryStreamExt};
 
         stream::iter(
@@ -180,7 +176,7 @@ impl ModStore {
         mods: &[&ModResolution],
         update: bool,
         tx: Option<Sender<FetchProgress>>,
-    ) -> Result<Vec<PathBuf>> {
+    ) -> Result<Vec<PathBuf>, ProviderError> {
         use futures::stream::{self, StreamExt, TryStreamExt};
 
         stream::iter(
@@ -198,7 +194,7 @@ impl ModStore {
         res: &ModResolution,
         update: bool,
         tx: Option<Sender<FetchProgress>>,
-    ) -> Result<PathBuf> {
+    ) -> Result<PathBuf, ProviderError> {
         self.get_provider(&res.url.0)?
             .fetch_mod(
                 res,
@@ -210,7 +206,7 @@ impl ModStore {
             .await
     }
 
-    pub async fn update_cache(&self) -> Result<()> {
+    pub async fn update_cache(&self) -> Result<(), ProviderError> {
         let providers = self.providers.read().unwrap().clone();
         for (name, provider) in providers.iter() {
             info!("updating cache for {name} provider");

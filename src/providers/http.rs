@@ -1,16 +1,9 @@
-use std::path::PathBuf;
 use std::sync::OnceLock;
-use std::{collections::HashMap, sync::Arc};
 
-use anyhow::{bail, Result};
 use serde::{Deserialize, Serialize};
-use tokio::sync::mpsc::Sender;
 use tracing::info;
 
-use super::{
-    BlobCache, BlobRef, FetchProgress, ModInfo, ModProvider, ModProviderCache, ModResolution,
-    ModResponse, ModSpecification, ProviderCache,
-};
+use crate::providers::*;
 
 inventory::submit! {
     super::ProviderFactory {
@@ -32,14 +25,17 @@ inventory::submit! {
 pub struct HttpProviderCache {
     url_blobs: HashMap<String, BlobRef>,
 }
+
 #[typetag::serde]
 impl ModProviderCache for HttpProviderCache {
     fn new() -> Self {
         Default::default()
     }
+
     fn as_any(&self) -> &dyn std::any::Any {
         self
     }
+
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
         self
     }
@@ -51,9 +47,12 @@ pub struct HttpProvider {
 }
 
 impl HttpProvider {
-    pub fn new_provider(_parameters: &HashMap<String, String>) -> Result<Arc<dyn ModProvider>> {
+    pub fn new_provider(
+        _parameters: &HashMap<String, String>,
+    ) -> Result<Arc<dyn ModProvider>, ProviderError> {
         Ok(Arc::new(Self::new()))
     }
+
     pub fn new() -> Self {
         Self {
             client: reqwest::Client::new(),
@@ -75,13 +74,19 @@ impl ModProvider for HttpProvider {
         spec: &ModSpecification,
         _update: bool,
         _cache: ProviderCache,
-    ) -> Result<ModResponse> {
-        let url = url::Url::parse(&spec.url)?;
+    ) -> Result<ModResponse, ProviderError> {
+        let Ok(url) = url::Url::parse(&spec.url) else {
+            return Err(ProviderError::InvalidUrl {
+                url: spec.url.to_string(),
+            });
+        };
+
         let name = url
             .path_segments()
             .and_then(|s| s.last())
             .map(|s| s.to_string())
             .unwrap_or_else(|| url.to_string());
+
         Ok(ModResponse::Resolve(ModInfo {
             provider: HTTP_PROVIDER_ID,
             name,
@@ -102,7 +107,7 @@ impl ModProvider for HttpProvider {
         cache: ProviderCache,
         blob_cache: &BlobCache,
         tx: Option<Sender<FetchProgress>>,
-    ) -> Result<PathBuf> {
+    ) -> Result<PathBuf, ProviderError> {
         let url = &res.url;
         Ok(
             if let Some(path) = if update {
@@ -125,16 +130,33 @@ impl ModProvider for HttpProvider {
                 path
             } else {
                 info!("downloading mod {url:?}...");
-                let response = self.client.get(&url.0).send().await?.error_for_status()?;
+                let response = self
+                    .client
+                    .get(&url.0)
+                    .send()
+                    .await
+                    .context(RequestFailedSnafu {
+                        url: url.0.to_string(),
+                    })?
+                    .error_for_status()
+                    .context(ResponseSnafu {
+                        url: url.0.to_string(),
+                    })?;
                 let size = response.content_length(); // TODO will be incorrect if compressed
                 if let Some(mime) = response
                     .headers()
                     .get(reqwest::header::HeaderName::from_static("content-type"))
                 {
-                    let content_type = &mime.to_str()?;
-                    if !["application/zip", "application/octet-stream"].contains(content_type) {
-                        bail!("unexpected content-type: {content_type}");
-                    }
+                    let content_type = mime.to_str().context(InvalidMimeSnafu {
+                        url: url.0.to_string(),
+                    })?;
+                    ensure!(
+                        !["application/zip", "application/octet-stream"].contains(&content_type),
+                        UnexpectedContentTypeSnafu {
+                            found_content_type: content_type.to_string(),
+                            url: url.0.to_string(),
+                        }
+                    );
                 }
 
                 use futures::stream::TryStreamExt;
@@ -142,8 +164,15 @@ impl ModProvider for HttpProvider {
 
                 let mut cursor = std::io::Cursor::new(vec![]);
                 let mut stream = response.bytes_stream();
-                while let Some(bytes) = stream.try_next().await? {
-                    cursor.write_all(&bytes).await?;
+                while let Some(bytes) = stream.try_next().await.with_context(|_| FetchSnafu {
+                    url: url.0.to_string(),
+                })? {
+                    cursor
+                        .write_all(&bytes)
+                        .await
+                        .with_context(|_| BufferIoSnafu {
+                            url: url.0.to_string(),
+                        })?;
                     if let Some(size) = size {
                         if let Some(tx) = &tx {
                             tx.send(FetchProgress::Progress {
@@ -178,13 +207,14 @@ impl ModProvider for HttpProvider {
         )
     }
 
-    async fn update_cache(&self, _cache: ProviderCache) -> Result<()> {
+    async fn update_cache(&self, _cache: ProviderCache) -> Result<(), ProviderError> {
         Ok(())
     }
 
-    async fn check(&self) -> Result<()> {
+    async fn check(&self) -> Result<(), ProviderError> {
         Ok(())
     }
+
     fn get_mod_info(&self, spec: &ModSpecification, _cache: ProviderCache) -> Option<ModInfo> {
         let url = url::Url::parse(&spec.url).ok()?;
         let name = url
@@ -208,6 +238,7 @@ impl ModProvider for HttpProvider {
     fn is_pinned(&self, _spec: &ModSpecification, _cache: ProviderCache) -> bool {
         true
     }
+
     fn get_version_name(&self, _spec: &ModSpecification, _cache: ProviderCache) -> Option<String> {
         Some("latest".to_string())
     }

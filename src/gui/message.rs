@@ -1,34 +1,29 @@
 use std::collections::BTreeSet;
 use std::ops::DerefMut;
 use std::time::SystemTime;
-use std::{
-    collections::{HashMap, HashSet},
-    path::PathBuf,
-    sync::Arc,
-};
+use std::{collections::HashMap, sync::Arc};
 
-use anyhow::Result;
-use mint_lib::mod_info::MetaConfig;
+use snafu::prelude::*;
 use tokio::{
     sync::mpsc::{self, Sender},
     task::JoinHandle,
 };
-use tracing::{debug, error, info};
-
-use crate::integrate::{IntegrationErr, IntegrationErrKind};
-use crate::mod_lints::{LintId, LintReport};
-use crate::state::{ModData_v0_1_0 as ModData, ModOrGroup};
-use crate::{
-    error::IntegrationError,
-    providers::{FetchProgress, ModInfo, ModResolution, ModSpecification, ModStore},
-    state::ModConfig,
-};
+use tracing::*;
 
 use super::SelfUpdateProgress;
 use super::{
     request_counter::{RequestCounter, RequestID},
     App, GitHubRelease, LastActionStatus, SpecFetchProgress, WindowProviderParameters,
 };
+use crate::integrate::*;
+use crate::mod_lints::{LintId, LintReport};
+use crate::state::{ModData_v0_1_0 as ModData, ModOrGroup};
+use crate::*;
+use crate::{
+    providers::{FetchProgress, ModInfo, ModStore},
+    state::ModConfig,
+};
+use mint_lib::mod_info::MetaConfig;
 
 #[derive(Debug)]
 pub struct MessageHandle<S> {
@@ -68,7 +63,7 @@ impl Message {
 pub struct ResolveMods {
     rid: RequestID,
     specs: Vec<ModSpecification>,
-    result: Result<HashMap<ModSpecification, ModInfo>>,
+    result: Result<HashMap<ModSpecification, ModInfo>, ProviderError>,
     is_dependency: bool,
 }
 
@@ -81,8 +76,8 @@ impl ResolveMods {
     ) {
         let rid = app.request_counter.next();
         let store = app.state.store.clone();
-        let tx = app.tx.clone();
         let ctx = ctx.clone();
+        let tx = app.tx.clone();
         let handle = tokio::spawn(async move {
             let result = store.resolve_mods(&specs, false).await;
             tx.send(Message::ResolveMods(Self {
@@ -159,18 +154,15 @@ impl ResolveMods {
                     app.last_action_status =
                         LastActionStatus::Success("mods successfully resolved".to_string());
                 }
-                Err(e) => match e.downcast::<IntegrationError>() {
-                    Ok(IntegrationError::NoProvider { url: _, factory }) => {
-                        app.window_provider_parameters =
-                            Some(WindowProviderParameters::new(factory, &app.state));
-                        app.last_action_status =
-                            LastActionStatus::Failure("no provider".to_string());
-                    }
-                    Err(e) => {
-                        error!("{:#?}\n{}", e, e.backtrace());
-                        app.last_action_status = LastActionStatus::Failure(e.to_string());
-                    }
-                },
+                Err(e) if let ProviderError::NoProvider { url: _, factory } = e => {
+                    app.window_provider_parameters =
+                        Some(WindowProviderParameters::new(factory, &app.state));
+                    app.last_action_status = LastActionStatus::Failure("no provider".to_string());
+                }
+                Err(e) => {
+                    error!("{}", e);
+                    app.last_action_status = LastActionStatus::Failure(e.to_string());
+                }
             }
             app.resolve_mod_rid = None;
         }
@@ -180,7 +172,7 @@ impl ResolveMods {
 #[derive(Debug)]
 pub struct Integrate {
     rid: RequestID,
-    result: Result<(), IntegrationErr>,
+    result: Result<(), IntegrationError>,
 }
 
 impl Integrate {
@@ -208,6 +200,7 @@ impl Integrate {
             state: Default::default(),
         }
     }
+
     fn receive(self, app: &mut App) {
         if Some(self.rid) == app.integrate_rid.as_ref().map(|r| r.rid) {
             match self.result {
@@ -216,37 +209,18 @@ impl Integrate {
                     app.last_action_status =
                         LastActionStatus::Success("integration complete".to_string());
                 }
-                Err(IntegrationErr { mod_ctxt, kind }) => match kind {
-                    IntegrationErrKind::Generic(e) => match e.downcast::<IntegrationError>() {
-                        Ok(IntegrationError::NoProvider { url: _, factory }) => {
-                            app.window_provider_parameters =
-                                Some(WindowProviderParameters::new(factory, &app.state));
-                            app.last_action_status =
-                                LastActionStatus::Failure("no provider".to_string());
-                        }
-                        Err(e) => {
-                            match mod_ctxt {
-                                        Some(mod_ctxt) => error!("error encountered during integration while working with mod `{:?}`\n{:#?}\n{}", mod_ctxt, e, e.backtrace()),
-                                        None => error!("{:#?}\n{}", e, e.backtrace()),
-                                    };
-                            app.last_action_status = LastActionStatus::Failure(e.to_string());
-                        }
-                    },
-                    IntegrationErrKind::Repak(e) => {
-                        match mod_ctxt {
-                                Some(mod_ctxt) => error!("`repak` error encountered during integration while working with mod `{:?}`\n{:#?}", mod_ctxt, e),
-                                None => error!("`repak` error encountered during integration: {:#?}", e),
-                            };
-                        app.last_action_status = LastActionStatus::Failure(e.to_string());
-                    }
-                    IntegrationErrKind::UnrealAsset(e) => {
-                        match mod_ctxt {
-                                Some(mod_ctxt) => error!("`unreal_asset` error encountered during integration while working with mod `{:?}`\n{:#?}", mod_ctxt, e),
-                                None => error!("`unreal_asset` error encountered during integration: {:#?}", e),
-                            };
-                        app.last_action_status = LastActionStatus::Failure(e.to_string());
-                    }
-                },
+                Err(ref e)
+                    if let IntegrationError::ProviderError { ref source } = e
+                        && let ProviderError::NoProvider { url: _, factory } = source =>
+                {
+                    app.window_provider_parameters =
+                        Some(WindowProviderParameters::new(factory, &app.state));
+                    app.last_action_status = LastActionStatus::Failure("no provider".to_string());
+                }
+                Err(e) => {
+                    error!("{}", e);
+                    app.last_action_status = LastActionStatus::Failure(e.to_string());
+                }
             }
             app.integrate_rid = None;
         }
@@ -273,7 +247,7 @@ impl FetchModProgress {
 #[derive(Debug)]
 pub struct UpdateCache {
     rid: RequestID,
-    result: Result<()>,
+    result: Result<(), ProviderError>,
 }
 
 impl UpdateCache {
@@ -303,19 +277,15 @@ impl UpdateCache {
                     app.last_action_status =
                         LastActionStatus::Success("successfully updated cache".to_string());
                 }
-                Err(e) => match e.downcast::<IntegrationError>() {
-                    // TODO make provider initializing more generic
-                    Ok(IntegrationError::NoProvider { url: _, factory }) => {
-                        app.window_provider_parameters =
-                            Some(WindowProviderParameters::new(factory, &app.state));
-                        app.last_action_status =
-                            LastActionStatus::Failure("no provider".to_string());
-                    }
-                    Err(e) => {
-                        error!("{:#?}\n{}", e, e.backtrace());
-                        app.last_action_status = LastActionStatus::Failure(e.to_string());
-                    }
-                },
+                Err(e) if let ProviderError::NoProvider { url: _, factory } = e => {
+                    app.window_provider_parameters =
+                        Some(WindowProviderParameters::new(factory, &app.state));
+                    app.last_action_status = LastActionStatus::Failure("no provider".to_string());
+                }
+                Err(e) => {
+                    error!("{}", e);
+                    app.last_action_status = LastActionStatus::Failure(e.to_string());
+                }
             }
             app.update_rid = None;
         }
@@ -325,7 +295,7 @@ impl UpdateCache {
 #[derive(Debug)]
 pub struct CheckUpdates {
     rid: RequestID,
-    result: Result<GitHubRelease>,
+    result: Result<GitHubRelease, MintError>,
 }
 
 impl CheckUpdates {
@@ -334,15 +304,24 @@ impl CheckUpdates {
         let tx = app.tx.clone();
         let ctx = ctx.clone();
 
-        async fn req() -> Result<GitHubRelease> {
+        async fn req() -> Result<GitHubRelease, MintError> {
             Ok(reqwest::Client::builder()
                 .user_agent("trumank/mint")
-                .build()?
+                .build()
+                .map_err(|_| MintError::GenericError {
+                    msg: "failed to construct reqwest client".to_string(),
+                })?
                 .get("https://api.github.com/repos/trumank/mint/releases/latest")
                 .send()
-                .await?
+                .await
+                .map_err(|_| MintError::GenericError {
+                    msg: "check self update request failed".to_string(),
+                })?
                 .json::<GitHubRelease>()
-                .await?)
+                .await
+                .map_err(|_| MintError::GenericError {
+                    msg: "check self update response is error".to_string(),
+                })?)
         }
 
         let handle = tokio::spawn(async move {
@@ -389,16 +368,10 @@ async fn integrate_async(
     config: MetaConfig,
     rid: RequestID,
     message_tx: Sender<Message>,
-) -> Result<(), IntegrationErr> {
+) -> Result<(), IntegrationError> {
     let update = false;
 
-    let mods = store
-        .resolve_mods(&mod_specs, update)
-        .await
-        .map_err(|e| IntegrationErr {
-            mod_ctxt: None,
-            kind: IntegrationErrKind::Generic(e),
-        })?;
+    let mods = store.resolve_mods(&mod_specs, update).await?;
 
     let to_integrate = mod_specs
         .iter()
@@ -431,13 +404,7 @@ async fn integrate_async(
         }
     });
 
-    let paths = store
-        .fetch_mods(&urls, update, Some(tx))
-        .await
-        .map_err(|e| IntegrationErr {
-            mod_ctxt: None,
-            kind: IntegrationErrKind::Generic(e),
-        })?;
+    let paths = store.fetch_mods(&urls, update, Some(tx)).await?;
 
     tokio::task::spawn_blocking(|| {
         crate::integrate::integrate(
@@ -446,11 +413,7 @@ async fn integrate_async(
             to_integrate.into_iter().zip(paths).collect(),
         )
     })
-    .await
-    .map_err(|e| IntegrationErr {
-        mod_ctxt: None,
-        kind: IntegrationErrKind::Generic(e.into()),
-    })??;
+    .await??;
 
     Ok(())
 }
@@ -458,7 +421,7 @@ async fn integrate_async(
 #[derive(Debug)]
 pub struct LintMods {
     rid: RequestID,
-    result: Result<LintReport>,
+    result: Result<LintReport, IntegrationError>,
 }
 
 impl LintMods {
@@ -488,7 +451,8 @@ impl LintMods {
                     )
                 })
                 .await
-                .unwrap(),
+                .unwrap()
+                .map_err(Into::into),
                 Err(e) => Err(e),
             };
 
@@ -507,6 +471,7 @@ impl LintMods {
             state: Default::default(),
         }
     }
+
     fn receive(self, app: &mut App) {
         if Some(self.rid) == app.lint_rid.as_ref().map(|r| r.rid) {
             match self.result {
@@ -516,18 +481,18 @@ impl LintMods {
                     app.last_action_status =
                         LastActionStatus::Success("lint mod report complete".to_string());
                 }
-                Err(e) => match e.downcast::<IntegrationError>() {
-                    Ok(IntegrationError::NoProvider { url: _, factory }) => {
-                        app.window_provider_parameters =
-                            Some(WindowProviderParameters::new(factory, &app.state));
-                        app.last_action_status =
-                            LastActionStatus::Failure("no provider".to_string());
-                    }
-                    Err(e) => {
-                        error!("{:#?}\n{}", e, e.backtrace());
-                        app.last_action_status = LastActionStatus::Failure(e.to_string());
-                    }
-                },
+                Err(ref e)
+                    if let IntegrationError::ProviderError { ref source } = e
+                        && let ProviderError::NoProvider { url: _, factory } = source =>
+                {
+                    app.window_provider_parameters =
+                        Some(WindowProviderParameters::new(factory, &app.state));
+                    app.last_action_status = LastActionStatus::Failure("no provider".to_string());
+                }
+                Err(e) => {
+                    error!("{}", e);
+                    app.last_action_status = LastActionStatus::Failure(e.to_string());
+                }
             }
             app.integrate_rid = None;
         }
@@ -540,7 +505,7 @@ async fn resolve_async_ordered(
     mod_specs: Vec<ModSpecification>,
     rid: RequestID,
     message_tx: Sender<Message>,
-) -> Result<Vec<PathBuf>> {
+) -> Result<Vec<PathBuf>, IntegrationError> {
     let update = false;
 
     let mods = store.resolve_mods(&mod_specs, update).await?;
@@ -576,13 +541,13 @@ async fn resolve_async_ordered(
         }
     });
 
-    store.fetch_mods_ordered(&urls, update, Some(tx)).await
+    Ok(store.fetch_mods_ordered(&urls, update, Some(tx)).await?)
 }
 
 #[derive(Debug)]
 pub struct SelfUpdate {
     rid: RequestID,
-    result: Result<PathBuf>,
+    result: Result<PathBuf, IntegrationError>,
 }
 
 impl SelfUpdate {
@@ -647,7 +612,7 @@ async fn self_update_async(
     ctx: egui::Context,
     rid: RequestID,
     message_tx: Sender<Message>,
-) -> Result<PathBuf> {
+) -> Result<PathBuf, IntegrationError> {
     use futures::stream::TryStreamExt;
     use tokio::io::AsyncWriteExt;
 
@@ -683,8 +648,12 @@ async fn self_update_async(
             "https://github.com/trumank/mint/releases/latest/download/{asset_name}"
         ))
         .send()
-        .await?
-        .error_for_status()?;
+        .await
+        .map_err(Into::into)
+        .with_context(|_| SelfUpdateFailedSnafu)?
+        .error_for_status()
+        .map_err(Into::into)
+        .with_context(|_| SelfUpdateFailedSnafu)?;
     let size = response.content_length();
     debug!(?response);
     debug!(?size);
@@ -693,11 +662,19 @@ async fn self_update_async(
         .prefix("self_update")
         .tempdir_in(std::env::current_dir()?)?;
     let tmp_archive_path = tmp_dir.path().join(asset_name);
-    let mut tmp_archive = tokio::fs::File::create(&tmp_archive_path).await?;
+    let mut tmp_archive = tokio::fs::File::create(&tmp_archive_path)
+        .await
+        .map_err(Into::into)
+        .with_context(|_| SelfUpdateFailedSnafu)?;
     let mut stream = response.bytes_stream();
 
     let mut total_bytes_written = 0;
-    while let Some(bytes) = stream.try_next().await? {
+    while let Some(bytes) = stream
+        .try_next()
+        .await
+        .map_err(Into::into)
+        .with_context(|_| SelfUpdateFailedSnafu)?
+    {
         let bytes_written = tmp_archive.write(&bytes).await?;
         total_bytes_written += bytes_written;
         if let Some(size) = size {
@@ -714,41 +691,45 @@ async fn self_update_async(
     debug!(?tmp_archive_path);
     debug!(?tmp_archive);
 
-    let original_exe_path = tokio::task::spawn_blocking(move || -> Result<PathBuf> {
-        let bin_name = if cfg!(target_os = "windows") {
-            "mint.exe"
-        } else if cfg!(target_os = "linux") {
-            "mint"
-        } else {
-            unimplemented!("unsupported platform");
-        };
+    let original_exe_path =
+        tokio::task::spawn_blocking(move || -> Result<PathBuf, IntegrationError> {
+            let bin_name = if cfg!(target_os = "windows") {
+                "mint.exe"
+            } else if cfg!(target_os = "linux") {
+                "mint"
+            } else {
+                unimplemented!("unsupported platform");
+            };
 
-        info!("extracting downloaded update archive");
-        self_update::Extract::from_source(&tmp_archive_path)
-            .archive(self_update::ArchiveKind::Zip)
-            .extract_file(tmp_dir.path(), bin_name)?;
+            info!("extracting downloaded update archive");
+            self_update::Extract::from_source(&tmp_archive_path)
+                .archive(self_update::ArchiveKind::Zip)
+                .extract_file(tmp_dir.path(), bin_name)
+                .map_err(Into::into)
+                .with_context(|_| SelfUpdateFailedSnafu)?;
 
-        info!("replacing old executable with new executable");
-        let tmp_file = tmp_dir.path().join("replacement_tmp");
-        let bin_path = tmp_dir.path().join(bin_name);
+            info!("replacing old executable with new executable");
+            let tmp_file = tmp_dir.path().join("replacement_tmp");
+            let bin_path = tmp_dir.path().join(bin_name);
 
-        let original_exe_path = std::env::current_exe()?;
+            let original_exe_path = std::env::current_exe()?;
 
-        self_update::Move::from_source(&bin_path)
-            .replace_using_temp(&tmp_file)
-            .to_dest(&original_exe_path)?;
+            self_update::Move::from_source(&bin_path)
+                .replace_using_temp(&tmp_file)
+                .to_dest(&original_exe_path)
+                .map_err(Into::into)
+                .with_context(|_| SelfUpdateFailedSnafu)?;
 
-        #[cfg(target_os = "linux")]
-        {
-            info!("setting executable permission on new executable");
-            use std::os::unix::fs::PermissionsExt;
-            std::fs::set_permissions(&original_exe_path, fs::Permissions::from_mode(0o755))
-                .unwrap();
-        }
+            #[cfg(target_os = "linux")]
+            {
+                info!("setting executable permission on new executable");
+                use std::os::unix::fs::PermissionsExt;
+                fs::set_permissions(&original_exe_path, fs::Permissions::from_mode(0o755)).unwrap();
+            }
 
-        Ok(original_exe_path)
-    })
-    .await??;
+            Ok(original_exe_path)
+        })
+        .await??;
 
     tx.send(SelfUpdateProgress::Complete).await.unwrap();
 

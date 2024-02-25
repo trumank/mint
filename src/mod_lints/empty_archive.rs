@@ -1,10 +1,8 @@
 use std::collections::BTreeSet;
 
-use anyhow::Result;
-
 use crate::providers::ModSpecification;
 
-use super::{Lint, LintCtxt};
+use super::{Lint, LintCtxt, LintError};
 
 #[derive(Default)]
 pub struct EmptyArchiveLint;
@@ -12,7 +10,7 @@ pub struct EmptyArchiveLint;
 impl Lint for EmptyArchiveLint {
     type Output = BTreeSet<ModSpecification>;
 
-    fn check_mods(&mut self, lcx: &LintCtxt) -> Result<Self::Output> {
+    fn check_mods(&mut self, lcx: &LintCtxt) -> Result<Self::Output, LintError> {
         let mut empty_archive_mods = BTreeSet::new();
 
         lcx.for_each_mod(
