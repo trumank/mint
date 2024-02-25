@@ -10,11 +10,12 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::time::{Duration, SystemTime};
 use std::{
     collections::{HashMap, HashSet},
+    fs,
     ops::DerefMut,
     path::PathBuf,
 };
 
-use anyhow::{anyhow, Context, Result};
+use anyhow::{anyhow, Result};
 use eframe::egui::{Button, CollapsingHeader, RichText, Visuals};
 use eframe::epaint::{Pos2, Vec2};
 use eframe::{
@@ -32,8 +33,9 @@ use tracing::{debug, trace};
 use crate::mod_lints::{LintId, LintReport, SplitAssetPair};
 use crate::Dirs;
 use crate::{
+    clear_directory,
     integrate::uninstall,
-    is_drg_pak,
+    is_drg_pak, is_valid_directory,
     providers::{
         ApprovalStatus, FetchProgress, ModInfo, ModSpecification, ModStore, ModioTags,
         ProviderFactory, RequiredStatus,
@@ -928,26 +930,26 @@ impl App {
                         });
                         ui.end_row();
 
-                        let config_dir = &self.state.dirs.config_dir;
-                        ui.label("Config directory:");
-                        if ui.link(config_dir.display().to_string()).clicked() {
-                            opener::open(config_dir).ok();
-                        }
-                        ui.end_row();
+                        let edit_directory_field = |ui: &mut egui::Ui, label: &str, path: &mut String, err: &mut Option<String>| {
+                            ui.horizontal(|ui| {
+                                ui.label(label);
+                                ui.text_edit_singleline(path);
 
-                        let cache_dir = &self.state.dirs.cache_dir;
-                        ui.label("Cache directory:");
-                        if ui.link(cache_dir.display().to_string()).clicked() {
-                            opener::open(cache_dir).ok();
-                        }
-                        ui.end_row();
+                                if ui.button("Browse").clicked() {
+                                    if let Some(selected_path) = rfd::FileDialog::new().pick_folder() {
+                                        *path = selected_path.to_string_lossy().to_string();
+                                        *err = None;
+                                    }
+                                }
 
-                        let data_dir = &self.state.dirs.data_dir;
-                        ui.label("Data directory:");
-                        if ui.link(data_dir.display().to_string()).clicked() {
-                            opener::open(data_dir).ok();
-                        }
-                        ui.end_row();
+                                if let Some(err_msg) = err {
+                                    ui.label(&*err_msg);
+                                }
+                                ui.end_row();
+                            });
+                        };
+
+                        edit_directory_field(ui, "Cache Directory:", &mut window.cache_dir, &mut window.cache_dir_err);
 
                         ui.label("GUI theme:");
                         ui.horizontal(|ui| {
@@ -980,24 +982,56 @@ impl App {
                         }
                     });
 
-                    ui.with_layout(egui::Layout::right_to_left(Align::TOP), |ui| {
-                        if ui.add_enabled(window.drg_pak_path_err.is_none(), egui::Button::new("save")).clicked() {
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::TOP), |ui| {
+                        let can_save = window.drg_pak_path_err.is_none()
+                            && window.cache_dir_err.is_none();
+
+                        if ui.add_enabled(can_save, egui::Button::new("save")).clicked() {
                             try_save = true;
                         }
+
                         if let Some(error) = &window.drg_pak_path_err {
+                            ui.colored_label(ui.visuals().error_fg_color, error);
+                        }
+                        if let Some(error) = &window.cache_dir_err {
                             ui.colored_label(ui.visuals().error_fg_color, error);
                         }
                     });
 
                 });
             if try_save {
-                if let Err(e) = is_drg_pak(&window.drg_pak_path).context("Is not valid DRG pak") {
+                let mut has_error = false;
+
+                if let Err(e) = is_drg_pak(&window.drg_pak_path) {
                     window.drg_pak_path_err = Some(e.to_string());
-                } else {
-                    self.state.config.drg_pak_path = Some(PathBuf::from(
-                        self.settings_window.take().unwrap().drg_pak_path,
-                    ));
-                    self.state.config.save().unwrap();
+                    has_error = true;
+                }
+                if let Err(e) = is_valid_directory(&window.cache_dir) {
+                    window.cache_dir_err = Some(e);
+                    has_error = true;
+                }
+
+                if !has_error {
+                    if let Some(old_cache_dir) = &self.state.config.cache_dir {
+                        if old_cache_dir.to_string_lossy() != window.cache_dir {
+                            if let Err(e) = fs::create_dir_all(&window.cache_dir) {
+                                window.cache_dir_err =
+                                    Some(format!("Failed to create new cache directory: {}", e));
+                                has_error = true;
+                            } else if let Err(e) = clear_directory(old_cache_dir) {
+                                window.cache_dir_err =
+                                    Some(format!("Failed to clear cache directory: {}", e));
+                                has_error = true;
+                            }
+                        }
+                    }
+
+                    if !has_error {
+                        self.state.config.drg_pak_path = Some(PathBuf::from(&window.drg_pak_path));
+                        self.state.config.cache_dir = Some(PathBuf::from(&window.cache_dir));
+
+                        self.state.config.save().unwrap();
+                    }
                 }
             } else if !open {
                 self.settings_window = None;
@@ -1483,19 +1517,27 @@ impl WindowProviderParameters {
 struct WindowSettings {
     drg_pak_path: String,
     drg_pak_path_err: Option<String>,
+    cache_dir: String,
+    cache_dir_err: Option<String>,
 }
 
 impl WindowSettings {
     fn new(state: &State) -> Self {
-        let path = state
-            .config
-            .drg_pak_path
-            .as_ref()
-            .map(|p| p.to_string_lossy().to_string())
-            .unwrap_or_default();
         Self {
-            drg_pak_path: path,
+            drg_pak_path: state
+                .config
+                .drg_pak_path
+                .as_ref()
+                .map(|p| p.to_string_lossy().to_string())
+                .unwrap_or_default(),
             drg_pak_path_err: None,
+            cache_dir: state
+                .config
+                .cache_dir
+                .as_ref()
+                .map(|p| p.to_string_lossy().to_string())
+                .unwrap_or_default(),
+            cache_dir_err: None,
         }
     }
 }

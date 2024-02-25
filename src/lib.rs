@@ -7,7 +7,8 @@ pub mod mod_lints;
 pub mod providers;
 pub mod state;
 
-use std::io::{Cursor, Read};
+use std::fs::{self, copy, create_dir_all};
+use std::io::{self, Cursor, Read};
 use std::str::FromStr;
 use std::{
     collections::HashSet,
@@ -85,6 +86,63 @@ pub fn read_file<P: AsRef<Path>>(path: P) -> Result<Vec<u8>> {
 pub fn write_file<P: AsRef<Path>, C: AsRef<[u8]>>(path: P, data: C) -> Result<()> {
     std::fs::write(&path, data)
         .with_context(|| format!("Could not write to file {}", path.as_ref().display()))
+}
+
+pub fn is_valid_directory(path: &str) -> Result<(), String> {
+    let path = Path::new(path);
+
+    if !path.exists() {
+        return Err("Path does not exist.".to_string());
+    }
+    if !path.is_dir() {
+        return Err("Path is not a directory.".to_string());
+    }
+
+    match fs::metadata(path) {
+        Ok(metadata) => {
+            if !metadata.permissions().readonly() {
+                Ok(())
+            } else {
+                Err("Directory is not writable.".to_string())
+            }
+        }
+        Err(_) => Err("Unable to access directory metadata.".to_string()),
+    }
+}
+
+pub fn copy_directory_contents(src: &Path, dest: &Path) -> io::Result<()> {
+    if src.is_dir() {
+        create_dir_all(dest)?;
+
+        for entry in fs::read_dir(src)? {
+            let entry = entry?;
+            let path = entry.path();
+            let dest_path = dest.join(entry.file_name());
+
+            if path.is_dir() {
+                copy_directory_contents(&path, &dest_path)?;
+            } else {
+                copy(&path, &dest_path)?;
+            }
+        }
+    }
+    Ok(())
+}
+
+pub fn clear_directory(path: &Path) -> io::Result<()> {
+    if path.is_dir() {
+        for entry in fs::read_dir(path)? {
+            let entry = entry?;
+            let path = entry.path();
+
+            if path.is_dir() {
+                fs::remove_dir_all(&path)?;
+            } else {
+                fs::remove_file(&path)?;
+            }
+        }
+    }
+    Ok(())
 }
 
 pub fn is_drg_pak<P: AsRef<Path>>(path: P) -> Result<()> {
