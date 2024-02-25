@@ -67,7 +67,7 @@ pub fn uninstall<P: AsRef<Path>>(path_pak: P, modio_mods: HashSet<u32>) -> Resul
             Err(e) if e.kind() == ErrorKind::NotFound => Ok(()),
             Err(e) => Err(e),
         }
-        .with_whatever_context(|| format!("failed to remove {}", path_hook_dll.display()))?;
+        .with_whatever_context(|_| format!("failed to remove {}", path_hook_dll.display()))?;
     }
     uninstall_modio(&installation, modio_mods).ok();
     Ok(())
@@ -168,10 +168,12 @@ pub enum IntegrationError {
     RepakError { source: repak::Error },
     #[snafu(transparent)]
     UnrealAssetError { source: unreal_asset::Error },
+    #[snafu(display("mod {}: I/O error encountered during its processing", mod_info.name))]
     CtxtIoError {
         source: std::io::Error,
         mod_info: ModInfo,
     },
+    #[snafu(display("mod {}: repak error encountered during its processing", mod_info.name))]
     CtxtRepakError {
         source: repak::Error,
         mod_info: ModInfo,
@@ -193,6 +195,18 @@ pub enum IntegrationError {
     SelfUpdateFailed {
         source: Box<dyn std::error::Error + Send + Sync>,
     },
+}
+
+impl IntegrationError {
+    pub fn opt_mod_id(&self) -> Option<u32> {
+        match self {
+            IntegrationError::CtxtIoError { mod_info, .. }
+            | IntegrationError::CtxtRepakError { mod_info, .. }
+            | IntegrationError::ModfileInvalidPrefix { mod_info, .. } => mod_info.modio_id,
+            IntegrationError::ProviderError { source } => source.opt_mod_id(),
+            _ => None,
+        }
+    }
 }
 
 pub fn integrate<P: AsRef<Path>>(

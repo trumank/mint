@@ -154,13 +154,14 @@ impl ResolveMods {
                     app.last_action_status =
                         LastActionStatus::Success("mods successfully resolved".to_string());
                 }
-                Err(e) if let ProviderError::NoProvider { url: _, factory } = e => {
+                Err(ProviderError::NoProvider { url: _, factory }) => {
                     app.window_provider_parameters =
                         Some(WindowProviderParameters::new(factory, &app.state));
                     app.last_action_status = LastActionStatus::Failure("no provider".to_string());
                 }
                 Err(e) => {
                     error!("{}", e);
+                    app.problematic_mod_id = e.opt_mod_id();
                     app.last_action_status = LastActionStatus::Failure(e.to_string());
                 }
             }
@@ -219,6 +220,7 @@ impl Integrate {
                 }
                 Err(e) => {
                     error!("{}", e);
+                    app.problematic_mod_id = e.opt_mod_id();
                     app.last_action_status = LastActionStatus::Failure(e.to_string());
                 }
             }
@@ -277,13 +279,14 @@ impl UpdateCache {
                     app.last_action_status =
                         LastActionStatus::Success("successfully updated cache".to_string());
                 }
-                Err(e) if let ProviderError::NoProvider { url: _, factory } = e => {
+                Err(ProviderError::NoProvider { url: _, factory }) => {
                     app.window_provider_parameters =
                         Some(WindowProviderParameters::new(factory, &app.state));
                     app.last_action_status = LastActionStatus::Failure("no provider".to_string());
                 }
                 Err(e) => {
                     error!("{}", e);
+                    app.problematic_mod_id = e.opt_mod_id();
                     app.last_action_status = LastActionStatus::Failure(e.to_string());
                 }
             }
@@ -305,7 +308,7 @@ impl CheckUpdates {
         let ctx = ctx.clone();
 
         async fn req() -> Result<GitHubRelease, MintError> {
-            Ok(reqwest::Client::builder()
+            reqwest::Client::builder()
                 .user_agent("trumank/mint")
                 .build()
                 .map_err(|_| MintError::GenericError {
@@ -321,7 +324,7 @@ impl CheckUpdates {
                 .await
                 .map_err(|_| MintError::GenericError {
                     msg: "check self update response is error".to_string(),
-                })?)
+                })
         }
 
         let handle = tokio::spawn(async move {
@@ -339,6 +342,7 @@ impl CheckUpdates {
             state: (),
         });
     }
+
     fn receive(self, app: &mut App) {
         if Some(self.rid) == app.check_updates_rid.as_ref().map(|r| r.rid) {
             app.check_updates_rid = None;
@@ -491,6 +495,7 @@ impl LintMods {
                 }
                 Err(e) => {
                     error!("{}", e);
+                    app.problematic_mod_id = e.opt_mod_id();
                     app.last_action_status = LastActionStatus::Failure(e.to_string());
                 }
             }
@@ -724,7 +729,8 @@ async fn self_update_async(
             {
                 info!("setting executable permission on new executable");
                 use std::os::unix::fs::PermissionsExt;
-                fs::set_permissions(&original_exe_path, fs::Permissions::from_mode(0o755)).unwrap();
+                fs::set_permissions(&original_exe_path, std::fs::Permissions::from_mode(0o755))
+                    .unwrap();
             }
 
             Ok(original_exe_path)
