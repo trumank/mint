@@ -2,12 +2,11 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use anyhow::Result;
 use tokio::sync::mpsc::Sender;
 
 use super::{
     BlobCache, FetchProgress, ModInfo, ModProvider, ModResolution, ModResponse, ModSpecification,
-    ProviderCache,
+    ProviderCache, ProviderError,
 };
 
 inventory::submit! {
@@ -23,9 +22,12 @@ inventory::submit! {
 pub struct FileProvider {}
 
 impl FileProvider {
-    pub fn new_provider(_parameters: &HashMap<String, String>) -> Result<Arc<dyn ModProvider>> {
+    pub fn new_provider(
+        _parameters: &HashMap<String, String>,
+    ) -> Result<Arc<dyn ModProvider>, ProviderError> {
         Ok(Arc::new(Self::new()))
     }
+
     pub fn new() -> Self {
         Self {}
     }
@@ -40,7 +42,7 @@ impl ModProvider for FileProvider {
         spec: &ModSpecification,
         _update: bool,
         _cache: ProviderCache,
-    ) -> Result<ModResponse> {
+    ) -> Result<ModResponse, ProviderError> {
         let path = Path::new(&spec.url);
         let name = path
             .file_name()
@@ -71,7 +73,7 @@ impl ModProvider for FileProvider {
         _cache: ProviderCache,
         _blob_cache: &BlobCache,
         tx: Option<Sender<FetchProgress>>,
-    ) -> Result<PathBuf> {
+    ) -> Result<PathBuf, ProviderError> {
         if let Some(tx) = tx {
             tx.send(FetchProgress::Complete {
                 resolution: res.clone(),
@@ -82,11 +84,11 @@ impl ModProvider for FileProvider {
         Ok(PathBuf::from(&res.url.0))
     }
 
-    async fn update_cache(&self, _cache: ProviderCache) -> Result<()> {
+    async fn update_cache(&self, _cache: ProviderCache) -> Result<(), ProviderError> {
         Ok(())
     }
 
-    async fn check(&self) -> Result<()> {
+    async fn check(&self) -> Result<(), ProviderError> {
         Ok(())
     }
 
@@ -117,6 +119,7 @@ impl ModProvider for FileProvider {
     fn is_pinned(&self, _spec: &ModSpecification, _cache: ProviderCache) -> bool {
         true
     }
+
     fn get_version_name(&self, _spec: &ModSpecification, _cache: ProviderCache) -> Option<String> {
         Some("latest".to_string())
     }

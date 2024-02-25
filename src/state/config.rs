@@ -1,9 +1,9 @@
 use std::io::Write;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
-use anyhow::{Context, Result};
+use serde::de::DeserializeOwned;
 
-use serde::{de::DeserializeOwned, Serialize};
+use super::*;
 
 pub trait ConfigTrait: std::fmt::Debug + Default + Serialize + DeserializeOwned {}
 impl<T> ConfigTrait for T where T: std::fmt::Debug + Default + Serialize + DeserializeOwned {}
@@ -36,15 +36,16 @@ impl<C: ConfigTrait> ConfigWrapper<C> {
     /// with the temporary file.
     ///
     /// See <https://stackoverflow.com/questions/70362352/atomic-file-create-write>.
-    pub fn save(&self) -> Result<()> {
+    pub fn save(&self) -> Result<(), StateError> {
         if let Some(final_path) = &self.path {
             let mut temp_file = tempfile::NamedTempFile::new_in(final_path.parent().unwrap())?;
             temp_file
-                .write_all(&serde_json::to_vec_pretty(&self.config)?)
-                .context("failed to write to tempfile")?;
-            temp_file
-                .persist(final_path)
-                .context("failed to replace destination file with tempfile")?;
+                .write_all(
+                    &serde_json::to_vec_pretty(&self.config)
+                        .context(CfgSerializationFailedSnafu)?,
+                )
+                .context(CfgSaveFailedSnafu)?;
+            temp_file.persist(final_path)?;
         }
         Ok(())
     }

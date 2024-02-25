@@ -15,7 +15,6 @@ use std::{
     path::PathBuf,
 };
 
-use anyhow::{anyhow, Context, Result};
 use eframe::egui::{Button, CollapsingHeader, RichText, Visuals};
 use eframe::epaint::{Pos2, Vec2};
 use eframe::{
@@ -32,6 +31,7 @@ use tokio::{
 use tracing::{debug, trace};
 
 use crate::mod_lints::{LintId, LintReport, SplitAssetPair};
+use crate::providers::ProviderError;
 use crate::Dirs;
 use crate::{
     integrate::uninstall,
@@ -40,6 +40,7 @@ use crate::{
         ApprovalStatus, FetchProgress, ModInfo, ModSpecification, ModStore, ProviderFactory,
     },
     state::{ModConfig, ModData_v0_1_0 as ModData, ModOrGroup, ModProfile, State},
+    MintError,
 };
 use find_string::FindString;
 use message::MessageHandle;
@@ -47,7 +48,7 @@ use request_counter::{RequestCounter, RequestID};
 
 use self::toggle_switch::toggle_switch;
 
-pub fn gui(dirs: Dirs, args: Option<Vec<String>>) -> Result<()> {
+pub fn gui(dirs: Dirs, args: Option<Vec<String>>) -> Result<(), MintError> {
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_inner_size([800.0, 400.0])
@@ -59,7 +60,9 @@ pub fn gui(dirs: Dirs, args: Option<Vec<String>>) -> Result<()> {
         options,
         Box::new(|cc| Box::new(App::new(cc, dirs, args).unwrap())),
     )
-    .map_err(|e| anyhow!("{e}"))?;
+    .map_err(|e| MintError::GenericError {
+        msg: format!("{e}"),
+    })?;
     Ok(())
 }
 
@@ -144,7 +147,11 @@ enum LastActionStatus {
 }
 
 impl App {
-    fn new(cc: &eframe::CreationContext, dirs: Dirs, args: Option<Vec<String>>) -> Result<Self> {
+    fn new(
+        cc: &eframe::CreationContext,
+        dirs: Dirs,
+        args: Option<Vec<String>>,
+    ) -> Result<Self, MintError> {
         let (tx, rx) = mpsc::channel(10);
         let state = State::init(dirs)?;
 
@@ -997,7 +1004,7 @@ impl App {
 
                 });
             if try_save {
-                if let Err(e) = is_drg_pak(&window.drg_pak_path).context("Is not valid DRG pak") {
+                if let Err(e) = is_drg_pak(&window.drg_pak_path) {
                     window.drg_pak_path_err = Some(e.to_string());
                 } else {
                     self.state.config.drg_pak_path = Some(PathBuf::from(
@@ -1459,8 +1466,8 @@ impl App {
 }
 
 struct WindowProviderParameters {
-    tx: Sender<(RequestID, Result<()>)>,
-    rx: Receiver<(RequestID, Result<()>)>,
+    tx: Sender<(RequestID, Result<(), ProviderError>)>,
+    rx: Receiver<(RequestID, Result<(), ProviderError>)>,
     check_rid: Option<(RequestID, JoinHandle<()>)>,
     check_error: Option<String>,
     factory: &'static ProviderFactory,

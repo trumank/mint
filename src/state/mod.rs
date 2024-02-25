@@ -7,18 +7,18 @@ use std::{
     sync::Arc,
 };
 
-use anyhow::{bail, Context, Result};
 use fs_err as fs;
-use mint_lib::{mod_info::MetaConfig, DRGInstallation};
 use serde::{Deserialize, Serialize};
+use snafu::prelude::*;
 
+use self::config::ConfigWrapper;
+use crate::providers::ProviderError;
 use crate::{
     gui::GuiTheme,
     providers::{ModSpecification, ModStore},
     Dirs,
 };
-
-use self::config::ConfigWrapper;
+use mint_lib::{mod_info::MetaConfig, DRGInstallation};
 
 /// Mod configuration, holds ModSpecification as well as other metadata
 #[derive(Debug, Clone, Hash, Serialize, Deserialize)]
@@ -92,7 +92,7 @@ impl ModData!["0.1.0"] {
         mut g: G,
         mut p: P,
     ) {
-        for mod_or_group in &self.profiles.get(profile).unwrap().mods {
+        for ref mod_or_group in &self.profiles.get(profile).unwrap().mods {
             match mod_or_group {
                 ModOrGroup::Group {
                     group_name,
@@ -126,7 +126,7 @@ impl ModData!["0.1.0"] {
         mut g: G,
         mut p: P,
     ) {
-        for mod_or_group in &mut self.profiles.get_mut(profile).unwrap().mods {
+        for ref mut mod_or_group in &mut self.profiles.get_mut(profile).unwrap().mods {
             match mod_or_group {
                 ModOrGroup::Group {
                     group_name,
@@ -169,7 +169,7 @@ impl ModData!["0.1.0"] {
         self.profiles.get(profile).unwrap().mods.iter().any(|m| {
             let f = &mut f;
             match m {
-                ModOrGroup::Individual(mc) => f(mc, None),
+                ModOrGroup::Individual(ref mc) => f(mc, None),
                 ModOrGroup::Group {
                     group_name,
                     enabled,
@@ -199,10 +199,10 @@ impl ModData!["0.1.0"] {
             .any(|m| {
                 let f = &mut f;
                 match m {
-                    ModOrGroup::Individual(mc) => f(mc, None),
+                    ModOrGroup::Individual(ref mut mc) => f(mc, None),
                     ModOrGroup::Group {
                         group_name,
-                        enabled,
+                        ref mut enabled,
                     } => self
                         .groups
                         .get_mut(group_name)
@@ -409,6 +409,30 @@ impl From<&VersionAnnotatedConfig> for MetaConfig {
     }
 }
 
+#[derive(Debug, Snafu)]
+pub enum StateError {
+    #[snafu(display("failed to deserialize user config"))]
+    CfgDeserializationFailed { source: serde_json::Error },
+    #[snafu(display("unsupported config version"))]
+    UnsupportedCfgVersion,
+    #[snafu(display("failed to read config.json"))]
+    CfgReadFailed { source: std::io::Error },
+    #[snafu(display("failed to save config"))]
+    CfgSaveFailed { source: std::io::Error },
+    #[snafu(display("failed to serialize user config"))]
+    CfgSerializationFailed { source: serde_json::Error },
+    #[snafu(transparent)]
+    IoError { source: std::io::Error },
+    #[snafu(transparent)]
+    PersistError { source: tempfile::PersistError },
+    #[snafu(transparent)]
+    ProviderError { source: ProviderError },
+    #[snafu(display("failed to deserialize mod data"))]
+    ModDataDeserializationFailed { source: serde_json::Error },
+    #[snafu(display("failed to deserialize legacy profiles"))]
+    LegacyProfilesDeserializationFailed { source: serde_json::Error },
+}
+
 pub struct State {
     pub dirs: Dirs,
     pub config: ConfigWrapper<VersionAnnotatedConfig>,
@@ -417,7 +441,7 @@ pub struct State {
 }
 
 impl State {
-    pub fn init(dirs: Dirs) -> Result<Self> {
+    pub fn init(dirs: Dirs) -> Result<Self, StateError> {
         let config_path = dirs.config_dir.join("config.json");
 
         let config = read_config_or_default(&config_path)?;
@@ -441,15 +465,15 @@ impl State {
     }
 }
 
-fn read_config_or_default(config_path: &PathBuf) -> Result<VersionAnnotatedConfig> {
+fn read_config_or_default(config_path: &PathBuf) -> Result<VersionAnnotatedConfig, StateError> {
     Ok(match fs::read(config_path) {
         Ok(buf) => {
             let config = serde_json::from_slice::<MaybeVersionedConfig>(&buf)
-                .context("failed to deserialize user config into maybe versioned config")?;
+                .context(CfgDeserializationFailedSnafu)?;
             match config {
                 MaybeVersionedConfig::Versioned(v) => match v {
                     VersionAnnotatedConfig::V0_0_0(v) => VersionAnnotatedConfig::V0_0_0(v),
-                    VersionAnnotatedConfig::Unsupported => bail!("unsupported config version"),
+                    VersionAnnotatedConfig::Unsupported => UnsupportedCfgVersionSnafu.fail()?,
                 },
                 MaybeVersionedConfig::Legacy(legacy) => {
                     VersionAnnotatedConfig::V0_0_0(Config_v0_0_0 {
@@ -461,33 +485,32 @@ fn read_config_or_default(config_path: &PathBuf) -> Result<VersionAnnotatedConfi
             }
         }
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => VersionAnnotatedConfig::default(),
-        Err(e) => Err(e).context("failed to read `config.json`")?,
+        Err(e) => Err(e)?,
     })
 }
 
 fn read_mod_data_or_default(
     mod_data_path: &PathBuf,
     legacy_mod_profiles_path: PathBuf,
-) -> Result<VersionAnnotatedModData> {
+) -> Result<VersionAnnotatedModData, StateError> {
     let mod_data = match fs::read(mod_data_path) {
         Ok(buf) => serde_json::from_slice::<MaybeVersionedModData>(&buf)
-            .context("failed to deserialize existing `mod_data.json`")?,
+            .context(ModDataDeserializationFailedSnafu)?,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
             match fs::read(&legacy_mod_profiles_path) {
                 Ok(buf) => {
                     let mod_data = serde_json::from_slice::<MaybeVersionedModData>(&buf)
-                        .context("failed to deserialize legacy `profiles.json`")?;
-                    fs::remove_file(&legacy_mod_profiles_path)
-                        .context("failed to remove legacy `profiles.json` while migrating")?;
+                        .context(LegacyProfilesDeserializationFailedSnafu)?;
+                    fs::remove_file(&legacy_mod_profiles_path)?;
                     mod_data
                 }
                 Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
                     MaybeVersionedModData::default()
                 }
-                Err(e) => Err(e).context("failed to read legacy `profiles`.json")?,
+                Err(e) => Err(e)?,
             }
         }
-        Err(e) => Err(e).context("failed to read `mod_data`.json")?,
+        Err(e) => Err(e)?,
     };
 
     let mod_data = match mod_data {

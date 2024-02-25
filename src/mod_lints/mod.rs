@@ -10,18 +10,14 @@ mod split_asset_pairs;
 mod unmodified_game_assets;
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::io::BufReader;
-use std::path::PathBuf;
+use std::io::{BufReader, Cursor, Read};
+use std::path::{Path, PathBuf};
 
-use anyhow::{Context, Result};
 use fs_err as fs;
 use indexmap::IndexSet;
 use repak::PakReader;
+use snafu::prelude::*;
 use tracing::trace;
-
-use crate::mod_lints::conflicting_mods::ConflictingModsLint;
-use crate::providers::{ModSpecification, ReadSeek};
-use crate::{lint_get_all_files_from_data, GetAllFilesFromDataError, PakOrNotPak};
 
 use self::archive_multiple_paks::ArchiveMultiplePaksLint;
 use self::archive_only_non_pak_files::ArchiveOnlyNonPakFilesLint;
@@ -33,6 +29,26 @@ use self::shader_files::ShaderFilesLint;
 pub use self::split_asset_pairs::SplitAssetPair;
 use self::split_asset_pairs::SplitAssetPairsLint;
 use self::unmodified_game_assets::UnmodifiedGameAssetsLint;
+use crate::mod_lints::conflicting_mods::ConflictingModsLint;
+use crate::providers::{ModSpecification, ReadSeek};
+
+#[derive(Debug, Snafu)]
+pub enum LintError {
+    #[snafu(transparent)]
+    RepakError { source: repak::Error },
+    #[snafu(transparent)]
+    IoError { source: std::io::Error },
+    #[snafu(transparent)]
+    PrefixMismatch { source: std::path::StripPrefixError },
+    #[snafu(display("empty archive"))]
+    EmptyArchive,
+    #[snafu(display("zip archive error"))]
+    ZipArchiveError,
+    #[snafu(display("zip only contains non-pak files"))]
+    OnlyNonPakFiles,
+    #[snafu(display("some lints require specifying a valid game pak path"))]
+    InvalidGamePath,
+}
 
 pub struct LintCtxt {
     pub(crate) mods: IndexSet<(ModSpecification, PathBuf)>,
@@ -43,7 +59,7 @@ impl LintCtxt {
     pub fn init(
         mods: IndexSet<(ModSpecification, PathBuf)>,
         fsd_pak_path: Option<PathBuf>,
-    ) -> Result<Self> {
+    ) -> Result<Self, LintError> {
         trace!("LintCtxt::init");
         Ok(Self { mods, fsd_pak_path })
     }
@@ -54,9 +70,9 @@ impl LintCtxt {
         mut empty_archive_handler: Option<EmptyArchiveHandler>,
         mut only_non_pak_files_handler: Option<OnlyNonPakFilesHandler>,
         mut multiple_pak_files_handler: Option<MultiplePakFilesHandler>,
-    ) -> Result<()>
+    ) -> Result<(), LintError>
     where
-        F: FnMut(ModSpecification, &mut Box<dyn ReadSeek>, &PakReader) -> Result<()>,
+        F: FnMut(ModSpecification, &mut Box<dyn ReadSeek>, &PakReader) -> Result<(), LintError>,
         EmptyArchiveHandler: FnMut(ModSpecification),
         OnlyNonPakFilesHandler: FnMut(ModSpecification),
         MultiplePakFilesHandler: FnMut(ModSpecification),
@@ -66,19 +82,19 @@ impl LintCtxt {
             let bufs = match lint_get_all_files_from_data(maybe_archive_reader) {
                 Ok(bufs) => bufs,
                 Err(e) => match e {
-                    GetAllFilesFromDataError::EmptyArchive => {
+                    LintError::EmptyArchive => {
                         if let Some(ref mut handler) = empty_archive_handler {
                             handler(mod_spec.clone());
                         }
                         continue;
                     }
-                    GetAllFilesFromDataError::OnlyNonPakFiles => {
+                    LintError::OnlyNonPakFiles => {
                         if let Some(ref mut handler) = only_non_pak_files_handler {
                             handler(mod_spec.clone());
                         }
                         continue;
                     }
-                    GetAllFilesFromDataError::Other(e) => return Err(e),
+                    e => return Err(e),
                 },
             };
 
@@ -104,7 +120,7 @@ impl LintCtxt {
         Ok(())
     }
 
-    pub fn for_each_mod_file<F>(&self, mut f: F) -> Result<()>
+    pub fn for_each_mod_file<F>(&self, mut f: F) -> Result<(), LintError>
     where
         F: FnMut(
             ModSpecification,
@@ -112,16 +128,14 @@ impl LintCtxt {
             &PakReader,
             PathBuf,
             String,
-        ) -> Result<()>,
+        ) -> Result<(), LintError>,
     {
         self.for_each_mod(
             |mod_spec, pak_read_seek, pak_reader| {
                 let mount = PathBuf::from(pak_reader.mount_point());
                 for p in pak_reader.files() {
                     let path = mount.join(&p);
-                    let path_buf = path
-                        .strip_prefix("../../../")
-                        .context("prefix does not match")?;
+                    let path_buf = path.strip_prefix("../../../")?;
                     let normalized_path = &path_buf.to_string_lossy().replace('\\', "/");
                     let normalized_path = normalized_path.to_ascii_lowercase();
                     f(
@@ -142,10 +156,61 @@ impl LintCtxt {
     }
 }
 
+pub(crate) enum PakOrNotPak {
+    Pak(Box<dyn ReadSeek>),
+    NotPak,
+}
+
+pub(crate) fn lint_get_all_files_from_data(
+    mut data: Box<dyn ReadSeek>,
+) -> Result<Vec<(PathBuf, PakOrNotPak)>, LintError> {
+    if let Ok(mut archive) = zip::ZipArchive::new(&mut data) {
+        ensure!(!archive.is_empty(), EmptyArchiveSnafu);
+
+        let mut files = Vec::new();
+        for i in 0..archive.len() {
+            let mut file = archive
+                .by_index(i)
+                .map_err(|_| LintError::ZipArchiveError)?;
+
+            if let Some(p) = file.enclosed_name().map(Path::to_path_buf) {
+                if file.is_file() {
+                    if p.extension().filter(|e| e == &"pak").is_some() {
+                        let mut buf = vec![];
+                        file.read_to_end(&mut buf)?;
+                        files.push((
+                            p.to_path_buf(),
+                            PakOrNotPak::Pak(Box::new(Cursor::new(buf))),
+                        ));
+                    } else {
+                        let mut buf = vec![];
+                        file.read_to_end(&mut buf)?;
+                        files.push((p.to_path_buf(), PakOrNotPak::NotPak));
+                    }
+                }
+            }
+        }
+
+        if files
+            .iter()
+            .filter(|(_, pak_or_not_pak)| matches!(pak_or_not_pak, PakOrNotPak::Pak(..)))
+            .count()
+            >= 1
+        {
+            Ok(files)
+        } else {
+            OnlyNonPakFilesSnafu.fail()?
+        }
+    } else {
+        data.rewind()?;
+        Ok(vec![(PathBuf::from("."), PakOrNotPak::Pak(data))])
+    }
+}
+
 pub trait Lint {
     type Output;
 
-    fn check_mods(&mut self, lcx: &LintCtxt) -> Result<Self::Output>;
+    fn check_mods(&mut self, lcx: &LintCtxt) -> Result<Self::Output, LintError>;
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -209,7 +274,7 @@ pub fn run_lints(
     enabled_lints: &BTreeSet<LintId>,
     mods: IndexSet<(ModSpecification, PathBuf)>,
     fsd_pak_path: Option<PathBuf>,
-) -> Result<LintReport> {
+) -> Result<LintReport, LintError> {
     let lint_ctxt = LintCtxt::init(mods, fsd_pak_path)?;
     let mut lint_report = LintReport::default();
 
