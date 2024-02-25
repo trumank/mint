@@ -330,17 +330,10 @@ fn is_false(value: &bool) -> bool {
 
 #[obake::versioned]
 #[obake(version("0.0.0"))]
-#[obake(version("0.1.0"))]
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Config {
-    #[obake(cfg("0.0.0"))]
-    #[obake(cfg("0.1.0"))]
     pub provider_parameters: HashMap<String, HashMap<String, String>>,
-    #[obake(cfg("0.0.0"))]
-    #[obake(cfg("0.1.0"))]
     pub drg_pak_path: Option<PathBuf>,
-    #[obake(cfg("0.0.0"))]
-    #[obake(cfg("0.1.0"))]
     pub gui_theme: Option<GuiTheme>,
     #[serde(default, skip_serializing_if = "is_false")]
     pub disable_fix_exploding_gas: bool,
@@ -352,8 +345,6 @@ pub struct Config {
 pub enum VersionAnnotatedConfig {
     #[serde(rename = "0.0.0")]
     V0_0_0(Config!["0.0.0"]),
-    #[serde(rename = "0.1.0")]
-    V0_1_0(Config!["0.1.0"]),
     #[serde(other)]
     Unsupported,
 }
@@ -373,20 +364,17 @@ impl Default for MaybeVersionedConfig {
 
 impl Default for VersionAnnotatedConfig {
     fn default() -> Self {
-        VersionAnnotatedConfig::V0_1_0(Default::default())
+        VersionAnnotatedConfig::V0_0_0(Default::default())
     }
 }
 
 impl Deref for VersionAnnotatedConfig {
-    type Target = Config_v0_1_0;
+    type Target = Config!["0.0.0"];
 
     fn deref(&self) -> &Self::Target {
         match self {
-            VersionAnnotatedConfig::V0_0_0(_) => unreachable!("Attempted to deref a legacy config"),
-            VersionAnnotatedConfig::V0_1_0(ref cfg) => cfg,
-            VersionAnnotatedConfig::Unsupported => {
-                unreachable!("Attempted to deref an unsupported config")
-            }
+            VersionAnnotatedConfig::V0_0_0(cfg) => cfg,
+            VersionAnnotatedConfig::Unsupported => unreachable!(),
         }
     }
 }
@@ -394,14 +382,13 @@ impl Deref for VersionAnnotatedConfig {
 impl DerefMut for VersionAnnotatedConfig {
     fn deref_mut(&mut self) -> &mut Self::Target {
         match self {
-            VersionAnnotatedConfig::V0_0_0(_) => unreachable!(),
-            VersionAnnotatedConfig::V0_1_0(cfg) => cfg,
+            VersionAnnotatedConfig::V0_0_0(cfg) => cfg,
             VersionAnnotatedConfig::Unsupported => unreachable!(),
         }
     }
 }
 
-impl Default for Config!["0.1.0"] {
+impl Default for Config!["0.0.0"] {
     fn default() -> Self {
         let default_dirs = Dirs::default_xdg().expect("Failed to get default directories");
 
@@ -421,19 +408,6 @@ impl From<&VersionAnnotatedConfig> for MetaConfig {
     fn from(value: &VersionAnnotatedConfig) -> Self {
         MetaConfig {
             disable_fix_exploding_gas: value.disable_fix_exploding_gas,
-        }
-    }
-}
-
-impl From<Config!["0.0.0"]> for Config!["0.1.0"] {
-    fn from(legacy: Config!("0.0.0")) -> Self {
-        let default_dirs = Dirs::default_xdg().expect("Failed to get default directories");
-
-        Self {
-            provider_parameters: legacy.provider_parameters,
-            drg_pak_path: legacy.drg_pak_path,
-            gui_theme: legacy.gui_theme,
-            cache_dir: Some(default_dirs.cache_dir),
         }
     }
 }
@@ -477,7 +451,6 @@ fn read_config_or_default(config_path: &PathBuf) -> Result<VersionAnnotatedConfi
                 .context("failed to deserialize user config into maybe versioned config")?;
             match config {
                 MaybeVersionedConfig::Versioned(v) => match v {
-                    VersionAnnotatedConfig::V0_1_0(v) => VersionAnnotatedConfig::V0_1_0(v),
                     VersionAnnotatedConfig::V0_0_0(v) => VersionAnnotatedConfig::V0_0_0(v),
                     VersionAnnotatedConfig::Unsupported => bail!("unsupported config version"),
                 },

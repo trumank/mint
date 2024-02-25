@@ -932,8 +932,8 @@ impl App {
                         ui.end_row();
 
                         let edit_directory_field = |ui: &mut egui::Ui, label: &str, path: &mut String, err: &mut Option<String>| {
+                            ui.label(label);
                             ui.horizontal(|ui| {
-                                ui.label(label);
                                 ui.text_edit_singleline(path);
 
                                 if ui.button("Browse").clicked() {

@@ -7,12 +7,13 @@ pub mod mod_lints;
 pub mod providers;
 pub mod state;
 
+use std::fs::{self, copy, create_dir_all};
 use std::io::{Cursor, Read};
 use std::ops::Deref;
-use std::fs::{self, copy, create_dir_all};
 use std::str::FromStr;
 use std::{
     collections::HashSet,
+    io,
     path::{Path, PathBuf},
 };
 
