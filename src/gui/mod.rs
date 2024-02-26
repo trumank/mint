@@ -124,6 +124,7 @@ pub struct App {
     needs_restart: bool,
     self_update_rid: Option<MessageHandle<SelfUpdateProgress>>,
     original_exe_path: Option<PathBuf>,
+    problematic_mod_id: Option<u32>,
 }
 
 #[derive(Default)]
@@ -190,6 +191,7 @@ impl App {
             needs_restart: false,
             self_update_rid: None,
             original_exe_path: None,
+            problematic_mod_id: None,
         })
     }
 
@@ -405,6 +407,15 @@ impl App {
                 */
 
                 let info = self.state.store.get_mod_info(&mc.spec);
+
+                if let Some(ref info) = info
+                    && let Some(modio_id) = info.modio_id
+                    && self.problematic_mod_id.is_some_and(|id| id == modio_id)
+                {
+                    let icon = egui::Button::new(RichText::new("❌").color(Color32::WHITE))
+                        .fill(Color32::RED);
+                    ui.add_enabled(false, icon);
+                }
 
                 if mc.enabled {
                     if let Some(req) = &self.integrate_rid {
@@ -680,6 +691,7 @@ impl App {
 
         if let Some(add_deps) = ctx.add_deps {
             message::ResolveMods::send(self, ui.ctx(), add_deps, true);
+            self.problematic_mod_id = None;
         }
 
         self.scroll_to_match = ctx.scroll_to_match;
@@ -1153,7 +1165,7 @@ impl App {
                                 self.tx.clone(),
                                 ctx.clone(),
                             ));
-
+                            self.problematic_mod_id = None;
                             self.lint_report_window = Some(WindowLintReport);
                         }
                     });
@@ -1620,6 +1632,7 @@ impl eframe::App for App {
                                     self.tx.clone(),
                                     ctx.clone(),
                                 ));
+                                self.problematic_mod_id = None;
                             }
                         });
 
@@ -1674,6 +1687,7 @@ impl eframe::App for App {
                             .clicked()
                         {
                             message::UpdateCache::send(self);
+                            self.problematic_mod_id = None;
                         }
                     },
                 );
@@ -1811,6 +1825,7 @@ impl eframe::App for App {
                     );
                     if is_committed(&resolve) {
                         message::ResolveMods::send(self, ctx, self.parse_mods(), false);
+                        self.problematic_mod_id = None;
                     }
                 });
             });
@@ -1867,6 +1882,7 @@ impl eframe::App for App {
 
                     self.resolve_mod = mods.trim().to_string();
                     message::ResolveMods::send(self, ctx, self.parse_mods(), false);
+                    self.problematic_mod_id = None;
                 }
                 for e in &i.events {
                     match e {

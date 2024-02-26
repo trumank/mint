@@ -203,7 +203,19 @@ pub enum DrgModioError {
     #[snafu(display("failed to fetch dependencies for mod {mod_id}: {source}"))]
     FetchDependenciesFailed { source: modio::Error, mod_id: u32 },
     #[snafu(display("encountered mod.io-related error: {msg}"))]
-    GenericError { msg: &'static str }
+    GenericError { msg: &'static str },
+}
+
+impl DrgModioError {
+    pub fn opt_mod_id(&self) -> Option<u32> {
+        match self {
+            DrgModioError::FetchModFilesFailed { mod_id, .. }
+            | DrgModioError::FetchModFileFailed { mod_id, .. }
+            | DrgModioError::FetchModFailed { mod_id, .. }
+            | DrgModioError::FetchDependenciesFailed { mod_id, .. } => Some(*mod_id),
+            _ => None,
+        }
+    }
 }
 
 #[cfg_attr(test, automock)]
@@ -988,9 +1000,9 @@ fn process_modio_tags(set: &HashSet<String>) -> ModioTags {
 #[cfg(test)]
 mod test {
     use super::{
-        Arc, DrgModioError, HashSet, MockDrgModio, ModProvider, ModioCache, ModioFile,
-        ModioProvider, RwLock, MODIO_PROVIDER_ID, OnceLock, HashMap, 
-        VersionAnnotatedCache, ModioMod, ModSpecification, ModioModResponse, ModResponse,
+        Arc, DrgModioError, HashMap, HashSet, MockDrgModio, ModProvider, ModResponse,
+        ModSpecification, ModioCache, ModioFile, ModioMod, ModioModResponse, ModioProvider,
+        OnceLock, RwLock, VersionAnnotatedCache, MODIO_PROVIDER_ID,
     };
     use crate::state::config::ConfigWrapper;
 
@@ -1057,9 +1069,11 @@ mod test {
                     .map(|id| vec![ModioModResponse { id: **id }])
                     .ok_or(DrgModioError::GenericError { msg: "not found" })
             });
-        mock.expect_fetch_mod()
-            .times(1)
-            .returning(move |id| mods.get(&id).map(|m| m.mod_.clone()).ok_or(DrgModioError::GenericError { msg: "not found" }));
+        mock.expect_fetch_mod().times(1).returning(move |id| {
+            mods.get(&id)
+                .map(|m| m.mod_.clone())
+                .ok_or(DrgModioError::GenericError { msg: "not found" })
+        });
         mock.expect_fetch_dependencies()
             .times(1)
             .returning(move |id| {
