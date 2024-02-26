@@ -122,6 +122,17 @@ pub enum ProviderError {
     NoModsForNameId { name_id: String },
 }
 
+impl ProviderError {
+    pub fn opt_mod_id(&self) -> Option<u32> {
+        match self {
+            ProviderError::DrgModioError { source } => source.opt_mod_id(),
+            ProviderError::ModCtxtModioError { mod_id, .. }
+            | ProviderError::ModCtxtIoError { mod_id, .. } => Some(*mod_id),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct ProviderFactory {
     pub id: &'static str,
