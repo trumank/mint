@@ -76,7 +76,7 @@ tokio = { version = "1.35.1", features = ["full"] }
 tracing = { version = "0.1.40", features = ["attributes"] }
 tracing-appender = "0.2.3"
 tracing-subscriber = { version = "0.3.18", features = ["fmt", "env-filter", "std", "registry"] }
-typetag = "0.2.15"
+typetag = "0.2.16"
 uasset_utils = { git = "https://github.com/trumank/uasset_utils" }
 unreal_asset = { git = "https://github.com/trumank/unrealmodding", branch = "patches" }
 url = "2.5.0"
