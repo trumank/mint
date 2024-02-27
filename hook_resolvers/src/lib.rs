@@ -14,6 +14,10 @@ use patternsleuth::scanner::Pattern;
 use patternsleuth::MemoryAccessorTrait;
 
 #[derive(Debug, PartialEq)]
+#[cfg_attr(
+    feature = "serde-resolvers",
+    derive(serde::Serialize, serde::Deserialize)
+)]
 pub struct GetServerName(pub usize);
 impl_resolver_singleton!(GetServerName, |ctx| async {
     let patterns = [
@@ -33,6 +37,10 @@ impl_resolver_singleton!(GetServerName, |ctx| async {
 });
 
 #[derive(Debug, PartialEq)]
+#[cfg_attr(
+    feature = "serde-resolvers",
+    derive(serde::Serialize, serde::Deserialize)
+)]
 pub struct FOnlineSessionSettingsSetFString(pub usize);
 impl_resolver_singleton!(FOnlineSessionSettingsSetFString, |ctx| async {
     let patterns = ["48 89 5C 24 ?? 48 89 54 24 ?? 55 56 57 48 83 EC 40 49 8B F8 48 8D 69"];
@@ -41,6 +49,10 @@ impl_resolver_singleton!(FOnlineSessionSettingsSetFString, |ctx| async {
 });
 
 #[derive(Debug, PartialEq)]
+#[cfg_attr(
+    feature = "serde-resolvers",
+    derive(serde::Serialize, serde::Deserialize)
+)]
 pub struct USessionHandlingFSDFillSessionSettting(pub usize);
 impl_resolver_singleton!(USessionHandlingFSDFillSessionSettting, |ctx| async {
     let patterns = ["48 89 5C 24 ?? 48 89 74 24 ?? 48 89 7C 24 ?? 55 41 54 41 55 41 56 41 57 48 8B EC 48 83 EC 50 48 8B B9"];
@@ -49,6 +61,10 @@ impl_resolver_singleton!(USessionHandlingFSDFillSessionSettting, |ctx| async {
 });
 
 #[derive(Debug, PartialEq)]
+#[cfg_attr(
+    feature = "serde-resolvers",
+    derive(serde::Serialize, serde::Deserialize)
+)]
 pub struct ModsFName(pub usize);
 impl_resolver_singleton!(ModsFName, |ctx| async {
     let strings = ctx
@@ -76,6 +92,10 @@ impl_resolver_singleton!(ModsFName, |ctx| async {
 });
 
 #[derive(Debug, PartialEq)]
+#[cfg_attr(
+    feature = "serde-resolvers",
+    derive(serde::Serialize, serde::Deserialize)
+)]
 pub struct SemicolonHReplace(pub usize);
 impl_resolver_singleton!(SemicolonHReplace, |ctx| async {
     let patterns = ["48 8B CB 48 8D 55 E0 E8 ?? ?? ?? ?? 4D 63 FE 48 8B F0 45 8D 77 01 44 89 75 B8 45 3B F4 7E 18 41 8B D7 48 8D 4D B0 E8 ?? ?? ?? ?? 44 8B 65 BC 44 8B 75 B8 4C 8B 6D B0 33 D2 49 8B CF 48 C1 E1 04 49 03 CD 48 89 11 48 8B 06 48 89 01 48 89 16 8B 46 08 89 41 08 8B 46 0C 89 41 0C 48 89 56 08 48 8B 4D E0 48 85 C9 74 05 E8"];
@@ -84,6 +104,10 @@ impl_resolver_singleton!(SemicolonHReplace, |ctx| async {
 });
 
 #[derive(Debug, PartialEq)]
+#[cfg_attr(
+    feature = "serde-resolvers",
+    derive(serde::Serialize, serde::Deserialize)
+)]
 pub struct Disable(pub usize);
 impl_resolver_singleton!(Disable, |ctx| async {
     let patterns = ["4C 8B B4 24 48 01 00 00 0F 84"];
@@ -94,6 +118,10 @@ impl_resolver_singleton!(Disable, |ctx| async {
 });
 
 #[derive(Debug, PartialEq)]
+#[cfg_attr(
+    feature = "serde-resolvers",
+    derive(serde::Serialize, serde::Deserialize)
+)]
 pub struct UObjectTemperatureComponentTimerCallback(pub usize);
 impl_resolver_singleton!(UObjectTemperatureComponentTimerCallback, |ctx| async {
     let patterns = ["40 55 57 41 56 48 8D 6C 24 ?? 48 81 EC 20 01 00 00"];
@@ -101,6 +129,10 @@ impl_resolver_singleton!(UObjectTemperatureComponentTimerCallback, |ctx| async {
     Ok(Self(ensure_one(res.into_iter().flatten())?))
 });
 #[derive(Debug, PartialEq)]
+#[cfg_attr(
+    feature = "serde-resolvers",
+    derive(serde::Serialize, serde::Deserialize)
+)]
 pub struct ProcessMulticastDelegate(pub usize);
 impl_resolver_singleton!(ProcessMulticastDelegate, |ctx| async {
     let patterns = ["4C 8B DC 57 41 54 41 56 48 81 EC A0 00 00 00"];
@@ -110,6 +142,10 @@ impl_resolver_singleton!(ProcessMulticastDelegate, |ctx| async {
 
 impl_try_collector! {
     #[derive(Debug, PartialEq)]
+        #[cfg_attr(
+        feature = "serde-resolvers",
+        derive(serde::Serialize, serde::Deserialize)
+    )]
     pub struct ServerModsResolution {
         pub set_fstring: FOnlineSessionSettingsSetFString,
         pub fill_session_setting: USessionHandlingFSDFillSessionSettting,
@@ -120,6 +156,10 @@ impl_try_collector! {
 
 impl_try_collector! {
     #[derive(Debug, PartialEq)]
+        #[cfg_attr(
+        feature = "serde-resolvers",
+        derive(serde::Serialize, serde::Deserialize)
+    )]
     pub struct ServerNameResolution {
         pub get_server_name: GetServerName,
     }
@@ -127,6 +167,10 @@ impl_try_collector! {
 
 impl_try_collector! {
     #[derive(Debug, PartialEq)]
+        #[cfg_attr(
+        feature = "serde-resolvers",
+        derive(serde::Serialize, serde::Deserialize)
+    )]
     pub struct SaveGameResolution {
         pub save_game_to_memory: UGameplayStaticsSaveGameToMemory,
         pub save_game_to_slot: UGameplayStaticsSaveGameToSlot,
@@ -138,6 +182,10 @@ impl_try_collector! {
 
 impl_try_collector! {
     #[derive(Debug, PartialEq)]
+        #[cfg_attr(
+        feature = "serde-resolvers",
+        derive(serde::Serialize, serde::Deserialize)
+    )]
     pub struct GasFixResolution {
         pub timer_callback: UObjectTemperatureComponentTimerCallback,
         pub process_multicast_delegate: ProcessMulticastDelegate,
@@ -146,6 +194,10 @@ impl_try_collector! {
 
 impl_try_collector! {
     #[derive(Debug, PartialEq)]
+        #[cfg_attr(
+        feature = "serde-resolvers",
+        derive(serde::Serialize, serde::Deserialize)
+    )]
     pub struct CoreResolution {
         pub gmalloc: GMalloc,
         pub fnametostring: FNameToString,
@@ -158,6 +210,10 @@ impl_try_collector! {
 
 impl_collector! {
     #[derive(Debug, PartialEq)]
+        #[cfg_attr(
+        feature = "serde-resolvers",
+        derive(serde::Serialize, serde::Deserialize)
+    )]
     pub struct HookResolution {
         pub disable: Disable,
         pub server_name: ServerNameResolution,

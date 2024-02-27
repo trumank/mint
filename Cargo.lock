@@ -2227,6 +2227,7 @@ name = "hook_resolvers"
 version = "0.2.10"
 dependencies = [
  "patternsleuth",
+ "serde",
 ]
 
 [[package]]

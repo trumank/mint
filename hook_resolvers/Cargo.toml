@@ -8,3 +8,7 @@ edition.workspace = true
 
 [dependencies]
 patternsleuth.workspace = true
+serde = { workspace = true, optional = true }
+
+[features]
+serde-resolvers = ["dep:serde"]
