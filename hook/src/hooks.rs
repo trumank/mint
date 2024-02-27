@@ -5,6 +5,7 @@ use std::{
 };
 
 use anyhow::{Context, Result};
+use fs_err as fs;
 use hook_resolvers::GasFixResolution;
 use mint_lib::DRGInstallationType;
 use windows::Win32::System::Memory::{VirtualProtect, PAGE_EXECUTE_READWRITE};
@@ -273,10 +274,10 @@ fn save_game_to_slot_detour(
             };
 
             if let Some(parent) = path.parent() {
-                std::fs::create_dir_all(parent).ok();
+                fs::create_dir_all(parent).ok();
             }
 
-            let res = std::fs::write(path, data.as_slice()).is_ok();
+            let res = fs::write(path, data.as_slice()).is_ok();
             res
         }
     }
@@ -287,8 +288,7 @@ fn load_game_from_slot_detour(slot_name: *const ue::FString, user_index: i32) ->
         let slot_name = &*slot_name;
         if slot_name.to_string() == "Player" {
             LoadGameFromSlot.call(slot_name, user_index)
-        } else if let Some(data) =
-            get_path_for_slot(slot_name).and_then(|path| std::fs::read(path).ok())
+        } else if let Some(data) = get_path_for_slot(slot_name).and_then(|path| fs::read(path).ok())
         {
             (globals().load_game_from_memory())(&ue::TArray::from(data.as_slice()))
         } else {

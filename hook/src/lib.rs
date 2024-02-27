@@ -4,6 +4,7 @@ mod ue;
 use std::{io::BufReader, path::Path};
 
 use anyhow::{Context, Result};
+use fs_err as fs;
 use hooks::{FnLoadGameFromMemory, FnSaveGameToMemory};
 use mint_lib::mod_info::Meta;
 use windows::Win32::{
@@ -133,7 +134,7 @@ unsafe fn patch() -> Result<()> {
         .map(|p| p.join("Content/Paks/mods_P.pak"))
         .context("could not determine pak path")?;
 
-    let mut pak_reader = BufReader::new(std::fs::File::open(pak_path)?);
+    let mut pak_reader = BufReader::new(fs::File::open(pak_path)?);
     let pak = repak::PakBuilder::new().reader(&mut pak_reader)?;
 
     let meta_buf = pak.get("meta", &mut pak_reader)?;
