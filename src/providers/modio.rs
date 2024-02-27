@@ -30,7 +30,7 @@ const MODIO_PROVIDER_ID: &str = "modio";
 inventory::submit! {
     super::ProviderFactory {
         id: MODIO_PROVIDER_ID,
-        new: ModioProvider::<modio::Modio>::new_provider,
+        new: ModioProvider::<ModioWrapper>::new_provider,
         can_provide: |url| re_mod().is_match(url),
         parameters: &[
             super::ProviderParameter {
@@ -49,6 +49,11 @@ fn format_spec(name_id: &str, mod_id: u32, file_id: Option<u32>) -> ModSpecifica
     } else {
         format!("https://mod.io/g/drg/m/{}#{}", name_id, mod_id)
     })
+}
+
+struct ModioWrapper {
+    modio: modio::Modio,
+    is_admin: tokio::sync::Mutex<Option<bool>>,
 }
 
 pub struct ModioProvider<M: DrgModio> {
@@ -207,7 +212,7 @@ pub trait DrgModio: Sync + Send {
 }
 
 #[async_trait::async_trait]
-impl DrgModio for modio::Modio {
+impl DrgModio for ModioWrapper {
     fn with_parameters(parameters: &HashMap<String, String>) -> Result<Self> {
         let client = reqwest_middleware::ClientBuilder::new(reqwest::Client::new())
             .with::<LoggingMiddleware>(Default::default())
@@ -222,13 +227,17 @@ impl DrgModio for modio::Modio {
             client,
         )?;
 
-        Ok(modio)
+        Ok(ModioWrapper {
+            modio,
+            is_admin: Default::default(),
+        })
     }
     async fn check(&self) -> Result<()> {
         use modio::filter::Eq;
         use modio::mods::filters::Id;
 
-        self.game(MODIO_DRG_ID)
+        self.modio
+            .game(MODIO_DRG_ID)
             .mods()
             .search(Id::eq(0))
             .collect()
@@ -240,13 +249,14 @@ impl DrgModio for modio::Modio {
         use modio::mods::filters::Id;
 
         let files = self
+            .modio
             .game(MODIO_DRG_ID)
             .mod_(id)
             .files()
             .search(Id::ne(0))
             .collect()
             .await?;
-        let mod_ = self.game(MODIO_DRG_ID).mod_(id).get().await?;
+        let mod_ = self.modio.game(MODIO_DRG_ID).mod_(id).get().await?;
 
         Ok(ModioMod::new(mod_, files))
     }
@@ -255,18 +265,20 @@ impl DrgModio for modio::Modio {
         use modio::mods::filters::Id;
 
         let files = self
+            .modio
             .game(MODIO_DRG_ID)
             .mod_(mod_id)
             .files()
             .search(Id::ne(0))
             .collect()
             .await?;
-        let mod_ = self.game(MODIO_DRG_ID).mod_(mod_id).get().await?;
+        let mod_ = self.modio.game(MODIO_DRG_ID).mod_(mod_id).get().await?;
 
         Ok(ModioMod::new(mod_, files))
     }
     async fn fetch_file(&self, mod_id: u32, modfile_id: u32) -> Result<modio::files::File> {
         Ok(self
+            .modio
             .game(MODIO_DRG_ID)
             .mod_(mod_id)
             .file(modfile_id)
@@ -275,6 +287,7 @@ impl DrgModio for modio::Modio {
     }
     async fn fetch_dependencies(&self, mod_id: u32) -> Result<Vec<u32>> {
         Ok(self
+            .modio
             .game(MODIO_DRG_ID)
             .mod_(mod_id)
             .dependencies()
@@ -286,10 +299,32 @@ impl DrgModio for modio::Modio {
     }
     async fn fetch_mods_by_name(&self, name_id: &str) -> Result<Vec<ModioModResponse>> {
         use modio::filter::{Eq, In};
-        use modio::mods::filters::{NameId, Visible};
+        use modio::mods::filters::{Id, NameId, Visible};
 
-        let filter = NameId::eq(name_id).and(Visible::_in(vec![0, 1]));
+        let is_admin = {
+            let mut admin_lock = self.is_admin.lock().await;
+            if let Some(is_admin) = *admin_lock {
+                is_admin
+            } else {
+                let is_admin = self
+                    .modio
+                    .game(MODIO_DRG_ID)
+                    .mods()
+                    .search(Id::eq(0).and(Visible::_in(vec![0, 1])))
+                    .collect()
+                    .await
+                    .is_ok();
+                *admin_lock = Some(is_admin);
+                is_admin
+            }
+        };
+
+        let mut filter = NameId::eq(name_id);
+        if is_admin {
+            filter = filter.and(Visible::_in(vec![0, 1]));
+        }
         Ok(self
+            .modio
             .game(MODIO_DRG_ID)
             .mods()
             .search(filter)
@@ -306,6 +341,7 @@ impl DrgModio for modio::Modio {
         let filter = Id::_in(filter_ids);
 
         Ok(self
+            .modio
             .game(MODIO_DRG_ID)
             .mods()
             .search(filter)
@@ -327,6 +363,7 @@ impl DrgModio for modio::Modio {
         use modio::mods::EventType as EventTypes;
 
         let events = self
+            .modio
             .game(MODIO_DRG_ID)
             .mods()
             .events(
@@ -345,7 +382,7 @@ impl DrgModio for modio::Modio {
     where
         modio::download::DownloadAction: From<A>,
     {
-        self.download(action)
+        self.modio.download(action)
     }
 }
 
