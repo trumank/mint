@@ -7,6 +7,7 @@ use anyhow::{Context, Result};
 use fs_err as fs;
 use hooks::{FnLoadGameFromMemory, FnSaveGameToMemory};
 use mint_lib::mod_info::Meta;
+use tracing::{info, warn};
 use windows::Win32::{
     Foundation::HMODULE,
     System::{
@@ -125,10 +126,16 @@ pub fn globals() -> &'static Globals {
 }
 
 unsafe fn patch() -> Result<()> {
-    let pak_path = std::env::current_exe()
-        .ok()
-        .as_deref()
-        .and_then(Path::parent)
+    let exe_path = std::env::current_exe().ok();
+    let bin_dir = exe_path.as_deref().and_then(Path::parent);
+
+    let guard = bin_dir
+        .and_then(|bin_dir| mint_lib::setup_logging(bin_dir.join("mint_hook.log"), "hook").ok());
+    if guard.is_none() {
+        warn!("failed to set up logging");
+    }
+
+    let pak_path = bin_dir
         .and_then(Path::parent)
         .and_then(Path::parent)
         .map(|p| p.join("Content/Paks/mods_P.pak"))
@@ -142,11 +149,13 @@ unsafe fn patch() -> Result<()> {
 
     let image = patternsleuth::process::internal::read_image()?;
     let resolution = image.resolve(hook_resolvers::HookResolution::resolver())?;
-    println!("{:#x?}", resolution);
+    info!("PS scan: {:#x?}", resolution);
 
     GLOBALS = Some(Globals { resolution, meta });
 
     hooks::initialize()?;
+
+    info!("hook initialized");
 
     Ok(())
 }

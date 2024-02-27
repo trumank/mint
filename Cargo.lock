@@ -2217,6 +2217,7 @@ dependencies = [
  "retour",
  "serde",
  "serde_json",
+ "tracing",
  "widestring",
  "windows 0.52.0",
 ]
