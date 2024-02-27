@@ -1,8 +1,13 @@
 pub mod mod_info;
 
-use std::path::{Path, PathBuf};
+use std::{
+    io::BufWriter,
+    path::{Path, PathBuf},
+};
 
 use anyhow::{bail, Context, Result};
+use fs_err as fs;
+use tracing::*;
 
 #[derive(Debug)]
 pub enum DRGInstallationType {
@@ -137,4 +142,65 @@ impl DRGInstallation {
             DRGInstallationType::Xbox => None,
         }
     }
+}
+
+pub fn setup_logging<P: AsRef<Path>>(
+    log_path: P,
+    target: &str,
+) -> Result<tracing_appender::non_blocking::WorkerGuard> {
+    use tracing::metadata::LevelFilter;
+    use tracing_subscriber::prelude::*;
+    use tracing_subscriber::{
+        field::RecordFields,
+        filter,
+        fmt::{
+            self,
+            format::{Pretty, Writer},
+            FormatFields,
+        },
+        EnvFilter,
+    };
+
+    /// Workaround for <https://github.com/tokio-rs/tracing/issues/1817>.
+    struct NewType(Pretty);
+
+    impl<'writer> FormatFields<'writer> for NewType {
+        fn format_fields<R: RecordFields>(
+            &self,
+            writer: Writer<'writer>,
+            fields: R,
+        ) -> core::fmt::Result {
+            self.0.format_fields(writer, fields)
+        }
+    }
+
+    let f = fs::File::create(log_path.as_ref())?;
+    let writer = BufWriter::new(f);
+    let (log_file_appender, guard) = tracing_appender::non_blocking(writer);
+    let debug_file_log = fmt::layer()
+        .with_writer(log_file_appender)
+        .fmt_fields(NewType(Pretty::default()))
+        .with_ansi(false)
+        .with_filter(filter::Targets::new().with_target(target, Level::DEBUG));
+    let stderr_log = fmt::layer()
+        .with_writer(std::io::stderr)
+        .compact()
+        .with_level(true)
+        .with_target(true)
+        .without_time()
+        .with_filter(
+            EnvFilter::builder()
+                .with_default_directive(LevelFilter::INFO.into())
+                .from_env_lossy(),
+        );
+    let subscriber = tracing_subscriber::registry()
+        .with(stderr_log)
+        .with(debug_file_log);
+
+    tracing::subscriber::set_global_default(subscriber)?;
+
+    debug!("tracing subscriber setup");
+    info!("writing logs to {:?}", log_path.as_ref().display());
+
+    Ok(guard)
 }

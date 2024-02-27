@@ -1,14 +1,10 @@
 use std::collections::BTreeSet;
-use std::io::BufWriter;
 use std::path::PathBuf;
 
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
-use fs_err as fs;
 use mint_lib::DRGInstallation;
 use tracing::{debug, info};
-use tracing_appender::non_blocking::WorkerGuard;
-use tracing_subscriber::filter;
 
 use mint::mod_lints::{run_lints, LintId};
 use mint::providers::ProviderFactory;
@@ -115,7 +111,8 @@ fn main() -> Result<()> {
         .unwrap_or_else(Dirs::default_xdg)?;
 
     std::env::set_var("RUST_BACKTRACE", "1");
-    let _guard = setup_logging(&dirs)?;
+
+    let _guard = mint_lib::setup_logging(dirs.data_dir.join("mint.log"), "mint")?;
     debug!("logging setup complete");
 
     info!("config dir = {}", dirs.config_dir.display());
@@ -156,65 +153,6 @@ fn main() -> Result<()> {
             Ok(())
         }
     }
-}
-
-fn setup_logging(dirs: &Dirs) -> Result<WorkerGuard> {
-    use tracing::metadata::LevelFilter;
-    use tracing::Level;
-    use tracing_subscriber::prelude::*;
-    use tracing_subscriber::{
-        field::RecordFields,
-        fmt::{
-            self,
-            format::{Pretty, Writer},
-            FormatFields,
-        },
-        EnvFilter,
-    };
-
-    /// Workaround for <https://github.com/tokio-rs/tracing/issues/1817>.
-    struct NewType(Pretty);
-
-    impl<'writer> FormatFields<'writer> for NewType {
-        fn format_fields<R: RecordFields>(
-            &self,
-            writer: Writer<'writer>,
-            fields: R,
-        ) -> core::fmt::Result {
-            self.0.format_fields(writer, fields)
-        }
-    }
-
-    let log_path = dirs.data_dir.join("mint.log");
-    let f = fs::File::create(&log_path)?;
-    let writer = BufWriter::new(f);
-    let (log_file_appender, guard) = tracing_appender::non_blocking(writer);
-    let debug_file_log = fmt::layer()
-        .with_writer(log_file_appender)
-        .fmt_fields(NewType(Pretty::default()))
-        .with_ansi(false)
-        .with_filter(filter::Targets::new().with_target("mint", Level::DEBUG));
-    let stderr_log = fmt::layer()
-        .with_writer(std::io::stderr)
-        .compact()
-        .with_level(true)
-        .with_target(true)
-        .without_time()
-        .with_filter(
-            EnvFilter::builder()
-                .with_default_directive(LevelFilter::INFO.into())
-                .from_env_lossy(),
-        );
-    let subscriber = tracing_subscriber::registry()
-        .with(stderr_log)
-        .with(debug_file_log);
-
-    tracing::subscriber::set_global_default(subscriber)?;
-
-    debug!("tracing subscriber setup");
-    info!("writing logs to {:?}", log_path.display());
-
-    Ok(guard)
 }
 
 #[tracing::instrument(skip(state))]

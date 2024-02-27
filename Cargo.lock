@@ -2785,8 +2785,6 @@ dependencies = [
  "thiserror",
  "tokio",
  "tracing",
- "tracing-appender",
- "tracing-subscriber",
  "typetag",
  "uasset_utils",
  "unreal_asset",
@@ -2799,10 +2797,14 @@ name = "mint_lib"
 version = "0.2.10"
 dependencies = [
  "anyhow",
+ "fs-err",
  "itertools 0.12.0",
  "repak",
  "serde",
  "steamlocate",
+ "tracing",
+ "tracing-appender",
+ "tracing-subscriber",
 ]
 
 [[package]]
