@@ -3312,7 +3312,7 @@ checksum = "1e91099d4268b0e11973f036e885d652fb0b21fedcf69738c627f94db6a44f42"
 [[package]]
 name = "patternsleuth"
 version = "0.1.0"
-source = "git+https://github.com/trumank/patternsleuth#651c3c6a6365add1b1dc1844ebe4f03940503258"
+source = "git+https://github.com/trumank/patternsleuth#67bd8d49101ace4c4844af1222ad091a4af78203"
 dependencies = [
  "anyhow",
  "futures",
@@ -3332,7 +3332,7 @@ dependencies = [
 [[package]]
 name = "patternsleuth_scanner"
 version = "0.1.0"
-source = "git+https://github.com/trumank/patternsleuth#651c3c6a6365add1b1dc1844ebe4f03940503258"
+source = "git+https://github.com/trumank/patternsleuth#67bd8d49101ace4c4844af1222ad091a4af78203"
 dependencies = [
  "anyhow",
  "memchr",
