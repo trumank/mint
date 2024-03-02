@@ -155,7 +155,7 @@ impl ModStore {
 
     pub async fn fetch_mods(
         &self,
-        mods: &[ModResolution],
+        mods: &[&ModResolution],
         update: bool,
         tx: Option<Sender<FetchProgress>>,
     ) -> Result<Vec<PathBuf>, ProviderError> {

@@ -387,8 +387,8 @@ async fn integrate_async(
         .collect();
     let urls = to_integrate
         .iter()
-        .map(|m| m.resolution.clone())
-        .collect::<Vec<ModResolution>>();
+        .map(|m| &m.resolution)
+        .collect::<Vec<_>>();
 
     let (tx, mut rx) = mpsc::channel::<FetchProgress>(10);
 
@@ -408,7 +408,7 @@ async fn integrate_async(
         }
     });
 
-    let paths = store.fetch_mods(&urls, update, Some(tx)).await?;
+    let paths = store.fetch_mods_ordered(&urls, update, Some(tx)).await?;
 
     tokio::task::spawn_blocking(|| {
         crate::integrate::integrate(

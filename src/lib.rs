@@ -135,7 +135,7 @@ pub async fn resolve_unordered_and_integrate<P: AsRef<Path>>(
         .collect::<Vec<_>>();
     let urls = to_integrate
         .iter()
-        .map(|m| m.resolution.clone())
+        .map(|m| &m.resolution)
         .collect::<Vec<_>>();
 
     info!("fetching mods...");
@@ -190,7 +190,10 @@ pub async fn resolve_ordered(
     mod_specs: &[ModSpecification],
 ) -> Result<Vec<PathBuf>, MintError> {
     let urls = resolve_into_urls(state, mod_specs).await?;
-    Ok(state.store.fetch_mods(&urls, false, None).await?)
+    Ok(state
+        .store
+        .fetch_mods(&urls.iter().collect::<Vec<_>>(), false, None)
+        .await?)
 }
 
 pub async fn resolve_unordered_and_integrate_with_provider_init<P, F>(
