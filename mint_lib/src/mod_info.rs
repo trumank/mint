@@ -29,7 +29,7 @@ pub enum ApprovalStatus {
 }
 
 /// Whether a mod can be resolved by clients or not
-#[derive(Debug, Clone, Eq, Ord, PartialEq, PartialOrd, Hash)]
+#[derive(Debug, Clone, Eq, Ord, PartialEq, PartialOrd, Hash, Serialize, Deserialize)]
 pub enum ResolvableStatus {
     Unresolvable(String),
     Resolvable,
@@ -112,11 +112,13 @@ impl ModIdentifier {
         Self(s)
     }
 }
+
 impl From<String> for ModIdentifier {
     fn from(value: String) -> Self {
         Self::new(value)
     }
 }
+
 impl From<&str> for ModIdentifier {
     fn from(value: &str) -> Self {
         Self::new(value.to_owned())
@@ -130,21 +132,25 @@ pub struct Meta {
     pub mods: Vec<MetaMod>,
     pub config: MetaConfig,
 }
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct MetaConfig {
     pub disable_fix_exploding_gas: bool,
 }
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct SemverVersion {
     pub major: u32,
     pub minor: u32,
     pub patch: u32,
 }
+
 impl Display for SemverVersion {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}.{}.{}", self.major, self.minor, self.patch)
     }
 }
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct MetaMod {
     pub name: String,
@@ -153,7 +159,9 @@ pub struct MetaMod {
     pub author: String,
     pub approval: ApprovalStatus,
     pub required: bool,
+    pub gameplay_affecting: bool,
 }
+
 impl Meta {
     pub fn to_server_list_string(&self) -> String {
         use itertools::Itertools;

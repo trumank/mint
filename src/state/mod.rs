@@ -74,9 +74,9 @@ pub struct ModData {
     pub active_profile: String,
     #[obake(cfg("0.0.0"))]
     pub profiles: BTreeMap<String, ModProfile!["0.0.0"]>,
-    #[obake(cfg("0.1.0"))]
+    #[obake(cfg(">=0.1.0"))]
     pub profiles: BTreeMap<String, ModProfile!["0.1.0"]>,
-    #[obake(cfg("0.1.0"))]
+    #[obake(cfg(">=0.1.0"))]
     pub groups: BTreeMap<String, ModGroup>,
 }
 
@@ -106,7 +106,7 @@ impl ModData!["0.1.0"] {
                         }
                     }
                 }
-                ModOrGroup::Individual(mc) => {
+                ModOrGroup::Individual(ref mc) => {
                     if p(mc) {
                         f(mc);
                     }
@@ -140,7 +140,7 @@ impl ModData!["0.1.0"] {
                         }
                     }
                 }
-                ModOrGroup::Individual(mc) => {
+                ModOrGroup::Individual(ref mut mc) => {
                     if p(mc) {
                         f(mc);
                     }
@@ -169,7 +169,7 @@ impl ModData!["0.1.0"] {
         self.profiles.get(profile).unwrap().mods.iter().any(|m| {
             let f = &mut f;
             match m {
-                ModOrGroup::Individual(mc) => f(mc, None),
+                ModOrGroup::Individual(ref mc) => f(mc, None),
                 ModOrGroup::Group {
                     group_name,
                     enabled,
@@ -199,10 +199,10 @@ impl ModData!["0.1.0"] {
             .any(|m| {
                 let f = &mut f;
                 match m {
-                    ModOrGroup::Individual(mc) => f(mc, None),
+                    ModOrGroup::Individual(ref mut mc) => f(mc, None),
                     ModOrGroup::Group {
-                        group_name,
-                        enabled,
+                        ref group_name,
+                        ref mut enabled,
                     } => self
                         .groups
                         .get_mut(group_name)
