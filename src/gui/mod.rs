@@ -499,23 +499,28 @@ impl App {
                         }
                     }
 
+                    let vis = ui.visuals();
                     let mut job = LayoutJob::default();
                     let mut is_match = false;
+                    let default = TextFormat {
+                        color: vis.hyperlink_color,
+                        ..Default::default()
+                    };
                     if let Some(search_string) = &self.search_string {
                         for (m, chunk) in FindString::new(&info.name, search_string) {
                             let background = if m {
                                 is_match = true;
                                 TextFormat {
                                     background: Color32::YELLOW,
-                                    ..Default::default()
+                                    ..default.clone()
                                 }
                             } else {
-                                Default::default()
+                                default.clone()
                             };
                             job.append(chunk, 0.0, background);
                         }
                     } else {
-                        job.append(&info.name, 0.0, Default::default());
+                        job.append(&info.name, 0.0, default);
                     }
 
                     match info.provider {
