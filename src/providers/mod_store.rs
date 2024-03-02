@@ -232,4 +232,21 @@ impl ModStore {
             .unwrap()
             .get_version_name(spec, self.cache.clone())
     }
+
+    pub fn update_gameplay_affecting_status(&self, id: ModIdentifier, stat: bool) {
+        self.cache
+            .write()
+            .unwrap()
+            .gameplay_affecting_cache
+            .insert(id, stat);
+    }
+
+    pub fn get_gameplay_affecting_status(&self, id: &ModIdentifier) -> Option<bool> {
+        self.cache
+            .read()
+            .unwrap()
+            .gameplay_affecting_cache
+            .get(id)
+            .copied()
+    }
 }

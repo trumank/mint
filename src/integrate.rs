@@ -2,20 +2,22 @@ use std::collections::{HashMap, HashSet};
 use std::ffi::{OsStr, OsString};
 use std::io::{self, BufReader, BufWriter, Cursor, ErrorKind, Read, Seek};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use fs_err as fs;
 
 use repak::PakWriter;
 use serde::Deserialize;
 use snafu::{prelude::*, Whatever};
-use tracing::info;
+use tracing::*;
 use uasset_utils::splice::{
     extract_tracked_statements, inject_tracked_statements, walk, AssetVersion, TrackedStatement,
 };
+use unreal_asset::reader::ArchiveTrait;
 
 use crate::mod_lints::LintError;
-use crate::providers::{ModInfo, ProviderError, ReadSeek};
-use mint_lib::mod_info::{ApprovalStatus, Meta, MetaConfig, MetaMod, SemverVersion};
+use crate::providers::{ModInfo, ModStore, ProviderError, ReadSeek};
+use mint_lib::mod_info::{ApprovalStatus, Meta, MetaConfig, MetaMod, ModioTags, SemverVersion};
 use mint_lib::DRGInstallation;
 
 use unreal_asset::{
@@ -168,12 +170,12 @@ pub enum IntegrationError {
     RepakError { source: repak::Error },
     #[snafu(transparent)]
     UnrealAssetError { source: unreal_asset::Error },
-    #[snafu(display("mod {}: I/O error encountered during its processing", mod_info.name))]
+    #[snafu(display("mod {}: I/O error encountered during its processing: {source}", mod_info.name))]
     CtxtIoError {
         source: std::io::Error,
         mod_info: ModInfo,
     },
-    #[snafu(display("mod {}: repak error encountered during its processing", mod_info.name))]
+    #[snafu(display("mod {}: repak error encountered during its processing: {source}", mod_info.name))]
     CtxtRepakError {
         source: repak::Error,
         mod_info: ModInfo,
@@ -187,6 +189,11 @@ pub enum IntegrationError {
     ProviderError { source: ProviderError },
     #[snafu(display("integration error: {msg}"))]
     GenericError { msg: &'static str },
+    #[snafu(display("mod {}: integration error: {msg}"))]
+    CtxtGenericError {
+        msg: &'static str,
+        mod_info: ModInfo,
+    },
     #[snafu(transparent)]
     JoinError { source: tokio::task::JoinError },
     #[snafu(transparent)]
@@ -212,6 +219,7 @@ impl IntegrationError {
 pub fn integrate<P: AsRef<Path>>(
     path_pak: P,
     config: MetaConfig,
+    store: Arc<ModStore>,
     mods: Vec<(ModInfo, PathBuf)>,
 ) -> Result<(), IntegrationError> {
     let Ok(installation) = DRGInstallation::from_pak_path(&path_pak) else {
@@ -236,6 +244,13 @@ pub fn integrate<P: AsRef<Path>>(
         .into_iter()
         .map(PathBuf::from)
         .collect::<Vec<_>>();
+
+    let fsd_lowercase_path_map = fsd_pak
+        .files()
+        .into_iter()
+        .map(|p| (p.to_ascii_lowercase(), p))
+        .collect::<HashMap<_, _>>();
+
     let mut directories: HashMap<OsString, Dir> = HashMap::new();
     for f in &paths {
         let mut dir = &mut directories;
@@ -398,10 +413,13 @@ pub fn integrate<P: AsRef<Path>>(
 
     let mut added_paths = HashSet::new();
 
+    let mut gameplay_affecting_results = HashMap::new();
+
     for (mod_info, path) in &mods {
         let raw_mod_file = fs::File::open(path).with_context(|_| CtxtIoSnafu {
             mod_info: mod_info.clone(),
         })?;
+
         let mut buf = get_pak_from_data(Box::new(BufReader::new(raw_mod_file))).map_err(|e| {
             if let IntegrationError::IoError { source } = e {
                 IntegrationError::CtxtIoError {
@@ -412,11 +430,33 @@ pub fn integrate<P: AsRef<Path>>(
                 e
             }
         })?;
+
         let pak = repak::PakBuilder::new()
             .reader(&mut buf)
             .with_context(|_| CtxtRepakSnafu {
                 mod_info: mod_info.clone(),
             })?;
+
+        let gameplay_affecting = if let Some(ModioTags {
+            approval_status, ..
+        }) = mod_info.modio_tags
+        {
+            approval_status != ApprovalStatus::Verified
+        } else {
+            check_gameplay_affecting(
+                &fsd_lowercase_path_map,
+                &mut fsd_pak_reader,
+                &fsd_pak,
+                mod_info,
+                &mut buf,
+                &pak,
+            )?
+        };
+
+        debug!(?mod_info, ?gameplay_affecting);
+
+        gameplay_affecting_results.insert(mod_info.resolution.url.clone(), gameplay_affecting);
+        store.update_gameplay_affecting_status(mod_info.resolution.url.clone(), gameplay_affecting);
 
         let mount = Path::new(pak.mount_point());
 
@@ -572,6 +612,13 @@ pub fn integrate<P: AsRef<Path>>(
                         .as_ref()
                         .map(|t| t.approval_status)
                         .unwrap_or(ApprovalStatus::Sandbox),
+                    gameplay_affecting: match info.modio_tags.as_ref().map(|t| t.approval_status) {
+                        Some(ApprovalStatus::Verified) => false,
+                        Some(_) => true,
+                        None => *gameplay_affecting_results
+                            .get(&info.resolution.url)
+                            .unwrap_or(&true),
+                    },
                 })
                 .collect(),
         };
@@ -587,6 +634,116 @@ pub fn integrate<P: AsRef<Path>>(
     );
 
     Ok(())
+}
+
+pub fn check_gameplay_affecting<F, M>(
+    fsd_lowercase_path_map: &HashMap<String, String>,
+    fsd_pak: &mut F,
+    fsd_pak_reader: &repak::PakReader,
+    mod_info: &ModInfo,
+    mod_pak: &mut M,
+    mod_pak_reader: &repak::PakReader,
+) -> Result<bool, IntegrationError>
+where
+    F: Read + Seek,
+    M: Read + Seek,
+{
+    let mount = Path::new(mod_pak_reader.mount_point());
+
+    let whitelist = [
+        "SoundWave",
+        "SoundCue",
+        "SoundClass",
+        "SoundMix",
+        "MaterialInstanceConstant",
+        "Material",
+        "SkeletalMesh",
+        "StaticMesh",
+        "Texture2D",
+        "AnimSequence",
+        "Skeleton",
+        "StringTable",
+    ]
+    .into_iter()
+    .collect::<HashSet<_>>();
+
+    let check_asset = |data: Vec<u8>| -> Result<bool, IntegrationError> {
+        debug!("check_asset");
+        let asset = unreal_asset::AssetBuilder::new(
+            Cursor::new(data),
+            unreal_asset::engine_version::EngineVersion::VER_UE4_27,
+        )
+        .skip_data(true)
+        .build()?;
+
+        for export in &asset.asset_data.exports {
+            let base = export.get_base_export();
+            // don't care about exported classes in this case
+            if base.outer_index.index == 0
+                && base.class_index.is_import()
+                && !asset
+                    .get_import(base.class_index)
+                    .map(|import| import.object_name.get_content(|c| whitelist.contains(c)))
+                    .unwrap_or(false)
+            {
+                // invalid import or import name is not whitelisted, unknown
+                return Ok(true);
+            };
+        }
+
+        Ok(false)
+    };
+
+    let mod_lowercase_path_map = mod_pak_reader
+        .files()
+        .into_iter()
+        .map(|p| -> Result<(String, String), IntegrationError> {
+            let j = mount.join(&p);
+            let new_path = j.strip_prefix("../../../").map_err(|_| {
+                IntegrationError::ModfileInvalidPrefix {
+                    mod_info: mod_info.clone(),
+                    modfile_path: PathBuf::from(p.clone()),
+                }
+            })?;
+            let new_path_str = &new_path.to_string_lossy().replace('\\', "/");
+
+            Ok((new_path_str.to_ascii_lowercase(), p))
+        })
+        .collect::<Result<HashMap<_, _>, IntegrationError>>()?;
+
+    for lower in mod_lowercase_path_map.keys() {
+        if let Some((base, ext)) = lower.rsplit_once('.') {
+            if ["uasset", "uexp", "umap", "ubulk", "ufont"].contains(&ext) {
+                let key_uasset = format!("{base}.uasset");
+                let key_umap = format!("{base}.umap");
+                // check mod pak for uasset or umap
+                // if not found, check fsd pak for uasset or umap
+                let asset = if let Some(path) = mod_lowercase_path_map.get(&key_uasset) {
+                    mod_pak_reader.get(path, mod_pak)?
+                } else if let Some(path) = mod_lowercase_path_map.get(&key_umap) {
+                    mod_pak_reader.get(path, mod_pak)?
+                } else if let Some(path) = fsd_lowercase_path_map.get(&key_uasset) {
+                    fsd_pak_reader.get(path, fsd_pak)?
+                } else if let Some(path) = fsd_lowercase_path_map.get(&key_umap) {
+                    fsd_pak_reader.get(path, fsd_pak)?
+                } else {
+                    // not found, unknown
+                    return Ok(true);
+                };
+
+                let asset_result = check_asset(asset.clone())?;
+                debug!(?asset_result);
+
+                if asset_result {
+                    debug!("GameplayAffecting: true");
+                    debug!("{:#?}", asset.clone());
+                    return Ok(true);
+                }
+            }
+        }
+    }
+
+    Ok(false)
 }
 
 pub(crate) fn get_pak_from_data(

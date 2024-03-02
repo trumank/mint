@@ -74,9 +74,9 @@ pub struct ModData {
     pub active_profile: String,
     #[obake(cfg("0.0.0"))]
     pub profiles: BTreeMap<String, ModProfile!["0.0.0"]>,
-    #[obake(cfg("0.1.0"))]
+    #[obake(cfg(">=0.1.0"))]
     pub profiles: BTreeMap<String, ModProfile!["0.1.0"]>,
-    #[obake(cfg("0.1.0"))]
+    #[obake(cfg(">=0.1.0"))]
     pub groups: BTreeMap<String, ModGroup>,
 }
 

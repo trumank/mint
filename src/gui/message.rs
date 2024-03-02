@@ -414,6 +414,7 @@ async fn integrate_async(
         crate::integrate::integrate(
             fsd_pak,
             config,
+            store,
             to_integrate.into_iter().zip(paths).collect(),
         )
     })
