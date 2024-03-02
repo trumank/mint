@@ -4,7 +4,7 @@
 externally of the game. This enables more stable mod usage as well as offline mod usage. Works for
 both Steam and Microsoft Store versions.
 
-<img alt="Graphical User Interface" src="https://github.com/jieyouxu/drg-mod-integration/assets/39484203/a09700f6-1932-4bc0-a64c-0f4e0d2faf53">
+<img alt="Graphical User Interface" src="https://github.com/trumank/mint/assets/1144160/0305419f-a2af-4349-9d63-12e19d97102f">
 
 Mods are added via URL to a .pak or .zip containing a .pak. Mods can also be pulled from mod.io.
 Examples:
@@ -39,7 +39,7 @@ We need to provide the tool with the path to `FSD-WindowsNoEditor.pak` and a mod
 you want to use mod.io mods. These can be configured in the settings menu (cogwheel located in the
 bottom toolbar).
 
-<img alt="Settings menu" src="https://github.com/jieyouxu/drg-mod-integration/assets/39484203/09d12b01-7d2d-449e-97bb-47e4b4cdd301">
+<img alt="Settings menu" src="https://github.com/trumank/mint/assets/1144160/b009a74c-b13a-4b84-95f9-4c59c6debb62">
 
 #### Locating the DRG `FSD-WindowsNoEditor.pak`
 
@@ -60,7 +60,7 @@ for an mod.io OAuth token.
 To generate a mod.io OAuth token, you'll need to visit <https://mod.io/me/access>. You'll need to
 accept the API terms and conditions.
 
-<img alt="mod.io Access page" src="https://github.com/jieyouxu/drg-mod-integration/assets/39484203/67096a62-8a3d-46f3-a106-cf6c5066e296">
+<img alt="mod.io Access page" src="https://github.com/trumank/mint/assets/1144160/2aeb6135-71c2-4c3c-8979-49e84b276bed">
 
 Then, you'll need to add a new client under OAuth Access, call it e.g. "DRG Mod Integration".
 
