@@ -190,18 +190,35 @@ pub enum DrgModioError {
     GenericModioError { source: modio::Error },
     #[snafu(display("failed to perform basic mod.io probe: {source}"))]
     CheckFailed { source: modio::Error },
-    #[snafu(display("failed to fetch mod files for {mod_id}: {source}"))]
-    FetchModFilesFailed { source: modio::Error, mod_id: u32 },
-    #[snafu(display("failed to fetch mod file {modfile_id} for {mod_id}: {source}"))]
+    #[snafu(display("failed to fetch mod files for <{url}> (mod_id = {mod_id}): {source}"))]
+    FetchModFilesFailed {
+        source: modio::Error,
+        url: String,
+        mod_id: u32,
+    },
+    #[snafu(display(
+        "failed to fetch mod file {modfile_id} for <{url}> (mod_id = {mod_id}): {source}"
+    ))]
     FetchModFileFailed {
         source: modio::Error,
+        url: String,
         mod_id: u32,
         modfile_id: u32,
     },
-    #[snafu(display("failed to fetch mod {mod_id}: {source}"))]
-    FetchModFailed { source: modio::Error, mod_id: u32 },
-    #[snafu(display("failed to fetch dependencies for mod {mod_id}: {source}"))]
-    FetchDependenciesFailed { source: modio::Error, mod_id: u32 },
+    #[snafu(display("failed to fetch mod <{url}> (mod_id = {mod_id}): {source}"))]
+    FetchModFailed {
+        source: modio::Error,
+        url: String,
+        mod_id: u32,
+    },
+    #[snafu(display(
+        "failed to fetch dependencies for mod <{url}> (mod_id = {mod_id}): {source}"
+    ))]
+    FetchDependenciesFailed {
+        source: modio::Error,
+        url: String,
+        mod_id: u32,
+    },
     #[snafu(display("encountered mod.io-related error: {msg}"))]
     GenericError { msg: &'static str },
 }
@@ -225,14 +242,16 @@ pub trait DrgModio: Sync + Send {
     where
         Self: Sized;
     async fn check(&self) -> Result<(), DrgModioError>;
-    async fn fetch_mod(&self, id: u32) -> Result<ModioMod, DrgModioError>;
-    async fn fetch_files(&self, mod_id: u32) -> Result<ModioMod, DrgModioError>;
+    async fn fetch_mod(&self, url: String, id: u32) -> Result<ModioMod, DrgModioError>;
+    async fn fetch_files(&self, url: String, mod_id: u32) -> Result<ModioMod, DrgModioError>;
     async fn fetch_file(
         &self,
+        url: String,
         mod_id: u32,
         modfile_id: u32,
     ) -> Result<modio::files::File, DrgModioError>;
-    async fn fetch_dependencies(&self, mod_id: u32) -> Result<Vec<u32>, DrgModioError>;
+    async fn fetch_dependencies(&self, url: String, mod_id: u32)
+        -> Result<Vec<u32>, DrgModioError>;
     async fn fetch_mods_by_name(
         &self,
         name_id: &str,
@@ -282,7 +301,7 @@ impl DrgModio for modio::Modio {
         Ok(())
     }
 
-    async fn fetch_mod(&self, id: u32) -> Result<ModioMod, DrgModioError> {
+    async fn fetch_mod(&self, url: String, id: u32) -> Result<ModioMod, DrgModioError> {
         use modio::filter::NotEq;
         use modio::mods::filters::Id;
 
@@ -293,18 +312,21 @@ impl DrgModio for modio::Modio {
             .search(Id::ne(0))
             .collect()
             .await
-            .context(FetchModFilesFailedSnafu { mod_id: id })?;
+            .with_context(|_| FetchModFilesFailedSnafu {
+                mod_id: id,
+                url: url.clone(),
+            })?;
         let r#mod = self
             .game(MODIO_DRG_ID)
             .mod_(id)
             .get()
             .await
-            .context(FetchModFailedSnafu { mod_id: id })?;
+            .context(FetchModFailedSnafu { mod_id: id, url })?;
 
         Ok(ModioMod::new(r#mod, files))
     }
 
-    async fn fetch_files(&self, mod_id: u32) -> Result<ModioMod, DrgModioError> {
+    async fn fetch_files(&self, url: String, mod_id: u32) -> Result<ModioMod, DrgModioError> {
         use modio::filter::NotEq;
         use modio::mods::filters::Id;
 
@@ -315,19 +337,23 @@ impl DrgModio for modio::Modio {
             .search(Id::ne(0))
             .collect()
             .await
-            .context(FetchModFilesFailedSnafu { mod_id })?;
+            .with_context(|_| FetchModFilesFailedSnafu {
+                mod_id,
+                url: url.clone(),
+            })?;
         let r#mod = self
             .game(MODIO_DRG_ID)
             .mod_(mod_id)
             .get()
             .await
-            .context(FetchModFailedSnafu { mod_id })?;
+            .context(FetchModFailedSnafu { mod_id, url })?;
 
         Ok(ModioMod::new(r#mod, files))
     }
 
     async fn fetch_file(
         &self,
+        url: String,
         mod_id: u32,
         modfile_id: u32,
     ) -> Result<modio::files::File, DrgModioError> {
@@ -337,18 +363,26 @@ impl DrgModio for modio::Modio {
             .file(modfile_id)
             .get()
             .await
-            .context(FetchModFileFailedSnafu { mod_id, modfile_id })?;
+            .with_context(|_| FetchModFileFailedSnafu {
+                url,
+                mod_id,
+                modfile_id,
+            })?;
         Ok(file)
     }
 
-    async fn fetch_dependencies(&self, mod_id: u32) -> Result<Vec<u32>, DrgModioError> {
+    async fn fetch_dependencies(
+        &self,
+        url: String,
+        mod_id: u32,
+    ) -> Result<Vec<u32>, DrgModioError> {
         Ok(self
             .game(MODIO_DRG_ID)
             .mod_(mod_id)
             .dependencies()
             .list()
             .await
-            .context(FetchDependenciesFailedSnafu { mod_id })?
+            .with_context(|_| FetchDependenciesFailedSnafu { url, mod_id })?
             .into_iter()
             .map(|d| d.mod_id)
             .collect::<Vec<_>>())
@@ -486,7 +520,7 @@ impl<M: DrgModio + Send + Sync> ModProvider for ModioProvider<M> {
                 if let Some(mod_) = read_cache(&cache, update, |c| c.mods.get(&mod_id).cloned()) {
                     mod_
                 } else {
-                    let mod_ = self.modio.fetch_mod(mod_id).await?;
+                    let mod_ = self.modio.fetch_mod(url.clone(), mod_id).await?;
 
                     write_cache(&cache, |c| {
                         c.mods.insert(mod_id, mod_.clone());
@@ -500,7 +534,7 @@ impl<M: DrgModio + Send + Sync> ModProvider for ModioProvider<M> {
             {
                 Some(deps) => deps,
                 None => {
-                    let deps = self.modio.fetch_dependencies(mod_id).await?;
+                    let deps = self.modio.fetch_dependencies(url.clone(), mod_id).await?;
                     write_cache(&cache, |c| {
                         c.dependencies.insert(mod_id, deps.clone());
                     });
@@ -535,7 +569,10 @@ impl<M: DrgModio + Send + Sync> ModProvider for ModioProvider<M> {
                     for m in mods {
                         let id = m.id;
                         // TODO avoid fetching mod a second time
-                        let m = self.modio.fetch_files(id).await?;
+                        let m = self
+                            .modio
+                            .fetch_files(m.profile_url.to_string(), id)
+                            .await?;
                         write_cache(&cache, |c| {
                             c.mod_id_map.insert(m.name_id.to_owned(), id);
                             c.mods.insert(id, m);
@@ -579,7 +616,7 @@ impl<M: DrgModio + Send + Sync> ModProvider for ModioProvider<M> {
             let mod_ = match read_cache(&cache, update, |c| c.mods.get(&mod_id).cloned()) {
                 Some(mod_) => mod_,
                 None => {
-                    let mod_ = self.modio.fetch_mod(mod_id).await?;
+                    let mod_ = self.modio.fetch_mod(spec.url.clone(), mod_id).await?;
                     write_cache(&cache, |c| {
                         c.mods.insert(mod_id, mod_.clone());
                         c.mod_id_map.insert(mod_.name_id.to_owned(), mod_id);
@@ -611,7 +648,7 @@ impl<M: DrgModio + Send + Sync> ModProvider for ModioProvider<M> {
                 let modfile_id = match cached {
                     Some(modfile_id) => modfile_id,
                     None => {
-                        let mod_ = self.modio.fetch_mod(id).await?;
+                        let mod_ = self.modio.fetch_mod(spec.url.clone(), id).await?;
                         let modfile_id = mod_.latest_modfile;
                         write_cache(&cache, |c| {
                             c.mods.insert(id, mod_.clone());
@@ -637,7 +674,7 @@ impl<M: DrgModio + Send + Sync> ModProvider for ModioProvider<M> {
                     .fail()?
                 } else if let Some(mod_) = mods.pop() {
                     let mod_id = mod_.id;
-                    let mod_ = self.modio.fetch_mod(mod_id).await?;
+                    let mod_ = self.modio.fetch_mod(spec.url.clone(), mod_id).await?;
                     let modfile_id = mod_.latest_modfile;
                     write_cache(&cache, |c| {
                         c.mods.insert(mod_id, mod_.clone());
@@ -704,7 +741,10 @@ impl<M: DrgModio + Send + Sync> ModProvider for ModioProvider<M> {
                     }
                     path
                 } else {
-                    let file = self.modio.fetch_file(mod_id, modfile_id).await?;
+                    let file = self
+                        .modio
+                        .fetch_file(res.url.0.clone(), mod_id, modfile_id)
+                        .await?;
 
                     let size = file.filesize;
                     let download: modio::download::DownloadAction = file.into();
@@ -1069,14 +1109,14 @@ mod test {
                     .map(|id| vec![ModioModResponse { id: **id }])
                     .ok_or(DrgModioError::GenericError { msg: "not found" })
             });
-        mock.expect_fetch_mod().times(1).returning(move |id| {
+        mock.expect_fetch_mod().times(1).returning(move |_, id| {
             mods.get(&id)
                 .map(|m| m.mod_.clone())
                 .ok_or(DrgModioError::GenericError { msg: "not found" })
         });
         mock.expect_fetch_dependencies()
             .times(1)
-            .returning(move |id| {
+            .returning(move |_, id| {
                 mods.get(&id)
                     .map(|m| m.dependencies.clone())
                     .ok_or(DrgModioError::GenericError { msg: "not found" })
