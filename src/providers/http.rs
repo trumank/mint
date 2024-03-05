@@ -151,7 +151,7 @@ impl ModProvider for HttpProvider {
                         url: url.0.to_string(),
                     })?;
                     ensure!(
-                        !["application/zip", "application/octet-stream"].contains(&content_type),
+                        ["application/zip", "application/octet-stream"].contains(&content_type),
                         UnexpectedContentTypeSnafu {
                             found_content_type: content_type.to_string(),
                             url: url.0.to_string(),
