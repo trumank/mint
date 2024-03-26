@@ -1747,8 +1747,7 @@ impl eframe::App for App {
                             };
 
                             // Orders by Enabled, then by Approval / Provider, then by Name
-                            return mc_b
-                                .enabled
+                            mc_b.enabled
                                 .cmp(&mc_a.enabled)
                                 .then_with(|| {
                                     let Some(tags_a) = info_a.modio_tags else {
@@ -1757,10 +1756,10 @@ impl eframe::App for App {
                                     let Some(tags_b) = info_b.modio_tags else {
                                         return Ordering::Equal;
                                     };
-                                    return tags_a.approval_status.cmp(&tags_b.approval_status);
+                                    tags_a.approval_status.cmp(&tags_b.approval_status)
                                 })
                                 .then(info_a.provider.cmp(info_b.provider))
-                                .then(info_a.name.to_lowercase().cmp(&info_b.name.to_lowercase()));
+                                .then(info_a.name.to_lowercase().cmp(&info_b.name.to_lowercase()))
                         });
                     }
                 }
