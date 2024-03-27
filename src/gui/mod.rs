@@ -471,7 +471,7 @@ impl App {
                         .on_hover_text_at_pointer("copy URL")
                         .clicked()
                     {
-                        ui.output_mut(|o| o.copied_text = mc.spec.url.to_owned());
+                        ui.output_mut(|o| o.copied_text = mc.spec.url.to_string());
                     }
 
                     if mc.enabled {
@@ -588,7 +588,7 @@ impl App {
                         .on_hover_text_at_pointer("Copy URL")
                         .clicked()
                     {
-                        ui.output_mut(|o| o.copied_text = mc.spec.url.to_owned());
+                        ui.output_mut(|o| o.copied_text = mc.spec.url.to_string());
                     }
                     ui.hyperlink(&mc.spec.url);
                 }

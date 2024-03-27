@@ -44,7 +44,7 @@ impl NamedEntries<ModProfile> for ModData {
     }
     fn add_new(&mut self, name: &str) {
         self.profiles.insert(name.to_owned(), Default::default());
-        self.active_profile = name.to_owned();
+        self.active_profile = name.to_string();
     }
     fn remove_selected(&mut self) {
         self.remove_active_profile();
