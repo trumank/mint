@@ -3313,7 +3313,7 @@ checksum = "1e91099d4268b0e11973f036e885d652fb0b21fedcf69738c627f94db6a44f42"
 [[package]]
 name = "patternsleuth"
 version = "0.1.0"
-source = "git+https://github.com/trumank/patternsleuth#67bd8d49101ace4c4844af1222ad091a4af78203"
+source = "git+https://github.com/trumank/patternsleuth#224020e0066ca417258aaea4fc8a0da4c38bbb2f"
 dependencies = [
  "anyhow",
  "futures",
@@ -3327,13 +3327,14 @@ dependencies = [
  "patternsleuth_scanner",
  "rayon",
  "strum 0.25.0",
+ "tracing",
  "windows 0.52.0",
 ]
 
 [[package]]
 name = "patternsleuth_scanner"
 version = "0.1.0"
-source = "git+https://github.com/trumank/patternsleuth#67bd8d49101ace4c4844af1222ad091a4af78203"
+source = "git+https://github.com/trumank/patternsleuth#224020e0066ca417258aaea4fc8a0da4c38bbb2f"
 dependencies = [
  "anyhow",
  "memchr",
