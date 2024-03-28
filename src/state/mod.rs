@@ -28,10 +28,16 @@ pub struct ModConfig {
 
     #[serde(default = "default_true")]
     pub enabled: bool,
+    #[serde(default = "default_priority")]
+    pub priority: i32,
 }
 
 fn default_true() -> bool {
     true
+}
+
+const fn default_priority() -> i32 {
+    50
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -537,18 +543,21 @@ mod mod_data_tests {
             spec: ModSpecification::new("a".to_string()),
             required: false,
             enabled: false,
+            priority: 50,
         };
 
         let mod_2 = ModConfig {
             spec: ModSpecification::new("b".to_string()),
             required: true,
             enabled: false,
+            priority: 50,
         };
 
         let mod_3 = ModConfig {
             spec: ModSpecification::new("c".to_string()),
             required: false,
             enabled: true,
+            priority: 50,
         };
 
         let mod_data = ModData {
@@ -588,18 +597,21 @@ mod mod_data_tests {
             spec: ModSpecification::new("a".to_string()),
             required: false,
             enabled: false,
+            priority: 50,
         };
 
         let mod_2 = ModConfig {
             spec: ModSpecification::new("b".to_string()),
             required: true,
             enabled: false,
+            priority: 50,
         };
 
         let mod_3 = ModConfig {
             spec: ModSpecification::new("c".to_string()),
             required: false,
             enabled: true,
+            priority: 50,
         };
 
         let mod_data = ModData {
@@ -639,18 +651,21 @@ mod mod_data_tests {
             spec: ModSpecification::new("a".to_string()),
             required: false,
             enabled: false,
+            priority: 50,
         };
 
         let mod_2 = ModConfig {
             spec: ModSpecification::new("b".to_string()),
             required: true,
             enabled: false,
+            priority: 50,
         };
 
         let mod_3 = ModConfig {
             spec: ModSpecification::new("c".to_string()),
             required: false,
             enabled: true,
+            priority: 50,
         };
 
         let mod_data = ModData {

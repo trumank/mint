@@ -7,7 +7,7 @@ mod toggle_switch;
 //#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")] // hide console window on Windows in release
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::ops::Deref;
+use std::ops::{Deref, RangeInclusive};
 use std::time::{Duration, SystemTime};
 use std::{
     collections::{HashMap, HashSet},
@@ -465,6 +465,17 @@ impl App {
                                 );
                             }
                         });
+
+                    ui.style_mut().spacing.interact_size.x = 30.;
+                    ui.add(
+                        egui::DragValue::new(&mut mc.priority)
+                            .speed(0.05)
+                            .clamp_range(RangeInclusive::new(0, 999)),
+                    )
+                    .on_hover_text_at_pointer(
+                        "Load Priority \nLower loads first. Can have duplicate values.",
+                    );
+                    ui.style_mut().spacing.interact_size.x = 40.; // Initial size
 
                     if ui
                         .button("📋")
@@ -1613,15 +1624,22 @@ impl eframe::App for App {
                                 );
                             }
 
-                            let mut mods = Vec::new();
-                            let active_profile = self.state.mod_data.active_profile.clone();
-                            self.state
-                                .mod_data
-                                .for_each_enabled_mod(&active_profile, |mc| {
-                                    mods.push(mc.spec.clone());
-                                });
-
                             if button.clicked() {
+                                let mut mod_configs = Vec::new();
+                                let mut mods = Vec::new();
+                                let active_profile = self.state.mod_data.active_profile.clone();
+                                self.state
+                                    .mod_data
+                                    .for_each_enabled_mod(&active_profile, |mc| {
+                                        mod_configs.push(mc.clone());
+                                    });
+
+                                mod_configs.sort_by_key(|k| k.priority);
+
+                                for config in mod_configs {
+                                    mods.push(config.spec.clone());
+                                }
+
                                 self.last_action_status = LastActionStatus::Idle;
                                 self.integrate_rid = Some(message::Integrate::send(
                                     &mut self.request_counter,
