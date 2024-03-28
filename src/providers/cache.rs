@@ -6,6 +6,9 @@ use std::sync::{Arc, RwLock};
 use fs_err as fs;
 use serde::{Deserialize, Serialize};
 use snafu::prelude::*;
+use tracing::*;
+
+use mint_lib::mod_info::ModIdentifier;
 
 use crate::state::config::ConfigWrapper;
 
@@ -22,9 +25,13 @@ pub trait ModProviderCache: Sync + Send + std::fmt::Debug {
 
 #[obake::versioned]
 #[obake(version("0.0.0"))]
+#[obake(version("0.1.0"))]
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct Cache {
+    #[obake(cfg(">=0.0.0"))]
     pub(super) cache: HashMap<String, Box<dyn ModProviderCache>>,
+    #[obake(cfg(">=0.1.0"))]
+    pub(super) gameplay_affecting_cache: HashMap<ModIdentifier, bool>,
 }
 
 impl Cache {
@@ -57,20 +64,32 @@ impl Cache {
 pub enum VersionAnnotatedCache {
     #[serde(rename = "0.0.0")]
     V0_0_0(Cache!["0.0.0"]),
+    #[serde(rename = "0.1.0")]
+    V0_1_0(Cache!["0.1.0"]),
+}
+
+impl From<Cache!["0.0.0"]> for Cache!["0.1.0"] {
+    fn from(legacy: Cache!["0.0.0"]) -> Self {
+        Self {
+            cache: legacy.cache,
+            gameplay_affecting_cache: Default::default(),
+        }
+    }
 }
 
 impl Default for VersionAnnotatedCache {
     fn default() -> Self {
-        VersionAnnotatedCache::V0_0_0(Default::default())
+        VersionAnnotatedCache::V0_1_0(Default::default())
     }
 }
 
 impl Deref for VersionAnnotatedCache {
-    type Target = Cache!["0.0.0"];
+    type Target = Cache!["0.1.0"];
 
     fn deref(&self) -> &Self::Target {
         match self {
-            VersionAnnotatedCache::V0_0_0(c) => c,
+            VersionAnnotatedCache::V0_0_0(_) => unreachable!(),
+            VersionAnnotatedCache::V0_1_0(c) => c,
         }
     }
 }
@@ -78,7 +97,8 @@ impl Deref for VersionAnnotatedCache {
 impl DerefMut for VersionAnnotatedCache {
     fn deref_mut(&mut self) -> &mut Self::Target {
         match self {
-            VersionAnnotatedCache::V0_0_0(c) => c,
+            VersionAnnotatedCache::V0_0_0(_) => unreachable!(),
+            VersionAnnotatedCache::V0_1_0(c) => c,
         }
     }
 }
@@ -139,6 +159,7 @@ pub(crate) fn read_cache_metadata_or_default(
                 });
             };
             let version = obj_map.remove("version");
+            debug!(?version);
             if let Some(v) = version
                 && let serde_json::Value::String(vs) = v
             {
@@ -149,10 +170,25 @@ pub(crate) fn read_cache_metadata_or_default(
                         // <https://github.com/serde-rs/serde/issues/1183>.
                         match serde_json::from_slice::<Cache!["0.0.0"]>(&buf) {
                             Ok(c) => {
+                                debug!("read as cache version v0.0.0");
                                 MaybeVersionedCache::Versioned(VersionAnnotatedCache::V0_0_0(c))
                             }
                             Err(e) => Err(e).context(DeserializeVersionedCacheFailedSnafu {
                                 version: "v0.0.0",
+                            })?,
+                        }
+                    }
+                    "0.1.0" => {
+                        // HACK: workaround a serde issue relating to flattening with tags
+                        // involving numeric keys in hashmaps, see
+                        // <https://github.com/serde-rs/serde/issues/1183>.
+                        match serde_json::from_slice::<Cache!["0.1.0"]>(&buf) {
+                            Ok(c) => {
+                                debug!("read as cache version v0.1.0");
+                                MaybeVersionedCache::Versioned(VersionAnnotatedCache::V0_1_0(c))
+                            }
+                            Err(e) => Err(e).context(DeserializeVersionedCacheFailedSnafu {
+                                version: "v0.1.0",
                             })?,
                         }
                     }
@@ -175,7 +211,8 @@ pub(crate) fn read_cache_metadata_or_default(
 
     let cache: VersionAnnotatedCache = match cache {
         MaybeVersionedCache::Versioned(v) => match v {
-            VersionAnnotatedCache::V0_0_0(v) => VersionAnnotatedCache::V0_0_0(v),
+            VersionAnnotatedCache::V0_0_0(v) => VersionAnnotatedCache::V0_1_0(v.into()),
+            VersionAnnotatedCache::V0_1_0(v) => VersionAnnotatedCache::V0_1_0(v),
         },
         MaybeVersionedCache::Legacy(legacy) => VersionAnnotatedCache::V0_0_0(legacy),
     };
