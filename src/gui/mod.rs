@@ -466,16 +466,42 @@ impl App {
                             }
                         });
 
-                    ui.style_mut().spacing.interact_size.x = 30.;
-                    ui.add(
-                        egui::DragValue::new(&mut mc.priority)
-                            .speed(0.05)
-                            .clamp_range(RangeInclusive::new(0, 999)),
-                    )
-                    .on_hover_text_at_pointer(
-                        "Load Priority \nLower loads first. Can have duplicate values.",
-                    );
-                    ui.style_mut().spacing.interact_size.x = 40.; // Initial size
+                    ui.scope(|ui| {
+                        ui.style_mut().spacing.interact_size.x = 30.;
+                        let dark = ui.visuals().dark_mode;
+                        match mc.priority.cmp(&0) {
+                            std::cmp::Ordering::Less => {
+                                ui.visuals_mut().override_text_color = Some(if dark {
+                                    Color32::LIGHT_RED
+                                } else {
+                                    Color32::DARK_RED
+                                });
+                            }
+                            std::cmp::Ordering::Greater => {
+                                ui.visuals_mut().override_text_color = Some(if dark {
+                                    Color32::LIGHT_GREEN
+                                } else {
+                                    Color32::DARK_GREEN
+                                });
+                            }
+                            _ => {}
+                        }
+                        ui.add(
+                            egui::DragValue::new(&mut mc.priority)
+                                .custom_formatter(|n, _| {
+                                    if n == 0. {
+                                        "-".to_string()
+                                    } else {
+                                        format!("{n}")
+                                    }
+                                })
+                                .speed(0.05)
+                                .clamp_range(RangeInclusive::new(-999, 999)),
+                        )
+                        .on_hover_text_at_pointer(
+                            "Load Priority\nIn case of asset conflict, mods with higher priority take precedent.\nCan have duplicate values.",
+                        );
+                    });
 
                     if ui
                         .button("📋")
@@ -1634,7 +1660,7 @@ impl eframe::App for App {
                                         mod_configs.push(mc.clone());
                                     });
 
-                                mod_configs.sort_by_key(|k| k.priority);
+                                mod_configs.sort_by_key(|k| -k.priority);
 
                                 for config in mod_configs {
                                     mods.push(config.spec.clone());
