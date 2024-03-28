@@ -28,7 +28,7 @@ pub struct ModConfig {
 
     #[serde(default = "default_true")]
     pub enabled: bool,
-    #[serde(default = "default_priority")]
+    #[serde(default, skip_serializing_if = "is_zero")]
     pub priority: i32,
 }
 
@@ -36,8 +36,8 @@ fn default_true() -> bool {
     true
 }
 
-const fn default_priority() -> i32 {
-    50
+fn is_zero(value: &i32) -> bool {
+    *value == 0
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
