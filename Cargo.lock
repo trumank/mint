@@ -1419,16 +1419,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "egui_animation"
-version = "0.1.0"
-source = "git+https://github.com/lucasmerlin/egui_dnd.git#dd739cd150af62082e0ed3bd031d71aef7f3e453"
-dependencies = [
- "egui",
- "hello_egui_utils",
- "simple-easing",
-]
-
-[[package]]
 name = "egui_commonmark"
 version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1437,17 +1427,6 @@ dependencies = [
  "egui",
  "egui_extras",
  "pulldown-cmark",
-]
-
-[[package]]
-name = "egui_dnd"
-version = "0.5.1"
-source = "git+https://github.com/lucasmerlin/egui_dnd.git#dd739cd150af62082e0ed3bd031d71aef7f3e453"
-dependencies = [
- "egui",
- "egui_animation",
- "simple-easing",
- "web-time",
 ]
 
 [[package]]
@@ -2159,14 +2138,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "95505c38b4572b2d910cecb0281560f54b440a19336cbbcb27bf6ce6adc6f5a8"
 
 [[package]]
-name = "hello_egui_utils"
-version = "0.1.0"
-source = "git+https://github.com/lucasmerlin/egui_dnd.git#dd739cd150af62082e0ed3bd031d71aef7f3e453"
-dependencies = [
- "egui",
-]
-
-[[package]]
 name = "hermit-abi"
 version = "0.3.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2753,7 +2724,6 @@ dependencies = [
  "eframe",
  "egui",
  "egui_commonmark",
- "egui_dnd",
  "fs-err",
  "futures",
  "hex",
@@ -4274,12 +4244,6 @@ name = "simd-adler32"
 version = "0.3.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d66dc143e6b11c1eddc06d5c423cfc97062865baf299914ab64caa38182078fe"
-
-[[package]]
-name = "simple-easing"
-version = "1.0.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "832ddd7df0d98d6fd93b973c330b7c8e0742d5cb8f1afc7dea89dba4d2531aa1"
 
 [[package]]
 name = "slab"
