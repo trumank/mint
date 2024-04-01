@@ -50,7 +50,6 @@ directories = "5.0.1"
 eframe = "0.25.0"
 egui = "0.25.0"
 egui_commonmark = "0.11.0"
-egui_dnd = { git = "https://github.com/lucasmerlin/egui_dnd.git" }
 futures = "0.3.30"
 hex = "0.4.3"
 image = { version = "0.24.7", default-features = false, features = ["png"] }
