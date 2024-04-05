@@ -12,12 +12,12 @@ use serde::{Deserialize, Serialize};
 use snafu::prelude::*;
 
 use self::config::ConfigWrapper;
-use crate::providers::ProviderError;
 use crate::{
     gui::GuiTheme,
     providers::{ModSpecification, ModStore},
     Dirs,
 };
+use crate::{gui::SortBy, providers::ProviderError};
 use mint_lib::{mod_info::MetaConfig, DRGInstallation};
 
 /// Mod configuration, holds ModSpecification as well as other metadata
@@ -344,6 +344,22 @@ pub struct Config {
     pub gui_theme: Option<GuiTheme>,
     #[serde(default, skip_serializing_if = "is_false")]
     pub disable_fix_exploding_gas: bool,
+    pub sorting_config: Option<SortingConfig>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct SortingConfig {
+    pub sort_category: SortBy,
+    pub is_ascending: bool,
+}
+
+impl Default for SortingConfig {
+    fn default() -> Self {
+        Self {
+            sort_category: SortBy::Enabled,
+            is_ascending: true,
+        }
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -403,6 +419,7 @@ impl Default for Config!["0.0.0"] {
                 .map(DRGInstallation::main_pak),
             gui_theme: None,
             disable_fix_exploding_gas: false,
+            sorting_config: Some(SortingConfig::default()),
         }
     }
 }
