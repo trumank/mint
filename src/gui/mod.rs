@@ -25,6 +25,7 @@ use eframe::{
 };
 use egui_commonmark::{CommonMarkCache, CommonMarkViewer};
 use mint_lib::mod_info::{ModioTags, RequiredStatus};
+use strum::{EnumIter, IntoEnumIterator};
 use tokio::{
     sync::mpsc::{self, Receiver, Sender},
     task::JoinHandle,
@@ -33,6 +34,7 @@ use tracing::{debug, trace};
 
 use crate::mod_lints::{LintId, LintReport, SplitAssetPair};
 use crate::providers::ProviderError;
+use crate::state::SortingConfig;
 use crate::Dirs;
 use crate::{
     integrate::uninstall,
@@ -88,6 +90,29 @@ impl GuiTheme {
         match self {
             GuiTheme::Light => Visuals::light(),
             GuiTheme::Dark => Visuals::dark(),
+        }
+    }
+}
+
+#[derive(PartialEq, Debug, EnumIter, Clone, serde::Serialize, serde::Deserialize)]
+pub enum SortBy {
+    Enabled,
+    Name,
+    Priority,
+    Provider,
+    RequiredStatus,
+    ApprovalCategory,
+}
+
+impl SortBy {
+    fn as_str(&self) -> &'static str {
+        match self {
+            SortBy::Enabled => "Enabled",
+            SortBy::Name => "Name",
+            SortBy::Priority => "Priority",
+            SortBy::Provider => "Provider",
+            SortBy::RequiredStatus => "Is Required",
+            SortBy::ApprovalCategory => "Approval",
         }
     }
 }
@@ -1492,6 +1517,106 @@ impl App {
             }
         }
     }
+
+    fn get_sorting_config(&mut self) -> (SortBy, bool) {
+        let default_config = SortingConfig::default();
+        let sorting_config = match self.state.config.sorting_config.as_ref() {
+            Some(config) => config.clone(),
+            None => default_config,
+        };
+        (sorting_config.sort_category, sorting_config.is_ascending)
+    }
+
+    fn update_sorting_config(&mut self, sort_category: SortBy, is_ascending: bool) {
+        self.state.config.sorting_config = Some(SortingConfig {
+            sort_category,
+            is_ascending,
+        });
+        self.state.config.save().unwrap();
+    }
+
+    fn sort_mods(&mut self) {
+        let (sort_category, is_ascending) = self.get_sorting_config();
+
+        let profile = self.state.mod_data.active_profile.clone();
+        let ModData { profiles, .. } = self.state.mod_data.deref_mut().deref_mut();
+
+        if let Some(active_profile) = profiles.get_mut(&profile) {
+            active_profile.mods.sort_by(|a, b| {
+                if matches!(a, ModOrGroup::Group { .. }) || matches!(b, ModOrGroup::Group { .. }) {
+                    unimplemented!("Groups in sorting not implemented");
+                }
+
+                let ModOrGroup::Individual(mc_a) = a else {
+                    debug!("Item is not Individual \n{:?}", a);
+                    return Ordering::Equal;
+                };
+                let ModOrGroup::Individual(mc_b) = b else {
+                    debug!("Item is not Individual \n{:?}", b);
+                    return Ordering::Equal;
+                };
+
+                let Some(info_a) = self.state.store.get_mod_info(&mc_a.spec) else {
+                    debug!("Failed to get mod info for \n{:?}", mc_a);
+                    return Ordering::Equal;
+                };
+                let Some(info_b) = self.state.store.get_mod_info(&mc_b.spec) else {
+                    debug!("Failed to get mod info for \n{:?}", mc_b);
+                    return Ordering::Equal;
+                };
+
+                let handle_missing_modio_tags = || -> Option<Ordering> {
+                    let mut order = if info_a.modio_tags.is_none() && info_b.modio_tags.is_none() {
+                        Ordering::Equal
+                    } else if info_a.modio_tags.is_none() {
+                        Ordering::Less
+                    } else if info_b.modio_tags.is_none() {
+                        Ordering::Greater
+                    } else {
+                        return None;
+                    };
+                    if is_ascending {
+                        order = order.reverse();
+                    }
+                    Some(order)
+                };
+
+                let name_order = info_a.name.to_lowercase().cmp(&info_b.name.to_lowercase());
+                let approval_order = handle_missing_modio_tags().unwrap_or_else(|| {
+                    info_a
+                        .modio_tags
+                        .clone()
+                        .unwrap()
+                        .approval_status
+                        .cmp(&info_b.modio_tags.clone().unwrap().approval_status)
+                });
+                let required_order = handle_missing_modio_tags().unwrap_or_else(|| {
+                    info_a
+                        .modio_tags
+                        .clone()
+                        .unwrap()
+                        .required_status
+                        .cmp(&info_b.modio_tags.clone().unwrap().required_status)
+                });
+                let mut order = match sort_category {
+                    SortBy::Enabled => mc_b.enabled.cmp(&mc_a.enabled),
+                    SortBy::Name => name_order,
+                    SortBy::Priority => mc_a.priority.cmp(&mc_b.priority),
+                    SortBy::Provider => info_b.provider.cmp(info_a.provider),
+                    SortBy::RequiredStatus => required_order,
+                    SortBy::ApprovalCategory => approval_order,
+                };
+
+                if !is_ascending {
+                    order = order.reverse();
+                }
+                if sort_category != SortBy::Name {
+                    order = order.then(name_order);
+                }
+                order
+            });
+        }
+    }
 }
 
 struct WindowProviderParameters {
@@ -1871,6 +1996,7 @@ impl eframe::App for App {
                 self.state.mod_data.deref_mut().deref_mut(),
                 Some(buttons),
             ) {
+                self.sort_mods();
                 self.state.mod_data.save().unwrap();
             }
 
@@ -1905,6 +2031,33 @@ impl eframe::App for App {
                         self.problematic_mod_id = None;
                     }
                 });
+            });
+
+            ui.horizontal(|ui| {
+                ui.label("Sort by: ");
+
+                let (mut sort_category, mut is_ascending) = self.get_sorting_config();
+
+                for category in SortBy::iter() {
+                    let mut radio_label = category.as_str().to_owned();
+                    if sort_category == category {
+                        if is_ascending {
+                            radio_label.push_str(" ⏶");
+                        } else {
+                            radio_label.push_str(" ⏷");
+                        }
+                    }
+                    let resp = ui.radio_value(&mut sort_category, category, radio_label);
+                    if resp.clicked() {
+                        if resp.changed() {
+                            is_ascending = true;
+                        } else {
+                            is_ascending = !is_ascending;
+                        }
+                        self.update_sorting_config(sort_category.clone(), is_ascending);
+                        self.sort_mods();
+                    };
+                }
             });
 
             let profile = self.state.mod_data.active_profile.clone();

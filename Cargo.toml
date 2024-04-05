@@ -87,6 +87,7 @@ include_dir = "0.7.3"
 postcard.workspace = true
 fs-err.workspace = true
 snafu = "0.8.0"
+strum = { version = "0.26", features = ["derive"] }
 
 [target.'cfg(target_env = "msvc")'.dependencies]
 hook = { path = "hook", artifact = "cdylib", optional = true, target = "x86_64-pc-windows-msvc"}
