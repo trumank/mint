@@ -42,7 +42,6 @@
                 ];
 
                 buildInputs = with pkgs; [
-                    pkgsMinGW.buildPackages.gcc
                     glib
                     gtk3
                     libGL
@@ -52,7 +51,7 @@
                     wayland
                 ];
 
-                libraryPath = lib.makeLibraryPath buildInputs;
+                libraryPath = lib.makeLibraryPath (buildInputs ++ [ pkgsMinGW.buildPackages.gcc ]);
 
                 manifest = (lib.importTOML ./Cargo.toml);
                 packageName = manifest.package.name;
