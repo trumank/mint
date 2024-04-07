@@ -54,7 +54,7 @@ use self::toggle_switch::toggle_switch;
 pub fn gui(dirs: Dirs, args: Option<Vec<String>>) -> Result<(), MintError> {
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
-            .with_inner_size([800.0, 400.0])
+            .with_inner_size([900.0, 500.0])
             .with_drag_and_drop(true),
         ..Default::default()
     };
