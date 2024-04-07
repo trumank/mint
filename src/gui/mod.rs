@@ -133,8 +133,9 @@ pub struct App {
     has_run_init: bool,
     request_counter: RequestCounter,
     window_provider_parameters: Option<WindowProviderParameters>,
-    search_string: Option<String>,
+    search_string: String,
     scroll_to_match: bool,
+    focus_search: bool,
     settings_window: Option<WindowSettings>,
     modio_texture_handle: Option<egui::TextureHandle>,
     last_action_status: LastActionStatus,
@@ -202,6 +203,7 @@ impl App {
             window_provider_parameters: None,
             search_string: Default::default(),
             scroll_to_match: false,
+            focus_search: false,
             settings_window: None,
             modio_texture_handle: None,
             last_action_status: LastActionStatus::Idle,
@@ -291,9 +293,9 @@ impl App {
                             };
                             let mut job = LayoutJob::default();
                             let mut is_match = false;
-                            if let Some(search_string) = &self.search_string {
+                            if !self.search_string.is_empty() {
                                 for (m, chunk) in
-                                    find_string::FindString::new(tag_str, search_string)
+                                    find_string::FindString::new(tag_str, &self.search_string)
                                 {
                                     let background = if m {
                                         is_match = true;
@@ -587,8 +589,8 @@ impl App {
                         color: vis.hyperlink_color,
                         ..Default::default()
                     };
-                    if let Some(search_string) = &self.search_string {
-                        for (m, chunk) in FindString::new(&info.name, search_string) {
+                    if !self.search_string.is_empty() {
+                        for (m, chunk) in FindString::new(&info.name, &self.search_string) {
                             let background = if m {
                                 is_match = true;
                                 TextFormat {
@@ -1980,6 +1982,8 @@ impl eframe::App for App {
                 });
             });
 
+            let profile = self.state.mod_data.active_profile.clone();
+
             ui.horizontal(|ui| {
                 ui.label("Sort by: ");
 
@@ -2005,13 +2009,10 @@ impl eframe::App for App {
                         self.sort_mods();
                     };
                 }
-            });
 
-            let profile = self.state.mod_data.active_profile.clone();
-            self.ui_profile(ui, &profile);
-
-            // TODO: actually implement mod groups.
-            if let Some(search_string) = &mut self.search_string {
+                ui.add_space(16.);
+                // TODO: actually implement mod groups.
+                let search_string = &mut self.search_string;
                 let lower = search_string.to_lowercase();
                 let any_matches = self.state.mod_data.any_mod(&profile, |mc, _| {
                     self.state
@@ -2021,7 +2022,7 @@ impl eframe::App for App {
                         .unwrap_or(false)
                 });
 
-                let mut text_edit = egui::TextEdit::singleline(search_string);
+                let mut text_edit = egui::TextEdit::singleline(search_string).hint_text("Search");
                 if !any_matches {
                     text_edit = text_edit.text_color(ui.visuals().error_fg_color);
                 }
@@ -2031,13 +2032,21 @@ impl eframe::App for App {
                 if res.changed() {
                     self.scroll_to_match = true;
                 }
-                if res.lost_focus() {
-                    self.search_string = None;
+                if res.lost_focus()
+                    && ui.input(|i| {
+                        i.key_pressed(egui::Key::Enter) || i.key_pressed(egui::Key::Escape)
+                    })
+                {
+                    *search_string = String::new();
                     self.scroll_to_match = false;
-                } else if !res.has_focus() {
+                } else if self.focus_search {
                     res.request_focus();
+                    self.focus_search = false;
                 }
-            }
+            });
+            ui.add_space(4.);
+
+            self.ui_profile(ui, &profile);
 
             // must access memory outside of input lock to prevent deadlock
             let is_anything_focused = ctx.memory(|m| m.focus().is_some());
@@ -2075,8 +2084,9 @@ impl eframe::App for App {
                         }
                         egui::Event::Text(text) => {
                             if !is_anything_focused {
-                                self.search_string = Some(text.to_string());
+                                self.search_string = text.to_string();
                                 self.scroll_to_match = true;
+                                self.focus_search = true;
                             }
                         }
                         _ => {}
