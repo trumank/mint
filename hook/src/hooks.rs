@@ -1,3 +1,5 @@
+#![allow(clippy::missing_transmute_annotations)]
+
 use std::{
     ffi::c_void,
     path::{Path, PathBuf},
