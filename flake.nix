@@ -16,15 +16,19 @@
                     inherit system overlays;
                 };
 
-                toolchain = (pkgs.rust-bin.fromRustupToolchainFile ./rust-toolchain.toml).override {
+                rustToolchain = (pkgs.rust-bin.fromRustupToolchainFile ./rust-toolchain.toml).override {
                     extensions = [ "rust-src" "rust-analyzer" ];
                 };
 
                 rustPlatform = pkgs.makeRustPlatform {
-                    cargo = toolchain;
-                    rustc = toolchain;
+                    cargo = rustToolchain;
+                    rustc = rustToolchain;
                 };
 
+                hookDlls = {
+                    "libzstd.dll" = pkgsMinGW.zstd;
+                    "libudis86-0.dll" = pkgsMinGW.udis86;
+                };
                 pkgsMinGW = pkgs.pkgsCross.mingwW64;
                 mingwRustflags = lib.strings.concatStringsSep " " [
                     "-L native=${pkgsMinGW.windows.pthreads}/lib"
@@ -33,15 +37,9 @@
                     "-l dylib=zstd"
                     "-l dylib=udis86-0"
                 ];
+                mingwCompiler = pkgsMinGW.buildPackages.gcc;
 
-                nativeBuildInputs = with pkgs; [
-                    toolchain
-                    pkgsMinGW.buildPackages.gcc
-                    pkg-config
-                    makeWrapper
-                ];
-
-                buildInputs = with pkgs; [
+                libs = with pkgs; [
                     glib
                     gtk3
                     libGL
@@ -51,15 +49,20 @@
                     wayland
                 ];
 
-                libraryPath = lib.makeLibraryPath (buildInputs ++ [ pkgsMinGW.buildPackages.gcc ]);
+                nativeBuildInputs = with pkgs; [
+                    rustToolchain
+                    pkg-config
+                ];
+
+                libraryPath = lib.makeLibraryPath libs;
 
                 manifest = (lib.importTOML ./Cargo.toml);
                 packageName = manifest.package.name;
                 packageVersion = manifest.workspace.package.version;
 
                 package = rustPlatform.buildRustPackage {
-                    inherit nativeBuildInputs;
-                    inherit buildInputs;
+                    nativeBuildInputs = nativeBuildInputs ++ [ pkgs.makeWrapper mingwCompiler ];
+                    buildInputs = libs;
 
                     pname = packageName;
                     version = packageVersion;
@@ -92,14 +95,20 @@
                     name = "mint";
 
                     inherit nativeBuildInputs;
-                    inherit buildInputs;
+                    buildInputs = libs ++ [ mingwCompiler ];
 
                     shellHook = let 
-                        zstdLib = "${pkgsMinGW.zstd}/bin/libzstd.dll";
-                        udisLib = "${pkgsMinGW.udis86}/bin/libudis86-0.dll";
+                        tmpDir = "/tmp/drg-mint";
+                        copy = lib.trivial.pipe hookDlls [
+                            (lib.attrsets.mapAttrsToList (dll: pkg: ''
+                                test -f "${tmpDir}/${dll}" || cp "${pkg}/bin/${dll}" "${tmpDir}"
+                            ''))
+                            lib.strings.concatLines
+                        ];
                     in ''
-                        test -f ./libzstd.dll || cp "${zstdLib}" "./"
-                        test -f ./libudis86-0.dll || cp "${udisLib}" "./"
+                        mkdir -p "${tmpDir}"
+                        ${copy}
+                        echo "Copy files from ${tmpDir} into FSD/Binaries/Win64/ when using the Steam Flatpak"
                     '';
 
                     LD_LIBRARY_PATH = libraryPath;
