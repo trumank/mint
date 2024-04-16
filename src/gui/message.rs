@@ -145,7 +145,7 @@ impl ResolveMods {
                                     spec: info.spec.clone(),
                                     required: info.suggested_require,
                                     enabled: true,
-                                    priority: 50,
+                                    priority: 0,
                                 }),
                             );
                         }
