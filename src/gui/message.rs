@@ -13,7 +13,7 @@ use tracing::*;
 use super::SelfUpdateProgress;
 use super::{
     request_counter::{RequestCounter, RequestID},
-    App, GitHubRelease, LastActionStatus, SpecFetchProgress, WindowProviderParameters,
+    App, LastActionStatus, SpecFetchProgress, WindowProviderParameters,
 };
 use crate::integrate::*;
 use crate::mod_lints::{LintId, LintReport};
@@ -23,7 +23,9 @@ use crate::{
     providers::{FetchProgress, ModInfo, ModStore},
     state::ModConfig,
 };
+use mint_lib::error::GenericError;
 use mint_lib::mod_info::MetaConfig;
+use mint_lib::update::GitHubRelease;
 
 #[derive(Debug)]
 pub struct MessageHandle<S> {
@@ -300,7 +302,7 @@ impl UpdateCache {
 #[derive(Debug)]
 pub struct CheckUpdates {
     rid: RequestID,
-    result: Result<GitHubRelease, MintError>,
+    result: Result<GitHubRelease, GenericError>,
 }
 
 impl CheckUpdates {
@@ -309,30 +311,10 @@ impl CheckUpdates {
         let tx = app.tx.clone();
         let ctx = ctx.clone();
 
-        async fn req() -> Result<GitHubRelease, MintError> {
-            reqwest::Client::builder()
-                .user_agent("trumank/mint")
-                .build()
-                .map_err(|_| MintError::GenericError {
-                    msg: "failed to construct reqwest client".to_string(),
-                })?
-                .get("https://api.github.com/repos/trumank/mint/releases/latest")
-                .send()
-                .await
-                .map_err(|_| MintError::GenericError {
-                    msg: "check self update request failed".to_string(),
-                })?
-                .json::<GitHubRelease>()
-                .await
-                .map_err(|_| MintError::GenericError {
-                    msg: "check self update response is error".to_string(),
-                })
-        }
-
         let handle = tokio::spawn(async move {
             tx.send(Message::CheckUpdates(Self {
                 rid,
-                result: req().await,
+                result: mint_lib::update::get_latest_release().await,
             }))
             .await
             .unwrap();
@@ -348,19 +330,22 @@ impl CheckUpdates {
     fn receive(self, app: &mut App) {
         if Some(self.rid) == app.check_updates_rid.as_ref().map(|r| r.rid) {
             app.check_updates_rid = None;
-            if let Ok(release) = self.result {
-                if let (Ok(version), Some(Ok(release_version))) = (
-                    semver::Version::parse(env!("CARGO_PKG_VERSION")),
-                    release
-                        .tag_name
-                        .strip_prefix('v')
-                        .map(semver::Version::parse),
-                ) {
-                    if release_version > version {
-                        app.available_update = Some(release);
-                        app.show_update_time = Some(SystemTime::now());
+            match self.result {
+                Ok(release) => {
+                    if let (Ok(version), Some(Ok(release_version))) = (
+                        semver::Version::parse(env!("CARGO_PKG_VERSION")),
+                        release
+                            .tag_name
+                            .strip_prefix('v')
+                            .map(semver::Version::parse),
+                    ) {
+                        if release_version > version {
+                            app.available_update = Some(release);
+                            app.show_update_time = Some(SystemTime::now());
+                        }
                     }
                 }
+                Err(e) => tracing::warn!("failed to fetch update {e}"),
             }
         }
     }

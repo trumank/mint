@@ -1,4 +1,6 @@
+pub mod error;
 pub mod mod_info;
+pub mod update;
 
 use std::{
     io::BufWriter,

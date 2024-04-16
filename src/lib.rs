@@ -31,8 +31,10 @@ pub enum MintError {
     ProviderError { source: ProviderError },
     #[snafu(transparent)]
     IntegrationError { source: IntegrationError },
-    #[snafu(display("mint encountered an error: {msg}"))]
-    GenericError { msg: String },
+    #[snafu(transparent)]
+    GenericError {
+        source: mint_lib::error::GenericError,
+    },
     #[snafu(transparent)]
     StateError { source: StateError },
     #[snafu(display("invalid DRG pak path: {path}"))]

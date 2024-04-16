@@ -25,6 +25,9 @@ fs-err = "2.11.0"
 tracing = { version = "0.1.40", features = ["attributes"] }
 tracing-appender = "0.2.3"
 tracing-subscriber = { version = "0.3.18", features = ["fmt", "env-filter", "std", "registry"] }
+tokio = "1.35.1"
+reqwest = { version = "0.11.23", default-features = false, features = ["blocking", "rustls", "json"] }
+snafu = "0.8.0"
 
 [package]
 name = "mint"
@@ -62,7 +65,7 @@ opener = "0.6.1"
 path-slash = "0.2.1"
 rayon = "1.8.0"
 regex = "1.10.2"
-reqwest = { version = "0.11.23", default-features = false, features = ["blocking", "rustls"] }
+reqwest.workspace = true
 reqwest-middleware = "0.2.4"
 rfd = "0.12.1"
 rust-ini = "0.20.0"
@@ -75,7 +78,7 @@ steamlocate.workspace = true
 task-local-extensions = "0.1.4"
 tempfile = "3.9.0"
 thiserror = "1.0.56"
-tokio = { version = "1.35.1", features = ["full"] }
+tokio = { workspace = true, features = ["full"] }
 tracing.workspace = true
 typetag = "0.2.16"
 uasset_utils = { git = "https://github.com/trumank/uasset_utils" }
@@ -86,7 +89,7 @@ repak.workspace = true
 include_dir = "0.7.3"
 postcard.workspace = true
 fs-err.workspace = true
-snafu = "0.8.0"
+snafu.workspace = true
 strum = { version = "0.26", features = ["derive"] }
 
 [target.'cfg(target_env = "msvc")'.dependencies]

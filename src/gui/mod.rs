@@ -24,7 +24,9 @@ use eframe::{
     epaint::{text::LayoutJob, Color32, Stroke},
 };
 use egui_commonmark::{CommonMarkCache, CommonMarkViewer};
+use mint_lib::error::ResultExt as _;
 use mint_lib::mod_info::{ModioTags, RequiredStatus};
+use mint_lib::update::GitHubRelease;
 use strum::{EnumIter, IntoEnumIterator};
 use tokio::{
     sync::mpsc::{self, Receiver, Sender},
@@ -63,9 +65,7 @@ pub fn gui(dirs: Dirs, args: Option<Vec<String>>) -> Result<(), MintError> {
         options,
         Box::new(|cc| Box::new(App::new(cc, dirs, args).unwrap())),
     )
-    .map_err(|e| MintError::GenericError {
-        msg: format!("{e}"),
-    })?;
+    .with_generic(|e| format!("{e}"))?;
     Ok(())
 }
 
@@ -2144,13 +2144,6 @@ fn custom_popup_above_or_below_widget<R>(
     } else {
         None
     }
-}
-
-#[derive(Debug, serde::Deserialize)]
-pub struct GitHubRelease {
-    html_url: String,
-    tag_name: String,
-    body: String,
 }
 
 #[derive(Debug)]
