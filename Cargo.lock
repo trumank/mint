@@ -816,6 +816,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "cityhasher"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ceab37c9e94f42414cccae77e930232c517f1bb190947018cffb0ab41fc40992"
+
+[[package]]
 name = "clap"
 version = "4.4.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4896,6 +4902,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "typed-path"
+version = "0.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6069e2cc1d241fd4ff5fa067e8882996fcfce20986d078696e05abccbcf27b43"
+
+[[package]]
 name = "typenum"
 version = "1.17.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4928,10 +4940,12 @@ dependencies = [
 [[package]]
 name = "uasset_utils"
 version = "0.1.0"
-source = "git+https://github.com/trumank/uasset_utils#5946c4acb14d7435c80fd21b2f8b3726b46d27e4"
+source = "git+https://github.com/trumank/uasset_utils#b457dc55688ad65e9397b6a7898356ab8a546159"
 dependencies = [
  "anyhow",
  "byteorder",
+ "cityhasher",
+ "typed-path",
  "unreal_asset",
 ]
 

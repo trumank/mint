@@ -1,6 +1,5 @@
 use std::collections::{HashMap, HashSet};
-use std::ffi::{OsStr, OsString};
-use std::io::{self, BufReader, BufWriter, Cursor, ErrorKind, Read, Seek};
+use std::io::{BufReader, BufWriter, Cursor, ErrorKind, Read, Seek, Write};
 use std::path::{Path, PathBuf};
 
 use fs_err as fs;
@@ -9,9 +8,13 @@ use repak::PakWriter;
 use serde::Deserialize;
 use snafu::{prelude::*, Whatever};
 use tracing::info;
+use uasset_utils::asset_registry::{AssetRegistry, Readable as _, Writable as _};
+use uasset_utils::paths::{PakPath, PakPathBuf, PakPathComponentTrait};
 use uasset_utils::splice::{
     extract_tracked_statements, inject_tracked_statements, walk, AssetVersion, TrackedStatement,
 };
+use unreal_asset::engine_version::EngineVersion;
+use unreal_asset::AssetBuilder;
 
 use crate::mod_lints::LintError;
 use crate::providers::{ModInfo, ProviderError, ReadSeek};
@@ -26,17 +29,8 @@ use unreal_asset::{
         ExSelf, ExSoftObjectConst, ExStringConst, ExVectorConst, FieldPath, KismetPropertyPointer,
     },
     kismet::{ExFalse, KismetExpression},
-    properties::object_property::TopLevelAssetPath,
-    properties::{
-        int_property::BoolProperty,
-        object_property::{SoftObjectPath, SoftObjectProperty},
-        str_property::StrProperty,
-        struct_property::StructProperty,
-        Property,
-    },
     types::vector::Vector,
-    types::{fname::FName, PackageIndex},
-    unversioned::ancestry::Ancestry,
+    types::PackageIndex,
     Asset,
 };
 
@@ -178,15 +172,18 @@ pub enum IntegrationError {
         source: repak::Error,
         mod_info: ModInfo,
     },
-    #[snafu(display("modfile {} of mod {mod_info:?} contains unexpected prefix", modfile_path.display()))]
+    #[snafu(display(
+        "modfile {} of mod {mod_info:?} contains unexpected prefix",
+        modfile_path
+    ))]
     ModfileInvalidPrefix {
         mod_info: ModInfo,
-        modfile_path: PathBuf,
+        modfile_path: String,
     },
     #[snafu(transparent)]
     ProviderError { source: ProviderError },
     #[snafu(display("integration error: {msg}"))]
-    GenericError { msg: &'static str },
+    GenericError { msg: String },
     #[snafu(transparent)]
     JoinError { source: tokio::task::JoinError },
     #[snafu(transparent)]
@@ -221,34 +218,8 @@ pub fn integrate<P: AsRef<Path>>(
     };
     let path_mod_pak = installation.paks_path().join("mods_P.pak");
 
-    let fsd_pak_file = fs::File::open(path_pak.as_ref())?;
-    let mut fsd_pak_reader = BufReader::new(fsd_pak_file);
+    let mut fsd_pak_reader = BufReader::new(fs::File::open(path_pak.as_ref())?);
     let fsd_pak = repak::PakBuilder::new().reader(&mut fsd_pak_reader)?;
-
-    #[derive(Debug, Default)]
-    struct Dir<'a> {
-        name: &'a OsStr,
-        children: HashMap<OsString, Dir<'a>>,
-    }
-
-    let paths = fsd_pak
-        .files()
-        .into_iter()
-        .map(PathBuf::from)
-        .collect::<Vec<_>>();
-    let mut directories: HashMap<OsString, Dir> = HashMap::new();
-    for f in &paths {
-        let mut dir = &mut directories;
-        for c in f.components() {
-            dir = &mut dir
-                .entry(c.as_os_str().to_ascii_lowercase())
-                .or_insert(Dir {
-                    name: c.as_os_str(),
-                    children: Default::default(),
-                })
-                .children;
-        }
-    }
 
     #[derive(Debug, Default)]
     struct RawAsset {
@@ -258,68 +229,19 @@ pub fn integrate<P: AsRef<Path>>(
 
     impl RawAsset {
         fn parse(&self) -> Result<Asset<Cursor<&Vec<u8>>>, IntegrationError> {
-            Ok(unreal_asset::Asset::new(
+            Ok(AssetBuilder::new(
                 Cursor::new(self.uasset.as_ref().unwrap()),
-                Some(Cursor::new(self.uexp.as_ref().unwrap())),
-                unreal_asset::engine_version::EngineVersion::VER_UE4_27,
-                None,
-                false,
-            )?)
+                EngineVersion::VER_UE4_27,
+            )
+            .bulk(Cursor::new(self.uexp.as_ref().unwrap()))
+            .build()?)
         }
     }
 
-    // Used to normalize match path case to existing files in the DRG pak.
-    let normalize_path = |path_str: &str| {
-        let mut dir = Some(&directories);
-        let path = Path::new(path_str);
-        let mut normalized_path = PathBuf::new();
-        for c in path.components() {
-            if let Some(entry) = dir.and_then(|d| d.get(&c.as_os_str().to_ascii_lowercase())) {
-                normalized_path.push(entry.name);
-                dir = Some(&entry.children);
-            } else {
-                normalized_path.push(c);
-            }
-        }
-        normalized_path
-    };
-
-    let write_file =
-        |pak: &mut PakWriter<_>, data: &[u8], path: &str| -> Result<(), IntegrationError> {
-            let binding = normalize_path(path);
-            let path = binding.to_str().unwrap().replace('\\', "/");
-
-            pak.write_file(&path, data)?;
-
-            Ok(())
-        };
-
-    let write_asset =
-        |pak: &mut PakWriter<_>, asset: Asset<_>, path: &str| -> Result<(), IntegrationError> {
-            let mut data_out = (Cursor::new(vec![]), Cursor::new(vec![]));
-
-            asset.write_data(&mut data_out.0, Some(&mut data_out.1))?;
-            data_out.0.rewind()?;
-            data_out.1.rewind()?;
-
-            write_file(pak, &data_out.0.into_inner(), &format!("{path}.uasset"))?;
-            write_file(pak, &data_out.1.into_inner(), &format!("{path}.uexp"))?;
-
-            Ok(())
-        };
-
-    fn format_soft_class(path: &Path) -> String {
-        let name = path.file_stem().unwrap().to_string_lossy();
-        format!(
-            "/Game/{}{}_C",
-            path.strip_prefix("FSD/Content")
-                .unwrap()
-                .to_string_lossy()
-                .strip_suffix("uasset")
-                .unwrap(),
-            name
-        )
-    }
+    let ar_path = "FSD/AssetRegistry.bin";
+    let mut asset_registry =
+        AssetRegistry::read(&mut Cursor::new(fsd_pak.get(ar_path, &mut fsd_pak_reader)?))
+            .map_err(|e| IntegrationError::GenericError { msg: e.to_string() })?;
 
     let mut other_deferred = vec![];
     let mut deferred = |path| {
@@ -363,20 +285,16 @@ pub fn integrate<P: AsRef<Path>>(
         }?;
     }
 
-    let mut mod_pak = repak::PakBuilder::new()
-        .compression([repak::Compression::Zlib])
-        .writer(
-            BufWriter::new(
-                fs::OpenOptions::new()
-                    .write(true)
-                    .create(true)
-                    .truncate(true)
-                    .open(&path_mod_pak)?,
-            ),
-            repak::Version::V11,
-            "../../../".to_string(),
-            None,
-        );
+    let mut bundle = ModBundleWriter::new(
+        BufWriter::new(
+            fs::OpenOptions::new()
+                .write(true)
+                .create(true)
+                .truncate(true)
+                .open(&path_mod_pak)?,
+        ),
+        &fsd_pak.files(),
+    )?;
 
     #[cfg(feature = "hook")]
     {
@@ -418,54 +336,98 @@ pub fn integrate<P: AsRef<Path>>(
                 mod_info: mod_info.clone(),
             })?;
 
-        let mount = Path::new(pak.mount_point());
+        let mount = PakPath::new(pak.mount_point());
 
-        for p in pak.files() {
-            let j = mount.join(&p);
-            let new_path = j.strip_prefix("../../../").map_err(|_| {
-                IntegrationError::ModfileInvalidPrefix {
-                    mod_info: mod_info.clone(),
-                    modfile_path: j.clone(),
+        let pak_files = pak
+            .files()
+            .into_iter()
+            .map(|p| -> Result<_, IntegrationError> {
+                let j = mount.join(&p);
+                Ok((
+                    j.strip_prefix("../../../")
+                        .map_err(|_| IntegrationError::ModfileInvalidPrefix {
+                            mod_info: mod_info.clone(),
+                            modfile_path: j.to_string(),
+                        })?
+                        .to_path_buf(),
+                    p,
+                ))
+            })
+            .collect::<Result<HashMap<_, _>, _>>()?;
+
+        for (normalized, pak_path) in &pak_files {
+            match normalized.extension() {
+                Some("uasset" | "umap")
+                    if pak_files.contains_key(&normalized.with_extension("uexp")) =>
+                {
+                    let uasset = pak
+                        .get(pak_path, &mut buf)
+                        .with_context(|_| CtxtRepakSnafu {
+                            mod_info: mod_info.clone(),
+                        })?;
+
+                    let uexp = pak
+                        .get(
+                            PakPath::new(pak_path).with_extension("uexp").as_str(),
+                            &mut buf,
+                        )
+                        .with_context(|_| CtxtRepakSnafu {
+                            mod_info: mod_info.clone(),
+                        })?;
+
+                    let asset = AssetBuilder::new(Cursor::new(uasset), EngineVersion::VER_UE4_27)
+                        .bulk(Cursor::new(uexp))
+                        .skip_data(true)
+                        .build()?;
+                    asset_registry
+                        .populate(normalized.with_extension("").as_str(), &asset)
+                        .map_err(|e| IntegrationError::GenericError { msg: e.to_string() })?;
                 }
-            })?;
-            let new_path_str = &new_path.to_string_lossy().replace('\\', "/");
-            let lowercase = new_path_str.to_ascii_lowercase();
+                _ => {}
+            }
+        }
+
+        for (normalized, pak_path) in pak_files {
+            let lowercase = normalized.as_str().to_ascii_lowercase();
             if added_paths.contains(&lowercase) {
                 continue;
             }
 
-            if let Some(filename) = new_path.file_name() {
+            if let Some(filename) = normalized.file_name() {
                 if filename == "AssetRegistry.bin" {
                     continue;
                 }
-                if new_path.extension().and_then(std::ffi::OsStr::to_str) == Some("ushaderbytecode")
-                {
+                if normalized.extension() == Some("ushaderbytecode") {
                     continue;
                 }
-                let lower = filename.to_string_lossy().to_lowercase();
+                let lower = filename.to_lowercase();
                 if lower == "initspacerig.uasset" {
-                    init_spacerig_assets.insert(format_soft_class(new_path));
+                    init_spacerig_assets.insert(format_soft_class(&normalized));
                 }
                 if lower == "initcave.uasset" {
-                    init_cave_assets.insert(format_soft_class(new_path));
+                    init_cave_assets.insert(format_soft_class(&normalized));
                 }
             }
 
-            let file_data = pak.get(&p, &mut buf).with_context(|_| CtxtRepakSnafu {
-                mod_info: mod_info.clone(),
-            })?;
-            if let Some(raw) = new_path_str
+            let file_data = pak
+                .get(&pak_path, &mut buf)
+                .with_context(|_| CtxtRepakSnafu {
+                    mod_info: mod_info.clone(),
+                })?;
+            if let Some(raw) = normalized
+                .as_str()
                 .strip_suffix(".uasset")
                 .and_then(|path| deferred_assets.get_mut(path))
             {
                 raw.uasset = Some(file_data);
-            } else if let Some(raw) = new_path_str
+            } else if let Some(raw) = normalized
+                .as_str()
                 .strip_suffix(".uexp")
                 .and_then(|path| deferred_assets.get_mut(path))
             {
                 raw.uexp = Some(file_data);
             } else {
-                write_file(&mut mod_pak, &file_data, new_path_str)?;
+                bundle.write_file(&file_data, normalized.as_str())?;
                 added_paths.insert(lowercase);
             }
         }
@@ -474,7 +436,7 @@ pub fn integrate<P: AsRef<Path>>(
     {
         let mut pcb_asset = deferred_assets[&pcb_path].parse()?;
         hook_pcb(&mut pcb_asset);
-        write_asset(&mut mod_pak, pcb_asset, pcb_path)?;
+        bundle.write_asset(pcb_asset, pcb_path)?;
     }
 
     let mut patch_deferred = |path_str: &str,
@@ -482,7 +444,7 @@ pub fn integrate<P: AsRef<Path>>(
      -> Result<(), IntegrationError> {
         let mut asset = deferred_assets[path_str].parse()?;
         f(&mut asset)?;
-        write_asset(&mut mod_pak, asset, path_str)
+        bundle.write_asset(asset, path_str)
     };
 
     // apply patches to base assets
@@ -493,62 +455,134 @@ pub fn integrate<P: AsRef<Path>>(
     patch_deferred(modding_tab_path, patch_modding_tab_item)?;
     patch_deferred(server_list_entry_path, patch_server_list_entry)?;
 
-    fn collect_dir_files(dir: &'static include_dir::Dir, collect: &mut HashMap<String, &[u8]>) {
-        for entry in dir.entries() {
-            match entry {
-                include_dir::DirEntry::Dir(dir) => {
-                    collect_dir_files(dir, collect);
-                }
-                include_dir::DirEntry::File(file) => {
-                    collect.insert(
-                        file.path().to_str().unwrap().replace('\\', "/"),
-                        file.contents(),
-                    );
-                }
-            }
-        }
-    }
-
     let mut int_files = HashMap::new();
     collect_dir_files(&INTEGRATION_DIR, &mut int_files);
 
-    let int_path = (
-        "FSD/Content/_AssemblyStorm/ModIntegration/MI_SpawnMods.uasset",
-        "FSD/Content/_AssemblyStorm/ModIntegration/MI_SpawnMods.uexp",
-    );
-
     for (path, data) in &int_files {
-        if path == int_path.0 || path == int_path.1 {
-            continue;
-        }
-        write_file(&mut mod_pak, data, path)?;
+        bundle.write_file(data, path)?;
     }
 
-    let mut int_asset = unreal_asset::Asset::new(
-        Cursor::new(int_files[int_path.0]),
-        Some(Cursor::new(int_files[int_path.1])),
-        unreal_asset::engine_version::EngineVersion::VER_UE4_27,
-        None,
-        false,
-    )?;
+    bundle.write_meta(config, &mods)?;
 
-    inject_init_actors(
-        &mut int_asset,
-        init_spacerig_assets,
-        init_cave_assets,
-        &mods,
+    let mut buf = vec![];
+    asset_registry
+        .write(&mut buf)
+        .map_err(|e| IntegrationError::GenericError { msg: e.to_string() })?;
+    bundle.write_file(&buf, ar_path)?;
+
+    bundle.finish()?;
+
+    info!(
+        "{} mods installed to {}",
+        mods.len(),
+        path_mod_pak.display()
     );
 
-    let mut int_out = (Cursor::new(vec![]), Cursor::new(vec![]));
+    Ok(())
+}
 
-    int_asset.write_data(&mut int_out.0, Some(&mut int_out.1))?;
-    int_out.0.rewind()?;
-    int_out.1.rewind()?;
+fn collect_dir_files(dir: &'static include_dir::Dir, collect: &mut HashMap<String, &[u8]>) {
+    for entry in dir.entries() {
+        match entry {
+            include_dir::DirEntry::Dir(dir) => {
+                collect_dir_files(dir, collect);
+            }
+            include_dir::DirEntry::File(file) => {
+                collect.insert(
+                    file.path().to_str().unwrap().replace('\\', "/"),
+                    file.contents(),
+                );
+            }
+        }
+    }
+}
 
-    write_file(&mut mod_pak, &int_out.0.into_inner(), int_path.0)?;
-    write_file(&mut mod_pak, &int_out.1.into_inner(), int_path.1)?;
+fn format_soft_class<P: AsRef<PakPath>>(path: P) -> String {
+    let path = path.as_ref();
+    let name = path.file_stem().unwrap();
+    format!(
+        "/Game/{}{}_C",
+        path.strip_prefix("FSD/Content")
+            .unwrap()
+            .as_str()
+            .strip_suffix("uasset")
+            .unwrap(),
+        name
+    )
+}
 
-    {
+struct ModBundleWriter<W: Write + Seek> {
+    pak_writer: PakWriter<W>,
+    directories: HashMap<String, Dir>,
+}
+
+impl<W: Write + Seek> ModBundleWriter<W> {
+    fn new(writer: W, fsd_paths: &[String]) -> Result<Self, IntegrationError> {
+        let mut directories: HashMap<String, Dir> = HashMap::new();
+        for f in fsd_paths {
+            let mut dir = &mut directories;
+            for c in PakPath::new(f).components() {
+                dir = &mut dir
+                    .entry(c.as_str().to_ascii_lowercase())
+                    .or_insert(Dir {
+                        name: c.to_string(),
+                        children: Default::default(),
+                    })
+                    .children;
+            }
+        }
+
+        Ok(Self {
+            pak_writer: repak::PakBuilder::new()
+                .compression([repak::Compression::Zlib])
+                .writer(writer, repak::Version::V11, "../../../".to_string(), None),
+            directories,
+        })
+    }
+    /// Used to normalize match path case to existing files in the DRG pak.
+    fn normalize_path(&self, path_str: &str) -> PakPathBuf {
+        let mut dir = Some(&self.directories);
+        let path = PakPath::new(path_str);
+        let mut normalized_path = PakPathBuf::new();
+        for c in path.components() {
+            if let Some(entry) = dir.and_then(|d| d.get(&c.as_str().to_ascii_lowercase())) {
+                normalized_path.push(&entry.name);
+                dir = Some(&entry.children);
+            } else {
+                normalized_path.push(c);
+            }
+        }
+        normalized_path
+    }
+
+    fn write_file(&mut self, data: &[u8], path: &str) -> Result<(), IntegrationError> {
+        self.pak_writer
+            .write_file(self.normalize_path(path).as_str(), data)?;
+        Ok(())
+    }
+
+    fn write_asset<C: Read + Seek>(
+        &mut self,
+        asset: Asset<C>,
+        path: &str,
+    ) -> Result<(), IntegrationError> {
+        let mut data_out = (Cursor::new(vec![]), Cursor::new(vec![]));
+
+        asset.write_data(&mut data_out.0, Some(&mut data_out.1))?;
+        data_out.0.rewind()?;
+        data_out.1.rewind()?;
+
+        self.write_file(&data_out.0.into_inner(), &format!("{path}.uasset"))?;
+        self.write_file(&data_out.1.into_inner(), &format!("{path}.uexp"))?;
+
+        Ok(())
+    }
+
+    fn write_meta(
+        &mut self,
+        config: MetaConfig,
+        mods: &[(ModInfo, PathBuf)],
+    ) -> Result<(), IntegrationError> {
         let mut split = env!("CARGO_PKG_VERSION").split('.');
         let version = SemverVersion {
             major: split.next().unwrap().parse().unwrap(),
@@ -575,18 +609,20 @@ pub fn integrate<P: AsRef<Path>>(
                 })
                 .collect(),
         };
-        write_file(&mut mod_pak, &postcard::to_allocvec(&meta).unwrap(), "meta")?;
+        self.write_file(&postcard::to_allocvec(&meta).unwrap(), "meta")?;
+        Ok(())
     }
 
-    mod_pak.write_index()?;
+    fn finish(self) -> Result<(), IntegrationError> {
+        self.pak_writer.write_index()?;
+        Ok(())
+    }
+}
 
-    info!(
-        "{} mods installed to {}",
-        mods.len(),
-        path_mod_pak.display()
-    );
-
-    Ok(())
+#[derive(Debug, Default)]
+struct Dir {
+    name: String,
+    children: HashMap<String, Dir>,
 }
 
 pub(crate) fn get_pak_from_data(
@@ -598,11 +634,11 @@ pub(crate) fn get_pak_from_data(
                 let mut file = archive
                     .by_index(i)
                     .map_err(|_| IntegrationError::GenericError {
-                        msg: "failed to extract file in zip archive",
+                        msg: "failed to extract file in zip archive".to_string(),
                     })?;
                 match file.enclosed_name() {
                     Some(p) => {
-                        if file.is_file() && p.extension().filter(|e| e == &"pak").is_some() {
+                        if file.is_file() && p.extension() == Some(std::ffi::OsStr::new("pak")) {
                             let mut buf = vec![];
                             file.read_to_end(&mut buf)?;
                             Ok(Some(Box::new(Cursor::new(buf))))
@@ -666,53 +702,6 @@ fn get_import<R: Read + Seek>(asset: &mut Asset<R>, import: ImportChain) -> Pack
         });
     }
     pi
-}
-
-fn find_export_named<'a, R: io::Read + io::Seek>(
-    asset: &'a mut unreal_asset::Asset<R>,
-    name: &'a str,
-) -> Option<&'a mut unreal_asset::exports::normal_export::NormalExport> {
-    for export in &mut asset.asset_data.exports {
-        if let unreal_asset::exports::Export::NormalExport(export) = export {
-            if export.base_export.object_name.get_content(|n| n == name) {
-                return Some(export);
-            }
-        }
-    }
-    None
-}
-
-fn find_array_property_named<'a>(
-    export: &'a mut unreal_asset::exports::normal_export::NormalExport,
-    name: &'a str,
-) -> Option<(
-    usize,
-    &'a mut unreal_asset::properties::array_property::ArrayProperty,
-)> {
-    for (i, prop) in &mut export.properties.iter_mut().enumerate() {
-        if let unreal_asset::properties::Property::ArrayProperty(prop) = prop {
-            if prop.name.get_content(|n| n == name) {
-                return Some((i, prop));
-            }
-        }
-    }
-    None
-}
-fn find_struct_property_named<'a>(
-    export: &'a mut unreal_asset::exports::normal_export::NormalExport,
-    name: &'a str,
-) -> Option<(
-    usize,
-    &'a mut unreal_asset::properties::struct_property::StructProperty,
-)> {
-    for (i, prop) in &mut export.properties.iter_mut().enumerate() {
-        if let unreal_asset::properties::Property::StructProperty(prop) = prop {
-            if prop.name.get_content(|n| n == name) {
-                return Some((i, prop));
-            }
-        }
-    }
-    None
 }
 
 /// "it's only 3 instructions"
@@ -1035,122 +1024,6 @@ fn hook_pcb<R: Read + Seek>(asset: &mut Asset<R>) {
         }
         .into(),
     );
-}
-
-fn inject_init_actors<R: Read + Seek>(
-    asset: &mut Asset<R>,
-    init_spacerig: HashSet<String>,
-    init_cave: HashSet<String>,
-    mods: &[(ModInfo, PathBuf)],
-) {
-    let init_spacerig_fnames = init_spacerig
-        .into_iter()
-        .map(|p| asset.add_fname(&p))
-        .collect::<Vec<_>>();
-    let init_cave_fnames = init_cave
-        .into_iter()
-        .map(|p| asset.add_fname(&p))
-        .collect::<Vec<_>>();
-
-    let ancestry = Ancestry::new(FName::new_dummy("".to_owned(), 0));
-
-    let structs = mods
-        .iter()
-        .map(|(mod_info, _path)| {
-            StructProperty {
-                name: asset.add_fname("LoadedMods"),
-                ancestry: Ancestry::new(FName::new_dummy("".to_owned(), 0)),
-                struct_type: Some(asset.add_fname("MI_Mod")),
-                struct_guid: Some(
-                    [
-                        59, 201, 35, 171, 89, 71, 206, 180, 185, 207, 203, 190, 80, 216, 194, 203,
-                    ]
-                    .into(),
-                ),
-                property_guid: None,
-                duplication_index: 0,
-                serialize_none: true,
-                value: [
-                    StrProperty {
-                        name: asset.add_fname("Name_2_34C619CC6D494CA58075DEC3D6BA8888"),
-                        ancestry: ancestry.clone(),
-                        property_guid: None,
-                        duplication_index: 0,
-                        value: Some(mod_info.name.to_string()),
-                    }
-                    .into(),
-                    StrProperty {
-                        name: asset.add_fname("Resolution_13_9947C5279BF5459380939CBA188C9805"),
-                        ancestry: ancestry.clone(),
-                        property_guid: None,
-                        duplication_index: 0,
-                        value: Some(mod_info.resolution.get_resolvable_url_or_name().to_string()),
-                    }
-                    .into(),
-                    BoolProperty {
-                        name: asset.add_fname("Required_9_B258E5345EEE4548A6292DEF342D3FBB"),
-                        ancestry: ancestry.clone(),
-                        property_guid: None,
-                        duplication_index: 0,
-                        value: mod_info.suggested_require,
-                    }
-                    .into(),
-                ]
-                .to_vec(),
-            }
-            .into()
-        })
-        .collect::<Vec<Property>>();
-
-    if let Some(e) = find_export_named(asset, "Default__MI_SpawnMods_C") {
-        if let Some((_, p)) = find_array_property_named(e, "SpaceRigMods") {
-            p.value.clear();
-            for path in init_spacerig_fnames {
-                p.value.push(
-                    SoftObjectProperty {
-                        name: FName::new_dummy("0".to_owned(), -2147483648),
-                        ancestry: ancestry.clone(),
-                        property_guid: None,
-                        duplication_index: 0,
-                        value: SoftObjectPath {
-                            asset_path: TopLevelAssetPath::new(None, path),
-                            sub_path_string: None,
-                        },
-                    }
-                    .into(),
-                );
-            }
-        }
-        if let Some((_, p)) = find_array_property_named(e, "CaveMods") {
-            p.value.clear();
-            for path in init_cave_fnames {
-                p.value.push(
-                    SoftObjectProperty {
-                        name: FName::new_dummy("0".to_owned(), -2147483648),
-                        ancestry: ancestry.clone(),
-                        property_guid: None,
-                        duplication_index: 0,
-                        value: SoftObjectPath {
-                            asset_path: TopLevelAssetPath::new(None, path),
-                            sub_path_string: None,
-                        },
-                    }
-                    .into(),
-                );
-            }
-        }
-
-        if let Some((_, p)) = find_struct_property_named(e, "Config") {
-            if let Some(Property::StrProperty(version)) = p.value.get_mut(0) {
-                version.value = Some(env!("CARGO_PKG_VERSION").into());
-            }
-            if structs.is_empty() {
-                p.value.remove(1);
-            } else if let Property::ArrayProperty(loaded_mods) = &mut p.value[1] {
-                loaded_mods.value = structs;
-            }
-        }
-    }
 }
 
 fn patch<C: Seek + Read>(asset: &mut Asset<C>) -> Result<(), IntegrationError> {
