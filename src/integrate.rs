@@ -206,6 +206,7 @@ impl IntegrationError {
     }
 }
 
+#[tracing::instrument(skip_all)]
 pub fn integrate<P: AsRef<Path>>(
     path_pak: P,
     config: MetaConfig,
