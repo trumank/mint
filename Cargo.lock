@@ -2118,7 +2118,7 @@ dependencies = [
  "futures-sink",
  "futures-util",
  "http",
- "indexmap 2.1.0",
+ "indexmap 2.2.6",
  "slab",
  "tokio",
  "tokio-util",
@@ -2385,9 +2385,9 @@ dependencies = [
 
 [[package]]
 name = "indexmap"
-version = "2.1.0"
+version = "2.2.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d530e1a18b1cb4c484e6e34556a0d948706958449fca0cab753d649f2bce3d1f"
+checksum = "168fb715dda47215e360912c096649d23d58bf392ac62f73919e831745e40f26"
 dependencies = [
  "equivalent",
  "hashbrown 0.14.3",
@@ -2737,7 +2737,7 @@ dependencies = [
  "hook",
  "image",
  "include_dir",
- "indexmap 2.1.0",
+ "indexmap 2.2.6",
  "inventory",
  "mint_lib",
  "mockall",
@@ -4782,7 +4782,7 @@ version = "0.19.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1b5bb770da30e5cbfde35a2d7b9b8a2c4b8ef89548a7a6aeab5c9a576e3e7421"
 dependencies = [
- "indexmap 2.1.0",
+ "indexmap 2.2.6",
  "toml_datetime",
  "winnow",
 ]
@@ -4793,7 +4793,7 @@ version = "0.21.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d34d383cd00a163b4a5b85053df514d45bc330f6de7737edfe0a93311d1eaa03"
 dependencies = [
- "indexmap 2.1.0",
+ "indexmap 2.2.6",
  "serde",
  "serde_spanned",
  "toml_datetime",
@@ -4940,11 +4940,12 @@ dependencies = [
 [[package]]
 name = "uasset_utils"
 version = "0.1.0"
-source = "git+https://github.com/trumank/uasset_utils#b457dc55688ad65e9397b6a7898356ab8a546159"
+source = "git+https://github.com/trumank/uasset_utils#abd2523c9feab1337ce50d51c391732c58d47e43"
 dependencies = [
  "anyhow",
  "byteorder",
  "cityhasher",
+ "indexmap 2.2.6",
  "typed-path",
  "unreal_asset",
 ]
