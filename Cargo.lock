@@ -4940,13 +4940,14 @@ dependencies = [
 [[package]]
 name = "uasset_utils"
 version = "0.1.0"
-source = "git+https://github.com/trumank/uasset_utils#abd2523c9feab1337ce50d51c391732c58d47e43"
+source = "git+https://github.com/trumank/uasset_utils#4b2f0930b75a86e0995aa83444f31528904501f0"
 dependencies = [
  "anyhow",
  "byteorder",
  "cityhasher",
  "indexmap 2.2.6",
  "typed-path",
+ "unicase",
  "unreal_asset",
 ]
 
