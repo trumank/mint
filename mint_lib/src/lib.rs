@@ -10,6 +10,7 @@ use std::{
 use anyhow::{bail, Context, Result};
 use fs_err as fs;
 use tracing::*;
+use tracing_subscriber::fmt::format::FmtSpan;
 
 #[derive(Debug)]
 pub enum DRGInstallationType {
@@ -186,10 +187,8 @@ pub fn setup_logging<P: AsRef<Path>>(
         .with_filter(filter::Targets::new().with_target(target, Level::DEBUG));
     let stderr_log = fmt::layer()
         .with_writer(std::io::stderr)
-        .compact()
-        .with_level(true)
-        .with_target(true)
-        .without_time()
+        .event_format(tracing_subscriber::fmt::format().without_time())
+        .with_span_events(FmtSpan::CLOSE)
         .with_filter(
             EnvFilter::builder()
                 .with_default_directive(LevelFilter::INFO.into())
