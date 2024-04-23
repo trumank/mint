@@ -162,23 +162,32 @@ pub enum IntegrationError {
     RepakError { source: repak::Error },
     #[snafu(transparent)]
     UnrealAssetError { source: unreal_asset::Error },
-    #[snafu(display("mod {}: I/O error encountered during its processing", mod_info.name))]
+    #[snafu(display("mod {:?}: I/O error encountered during its processing", mod_info.name))]
     CtxtIoError {
         source: std::io::Error,
         mod_info: ModInfo,
     },
-    #[snafu(display("mod {}: repak error encountered during its processing", mod_info.name))]
+    #[snafu(display("mod {:?}: repak error encountered during its processing", mod_info.name))]
     CtxtRepakError {
         source: repak::Error,
         mod_info: ModInfo,
     },
     #[snafu(display(
-        "modfile {} of mod {mod_info:?} contains unexpected prefix",
+        "mod {:?}: modfile {} contains unexpected prefix",
+        mod_info.name,
         modfile_path
     ))]
     ModfileInvalidPrefix {
         mod_info: ModInfo,
         modfile_path: String,
+    },
+    #[snafu(display(
+        "mod {:?}: failed to integrate: {source}",
+        mod_info.name,
+    ))]
+    CtxtGenericError {
+        source: Box<dyn std::error::Error + Send + Sync>,
+        mod_info: ModInfo,
     },
     #[snafu(transparent)]
     ProviderError { source: ProviderError },
@@ -199,6 +208,7 @@ impl IntegrationError {
         match self {
             IntegrationError::CtxtIoError { mod_info, .. }
             | IntegrationError::CtxtRepakError { mod_info, .. }
+            | IntegrationError::CtxtGenericError { mod_info, .. }
             | IntegrationError::ModfileInvalidPrefix { mod_info, .. } => mod_info.modio_id,
             IntegrationError::ProviderError { source } => source.opt_mod_id(),
             _ => None,
@@ -382,7 +392,10 @@ pub fn integrate<P: AsRef<Path>>(
                         .build()?;
                     asset_registry
                         .populate(normalized.with_extension("").as_str(), &asset)
-                        .map_err(|e| IntegrationError::GenericError { msg: e.to_string() })?;
+                        .map_err(|e| IntegrationError::CtxtGenericError {
+                            source: e.into(),
+                            mod_info: mod_info.clone(),
+                        })?;
                 }
                 _ => {}
             }
