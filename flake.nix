@@ -19,25 +19,20 @@
                 rustToolchain = (pkgs.rust-bin.fromRustupToolchainFile ./rust-toolchain.toml).override {
                     extensions = [ "rust-src" "rust-analyzer" ];
                 };
-
                 rustPlatform = pkgs.makeRustPlatform {
                     cargo = rustToolchain;
                     rustc = rustToolchain;
                 };
 
-                hookDlls = {
-                    "libzstd.dll" = pkgsMinGW.zstd;
-                    "libudis86-0.dll" = pkgsMinGW.udis86;
-                };
-                pkgsMinGW = pkgs.pkgsCross.mingwW64;
+                mingwPkgs = pkgs.pkgsCross.mingwW64;
+                mingwCompiler = mingwPkgs.buildPackages.gcc;
                 mingwRustflags = lib.strings.concatStringsSep " " [
-                    "-L native=${pkgsMinGW.windows.pthreads}/lib"
-                    "-L native=${pkgsMinGW.zstd}/bin"
-                    "-L native=${pkgsMinGW.udis86}/bin"
+                    "-L native=${mingwPkgs.windows.pthreads}/lib"
+                    "-L native=${mingwPkgs.zstd}/bin"
+                    "-L native=${mingwPkgs.udis86}/bin"
                     "-l dylib=zstd"
                     "-l dylib=udis86-0"
                 ];
-                mingwCompiler = pkgsMinGW.buildPackages.gcc;
 
                 libs = with pkgs; [
                     glib
@@ -56,7 +51,7 @@
 
                 libraryPath = lib.makeLibraryPath libs;
 
-                manifest = (lib.importTOML ./Cargo.toml);
+                manifest = lib.importTOML ./Cargo.toml;
                 packageName = manifest.package.name;
                 packageVersion = manifest.workspace.package.version;
 
@@ -73,7 +68,6 @@
                         allowBuiltinFetchGit = true;
                     };
 
-                    # checkType = "debug";
                     doCheck = false;
 
                     preConfigure = ''
@@ -96,20 +90,6 @@
 
                     inherit nativeBuildInputs;
                     buildInputs = libs ++ [ mingwCompiler ];
-
-                    shellHook = let 
-                        tmpDir = "/tmp/drg-mint";
-                        copy = lib.trivial.pipe hookDlls [
-                            (lib.attrsets.mapAttrsToList (dll: pkg: ''
-                                test -f "${tmpDir}/${dll}" || cp "${pkg}/bin/${dll}" "${tmpDir}"
-                            ''))
-                            lib.strings.concatLines
-                        ];
-                    in ''
-                        mkdir -p "${tmpDir}"
-                        ${copy}
-                        echo "Copy files from ${tmpDir} into FSD/Binaries/Win64/ when using the Steam Flatpak"
-                    '';
 
                     LD_LIBRARY_PATH = libraryPath;
                     CARGO_TARGET_X86_64_PC_WINDOWS_GNU_RUSTFLAGS = mingwRustflags;
