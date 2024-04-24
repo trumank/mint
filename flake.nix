@@ -3,95 +3,101 @@
 
     inputs = {
         nixpkgs.url      = "github:nixos/nixpkgs/nixpkgs-unstable";
-        flake-utils.url  = "github:numtide/flake-utils";
         rust-overlay.url = "github:oxalica/rust-overlay";
     };
 
-    outputs = { nixpkgs, flake-utils, rust-overlay, ... }:
-        flake-utils.lib.eachDefaultSystem (system:
-            let
-                lib = nixpkgs.lib;
-                overlays = [ (import rust-overlay) ];
-                pkgs = import nixpkgs {
-                    inherit system overlays;
-                };
+    outputs = { nixpkgs, rust-overlay, ... }:
+    let
+        system = "x86_64-linux";
 
-                rustToolchain = (pkgs.rust-bin.fromRustupToolchainFile ./rust-toolchain.toml).override {
-                    extensions = [ "rust-src" "rust-analyzer" ];
-                };
-                rustPlatform = pkgs.makeRustPlatform {
-                    cargo = rustToolchain;
-                    rustc = rustToolchain;
-                };
+        lib = nixpkgs.lib;
+        overlays = [ (import rust-overlay) ];
+        pkgs = import nixpkgs {
+            inherit system overlays;
+        };
 
-                mingwPkgs = pkgs.pkgsCross.mingwW64;
-                mingwCompiler = mingwPkgs.buildPackages.gcc;
-                mingwRustflags = "-L ${mingwPkgs.windows.pthreads}/lib";
-                mingwTool = name: "${mingwCompiler}/bin/${mingwCompiler.targetPrefix}${name}";
+        rustToolchain = (pkgs.rust-bin.fromRustupToolchainFile ./rust-toolchain.toml).override {
+            extensions = [ "rust-src" "rust-analyzer" ];
+        };
+        rustPlatform = pkgs.makeRustPlatform {
+            cargo = rustToolchain;
+            rustc = rustToolchain;
+        };
 
-                libs = with pkgs; [
-                    gtk3
-                    libGL
-                    openssl
-                    atk
-                    libxkbcommon
-                    wayland
-                ];
+        mingwPkgs = pkgs.pkgsCross.mingwW64;
+        mingwCompiler = mingwPkgs.buildPackages.gcc;
+        mingwRustflags = "-L ${mingwPkgs.windows.pthreads}/lib";
+        mingwTool = name: "${mingwCompiler}/bin/${mingwCompiler.targetPrefix}${name}";
 
-                buildTools = with pkgs; [
-                    rustToolchain
-                    pkg-config
-                    mingwCompiler
-                ];
+        libs = with pkgs; [
+            gtk3
+            libGL
+            openssl
+            atk
+            libxkbcommon
+            wayland
+        ];
 
-                libraryPath = lib.makeLibraryPath libs;
+        buildTools = with pkgs; [
+            rustToolchain
+            pkg-config
+            mingwCompiler
+        ];
 
-                manifest = lib.importTOML ./Cargo.toml;
-                packageName = manifest.package.name;
-                packageVersion = manifest.workspace.package.version;
+        libraryPath = lib.makeLibraryPath libs;
 
-                package = rustPlatform.buildRustPackage {
-                    nativeBuildInputs = buildTools;
-                    buildInputs = libs;
+        manifest = lib.importTOML ./Cargo.toml;
+        packageName = manifest.package.name;
+        packageVersion = manifest.workspace.package.version;
 
-                    pname = packageName;
-                    version = packageVersion;
-                    src = lib.cleanSource ./.;
+        package = rustPlatform.buildRustPackage {
+            nativeBuildInputs = buildTools;
+            buildInputs = libs;
 
-                    verbose = true;
+            pname = packageName;
+            version = packageVersion;
+            src = lib.cleanSource ./.;
 
-                    cargoLock = {
-                        lockFile = ./Cargo.lock;
-                        allowBuiltinFetchGit = true;
-                    };
+            verbose = true;
 
-                    doCheck = false;
+            cargoLock = {
+                lockFile = ./Cargo.lock;
+                allowBuiltinFetchGit = true;
+            };
 
-                    preConfigure = ''
-                        export LD_LIBRARY_PATH="${libraryPath}"
-                        export CARGO_TARGET_X86_64_PC_WINDOWS_GNU_RUSTFLAGS="${mingwRustflags}";
-                    '';
-                };
+            doCheck = false;
 
-                devShell = pkgs.mkShell {
-                    name = "mint";
+            preConfigure = ''
+                export LD_LIBRARY_PATH="${libraryPath}"
+                export CARGO_TARGET_X86_64_PC_WINDOWS_GNU_RUSTFLAGS="${mingwRustflags}";
+            '';
 
-                    buildInputs = buildTools ++ libs;
+            meta = with lib; {
+                description = "Deep Rock Galactic mod loader and integration";
+                license = licenses.mit;
+                homepage = "https://github.com/trumank/mint";
+            };
+        };
 
-                    LD_LIBRARY_PATH = libraryPath;
-                    CARGO_TARGET_X86_64_PC_WINDOWS_GNU_RUSTFLAGS = mingwRustflags;
+        devShell = pkgs.mkShell {
+            name = "mint";
 
-                    # Necessary for cross compiled build scripts, otherwise it will build as ELF format
-                    # https://docs.rs/cc/latest/cc/#external-configuration-via-environment-variables
-                    CC_x86_64_pc_windows_gnu = mingwTool "cc";
-                    AR_x86_64_pc_windows_gnu = mingwTool "ar";
-                };
-            in {
-                packages = {
-                    ${packageName} = package;
-                    default = package;
-                };
+            buildInputs = buildTools ++ libs;
 
-                devShells.default = devShell;
-            });
+            LD_LIBRARY_PATH = libraryPath;
+            CARGO_TARGET_X86_64_PC_WINDOWS_GNU_RUSTFLAGS = mingwRustflags;
+
+            # Necessary for cross compiled build scripts, otherwise it will build as ELF format
+            # https://docs.rs/cc/latest/cc/#external-configuration-via-environment-variables
+            CC_x86_64_pc_windows_gnu = mingwTool "cc";
+            AR_x86_64_pc_windows_gnu = mingwTool "ar";
+        };
+    in {
+        packages.${system} = {
+            ${packageName} = package;
+            default = package;
+        };
+
+        devShells.${system}.default = devShell;
+    };
 }
