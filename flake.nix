@@ -26,16 +26,10 @@
 
                 mingwPkgs = pkgs.pkgsCross.mingwW64;
                 mingwCompiler = mingwPkgs.buildPackages.gcc;
-                mingwRustflags = lib.strings.concatStringsSep " " [
-                    "-L native=${mingwPkgs.windows.pthreads}/lib"
-                    "-L native=${mingwPkgs.zstd}/bin"
-                    "-L native=${mingwPkgs.udis86}/bin"
-                    "-l dylib=zstd"
-                    "-l dylib=udis86-0"
-                ];
+                mingwRustflags = "-L ${mingwPkgs.windows.pthreads}/lib";
+                mingwTool = name: "${mingwCompiler}/bin/${mingwCompiler.targetPrefix}${name}";
 
                 libs = with pkgs; [
-                    glib
                     gtk3
                     libGL
                     openssl
@@ -44,9 +38,10 @@
                     wayland
                 ];
 
-                nativeBuildInputs = with pkgs; [
+                buildTools = with pkgs; [
                     rustToolchain
                     pkg-config
+                    mingwCompiler
                 ];
 
                 libraryPath = lib.makeLibraryPath libs;
@@ -56,12 +51,14 @@
                 packageVersion = manifest.workspace.package.version;
 
                 package = rustPlatform.buildRustPackage {
-                    nativeBuildInputs = nativeBuildInputs ++ [ pkgs.makeWrapper mingwCompiler ];
+                    nativeBuildInputs = buildTools;
                     buildInputs = libs;
 
                     pname = packageName;
                     version = packageVersion;
                     src = lib.cleanSource ./.;
+
+                    verbose = true;
 
                     cargoLock = {
                         lockFile = ./Cargo.lock;
@@ -72,12 +69,22 @@
 
                     preConfigure = ''
                         export LD_LIBRARY_PATH="${libraryPath}"
-                        export CARGO_TARGET_X86_64_PC_WINDOWS_GNU_RUSTFLAGS="${mingwRustflags}"
+                        export CARGO_TARGET_X86_64_PC_WINDOWS_GNU_RUSTFLAGS="${mingwRustflags}";
                     '';
+                };
 
-                    postFixup = ''
-                        wrapProgram $out/bin/${packageName} --suffix LD_LIBRARY_PATH : ${libraryPath}
-                    '';
+                devShell = pkgs.mkShell {
+                    name = "mint";
+
+                    buildInputs = buildTools ++ libs;
+
+                    LD_LIBRARY_PATH = libraryPath;
+                    CARGO_TARGET_X86_64_PC_WINDOWS_GNU_RUSTFLAGS = mingwRustflags;
+
+                    # Necessary for cross compiled build scripts, otherwise it will build as ELF format
+                    # https://docs.rs/cc/latest/cc/#external-configuration-via-environment-variables
+                    CC_x86_64_pc_windows_gnu = mingwTool "cc";
+                    AR_x86_64_pc_windows_gnu = mingwTool "ar";
                 };
             in {
                 packages = {
@@ -85,14 +92,6 @@
                     default = package;
                 };
 
-                devShells.default = pkgs.mkShell {
-                    name = "mint";
-
-                    inherit nativeBuildInputs;
-                    buildInputs = libs ++ [ mingwCompiler ];
-
-                    LD_LIBRARY_PATH = libraryPath;
-                    CARGO_TARGET_X86_64_PC_WINDOWS_GNU_RUSTFLAGS = mingwRustflags;
-                };
+                devShells.default = devShell;
             });
 }
