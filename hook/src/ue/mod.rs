@@ -30,15 +30,51 @@ pub type FnFNameCtorWchar = unsafe extern "system" fn(&mut FName, *const u16, EF
 pub type FnUObjectBaseUtilityGetPathName =
     unsafe extern "system" fn(&UObjectBase, Option<&UObject>, &mut FString);
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone, Copy)]
 #[repr(C)]
 pub struct FVector {
     pub x: f32,
     pub y: f32,
     pub z: f32,
 }
+impl From<FVector> for nalgebra::Vector3<f32> {
+    fn from(val: FVector) -> Self {
+        nalgebra::Vector3::new(val.x, val.y, val.z)
+    }
+}
+impl From<nalgebra::Vector3<f32>> for FVector {
+    fn from(value: nalgebra::Vector3<f32>) -> Self {
+        Self {
+            x: value.x,
+            y: value.y,
+            z: value.z,
+        }
+    }
+}
+impl From<FVector> for nalgebra::Point3<f32> {
+    fn from(val: FVector) -> Self {
+        nalgebra::Point3::new(val.x, val.y, val.z)
+    }
+}
+impl From<nalgebra::Point3<f32>> for FVector {
+    fn from(value: nalgebra::Point3<f32>) -> Self {
+        Self {
+            x: value.x,
+            y: value.y,
+            z: value.z,
+        }
+    }
+}
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Copy, Clone)]
+#[repr(C)]
+pub struct FRotator {
+    pub pitch: f32,
+    pub yaw: f32,
+    pub roll: f32,
+}
+
+#[derive(Debug, Default, Clone, Copy)]
 #[repr(C)]
 pub struct FLinearColor {
     pub r: f32,

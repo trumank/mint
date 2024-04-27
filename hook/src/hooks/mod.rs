@@ -1,5 +1,6 @@
 #![allow(clippy::missing_transmute_annotations)]
 
+mod debug_drawing;
 mod server_list;
 
 use std::{
@@ -15,11 +16,7 @@ use hook_resolvers::GasFixResolution;
 use mint_lib::DRGInstallationType;
 use windows::Win32::System::Memory::{VirtualProtect, PAGE_EXECUTE_READWRITE};
 
-use crate::{
-    globals,
-    ue::{self, FLinearColor, UObject},
-    LOG_GUARD,
-};
+use crate::{globals, ue, LOG_GUARD};
 
 retour::static_detour! {
     static HookUFunctionBind: unsafe extern "system" fn(*mut ue::UFunction);
@@ -38,7 +35,6 @@ pub type FnSaveGameToMemory =
     unsafe extern "system" fn(*const USaveGame, *mut ue::TArray<u8>) -> bool;
 pub type FnLoadGameFromMemory =
     unsafe extern "system" fn(*const ue::TArray<u8>) -> *const USaveGame;
-
 type ExecFn = unsafe extern "system" fn(*mut ue::UObject, *mut ue::kismet::FFrame, *mut c_void);
 
 pub unsafe fn initialize() -> Result<()> {
@@ -54,6 +50,7 @@ pub unsafe fn initialize() -> Result<()> {
     ]
     .iter()
     .chain(server_list::kismet_hooks().iter())
+    .chain(debug_drawing::kismet_hooks().iter())
     .cloned()
     .collect::<std::collections::HashMap<_, ExecFn>>();
 
@@ -336,11 +333,11 @@ unsafe extern "system" fn exec_print_string(
 ) {
     let stack = stack.as_mut().unwrap();
 
-    let _ctx: Option<NonNull<UObject>> = stack.arg();
+    let _ctx: Option<NonNull<ue::UObject>> = stack.arg();
     let string: ue::FString = stack.arg();
     let _print_to_screen: bool = stack.arg();
     let _print_to_log: bool = stack.arg();
-    let _color: FLinearColor = stack.arg();
+    let _color: ue::FLinearColor = stack.arg();
     let _duration: f32 = stack.arg();
 
     println!("PrintString({string})");
