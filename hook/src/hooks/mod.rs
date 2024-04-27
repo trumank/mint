@@ -47,10 +47,6 @@ pub unsafe fn initialize() -> Result<()> {
             "/Script/Engine.KismetSystemLibrary:PrintString",
             exec_print_string as ExecFn,
         ),
-        (
-            "/Script/Engine.KismetSystemLibrary:DrawDebugLine",
-            exec_draw_debug_line as ExecFn,
-        ),
     ]
     .iter()
     .chain(server_list::kismet_hooks().iter())
@@ -330,38 +326,6 @@ unsafe extern "system" fn exec_get_mod_json(
     stack.code = stack.code.add(1);
 }
 
-#[repr(C)]
-struct UWorld {
-    object: ue::UObject,
-    network_notify: *const (),
-    persistent_level: *const (), // ULevel
-    net_driver: *const (),       // UNetDriver
-    line_batcher: *const ULineBatchComponent,
-    persistent_line_batcher: *const ULineBatchComponent,
-    foreground_line_batcher: *const ULineBatchComponent,
-}
-
-#[repr(C)]
-struct ULineBatchComponent {
-    vftable: *const ULineBatchComponentVTable,
-    // lots more
-}
-
-#[repr(C)]
-#[rustfmt::skip]
-struct ULineBatchComponentVTable {
-    padding: [*const (); 0x110],
-    draw_line: unsafe extern "system" fn(this: &mut ULineBatchComponent, start: &FVector, end: &FVector, color: &FLinearColor, depth_priority: bool, life_time: f32, thickness: f32),
-    draw_point: unsafe extern "system" fn(this: &mut ULineBatchComponent, position: &FVector, color: &FLinearColor, point_size: f32, depth_priority: u8, life_time: f32),
-}
-
-#[derive(Debug, Default, Clone, Copy)]
-struct FVector {
-    x: f32,
-    y: f32,
-    z: f32,
-}
-
 unsafe extern "system" fn exec_print_string(
     _context: *mut ue::UObject,
     stack: *mut ue::kismet::FFrame,
@@ -378,72 +342,5 @@ unsafe extern "system" fn exec_print_string(
 
     println!("PrintString({string})");
 
-    if !stack.code.is_null() {
-        stack.code = stack.code.add(1);
-    }
-}
-
-unsafe extern "system" fn exec_draw_debug_line(
-    _context: *mut ue::UObject,
-    stack: *mut ue::kismet::FFrame,
-    _result: *mut c_void,
-) {
-    let stack = stack.as_mut().unwrap();
-
-    let var: Option<&ue::UObject> = stack.arg();
-
-    let mut o = var;
-    let world = loop {
-        let Some(outer) = o else {
-            break None;
-        };
-        let class = outer
-            .uobject_base_utility
-            .uobject_base
-            .class_private
-            .as_ref();
-        if let Some(class) = class {
-            if "/Script/Engine.World"
-                == class
-                    .ustruct
-                    .ufield
-                    .uobject
-                    .uobject_base_utility
-                    .uobject_base
-                    .get_path_name(None)
-            {
-                break Some(outer);
-            }
-        }
-        o = outer
-            .uobject_base_utility
-            .uobject_base
-            .outer_private
-            .as_ref();
-    };
-
-    let start: FVector = stack.arg();
-    let end: FVector = stack.arg();
-    let color: FLinearColor = stack.arg();
-    let duration: f32 = stack.arg();
-    let thickness: f32 = stack.arg();
-
-    if let Some(world) = world {
-        let world = (world) as *const _ as *mut UWorld;
-        let batcher = (*world).line_batcher;
-        let f = (*(*batcher).vftable).draw_line;
-        f(
-            &mut *batcher.cast_mut(),
-            &start,
-            &end,
-            &color,
-            false,
-            thickness,
-            duration,
-        );
-    }
-
-    if !stack.code.is_null() {
-        stack.code = stack.code.add(1);
-    }
+    stack.code = stack.code.add(1);
 }

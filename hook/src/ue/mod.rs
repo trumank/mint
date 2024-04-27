@@ -74,7 +74,7 @@ pub struct FRotator {
     pub roll: f32,
 }
 
-#[derive(Debug, Default, Clone, Copy)]
+#[derive(Debug, Default, Copy, Clone)]
 #[repr(C)]
 pub struct FLinearColor {
     pub r: f32,
