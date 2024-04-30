@@ -37,6 +37,11 @@ pub struct FVector {
     pub y: f32,
     pub z: f32,
 }
+impl FVector {
+    pub fn new(x: f32, y: f32, z: f32) -> Self {
+        Self { x, y, z }
+    }
+}
 impl From<FVector> for nalgebra::Vector3<f32> {
     fn from(val: FVector) -> Self {
         nalgebra::Vector3::new(val.x, val.y, val.z)
@@ -81,4 +86,9 @@ pub struct FLinearColor {
     pub g: f32,
     pub b: f32,
     pub a: f32,
+}
+impl FLinearColor {
+    pub fn new(r: f32, g: f32, b: f32, a: f32) -> Self {
+        Self { r, g, b, a }
+    }
 }
