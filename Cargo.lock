@@ -4940,7 +4940,7 @@ dependencies = [
 [[package]]
 name = "uasset_utils"
 version = "0.1.0"
-source = "git+https://github.com/trumank/uasset_utils#4b2f0930b75a86e0995aa83444f31528904501f0"
+source = "git+https://github.com/trumank/uasset_utils#4977261489849335e9fe7f30a2d698bd4f3fd20c"
 dependencies = [
  "anyhow",
  "byteorder",
