@@ -51,8 +51,8 @@ pub fn kismet_hooks() -> &'static [(&'static str, ExecFn)] {
             exec_tick as ExecFn,
         ),
         (
-            "/Game/_AssemblyStorm/TestMod/MintDebugStuff/InitCave.InitCave_C:GetVertices",
-            exec_debug_mesh as ExecFn,
+            "/Game/_mint/BPL_CSG.BPL_CSG_C:Get Procedural Mesh Vertices",
+            exec_get_mesh_vertices as ExecFn,
         ),
     ]
 }
@@ -141,16 +141,6 @@ unsafe fn get_batcher(world: NonNull<UWorld>, duration: f32) -> NonNull<ULineBat
     }
     .nn()
     .unwrap()
-}
-
-#[derive(Debug, Default, Copy, Clone)]
-#[repr(C)]
-struct FBatchedPoint {
-    position: FVector,
-    color: FLinearColor,
-    point_size: f32,
-    remaining_life_time: f32,
-    depth_priority: u8,
 }
 
 unsafe fn draw_lines(batcher: NonNull<ULineBatchComponent>, lines: &[FBatchedLine]) {
@@ -1112,71 +1102,37 @@ mod physx {
     }
 }
 
-unsafe extern "system" fn exec_debug_mesh(
-    context: *mut ue::UObject,
+unsafe extern "system" fn exec_get_mesh_vertices(
+    _context: *mut ue::UObject,
     stack: *mut ue::kismet::FFrame,
     _result: *mut c_void,
 ) {
     let stack = stack.as_mut().unwrap();
 
     let mesh: Option<NonNull<UDeepProceduralMeshComponent>> = stack.arg();
-
-    let mut ret: TArray<FVector> = Default::default();
+    let _world_context: Option<NonNull<UObject>> = stack.arg();
 
     drop(stack.arg::<TArray<FVector>>());
     let ret: &mut TArray<FVector> = &mut *(stack.most_recent_property_address as *mut _);
     *ret = TArray::new();
 
-    //let ret: &mut TArray<FVector> = stack.arg();
+    if let Some(mesh) = mesh {
+        if let Some(triangle_mesh) = element_ptr!(mesh => .triangle_mesh.*).nn() {
+            let num = element_ptr!(triangle_mesh => .vftable.*.get_nb_vertices.*)(triangle_mesh);
+            let ptr = element_ptr!(triangle_mesh => .vftable.*.get_vertices.*)(triangle_mesh);
+            let slice = std::slice::from_raw_parts(ptr, num as usize);
+            let c = element_ptr!(mesh => .chunk_id.*);
 
-    //let mut ret = TArray::new();
-
-    if let Some(world) = get_world(context.nn()) {
-        if let Some(mesh) = mesh {
-            if let Some(triangle_mesh) = element_ptr!(mesh => .triangle_mesh.*).nn() {
-                let num =
-                    element_ptr!(triangle_mesh => .vftable.*.get_nb_vertices.*)(triangle_mesh);
-                let ptr = element_ptr!(triangle_mesh => .vftable.*.get_vertices.*)(triangle_mesh);
-                let slice = std::slice::from_raw_parts(ptr, num as usize);
-                //ret.extend_from_slice(slice);
-                let c = element_ptr!(mesh => .chunk_id.*);
-
-                let mut points = vec![];
-                let mut lines = vec![];
-                for vert in slice {
-                    let position = FVector::new(
-                        c.x as f32 * 800. + vert.x,
-                        c.y as f32 * 800. + vert.y,
-                        c.z as f32 * 800. + vert.z,
-                    );
-                    ret.push(position);
-                    //nav::draw_box(
-                    //    &mut lines,
-                    //    position,
-                    //    FVector::new(20., 20., 20.),
-                    //    FLinearColor::new(0., 0., 1., 1.),
-                    //);
-                    //points.push(FBatchedPoint {
-                    //    position: FVector::new(
-                    //        c.x as f32 * 800. + vert.x,
-                    //        c.y as f32 * 800. + vert.y,
-                    //        c.z as f32 * 800. + vert.z,
-                    //    ),
-                    //    color: FLinearColor::new(0., 0., 1., 1.),
-                    //    point_size: 40.,
-                    //    remaining_life_time: 0.,
-                    //    depth_priority: 0,
-                    //})
-                }
-
-                let batcher = element_ptr!(world => .line_batcher.*).nn().unwrap();
-                draw_points(batcher, &points);
-                draw_lines(batcher, &lines);
+            for vert in slice {
+                let position = FVector::new(
+                    c.x as f32 * 800. + vert.x,
+                    c.y as f32 * 800. + vert.y,
+                    c.z as f32 * 800. + vert.z,
+                );
+                ret.push(position);
             }
         }
     }
-
-    std::mem::forget(ret);
 
     if !stack.code.is_null() {
         stack.code = stack.code.add(1);
