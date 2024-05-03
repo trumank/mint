@@ -54,6 +54,10 @@ pub fn kismet_hooks() -> &'static [(&'static str, ExecFn)] {
             "/Game/_mint/BPL_CSG.BPL_CSG_C:Get Procedural Mesh Vertices",
             exec_get_mesh_vertices as ExecFn,
         ),
+        (
+            "/Game/_mint/BPL_CSG.BPL_CSG_C:Get Procedural Mesh Triangles",
+            exec_get_mesh_triangles as ExecFn,
+        ),
     ]
 }
 #[repr(C)]
@@ -1093,6 +1097,7 @@ mod physx {
         pub refit_bvh: *const (),
         pub get_nb_triangles: unsafe extern "system" fn(this: NonNull<PxTriangleMesh>) -> u32,
         pub get_triangles: unsafe extern "system" fn(this: NonNull<PxTriangleMesh>) -> *const (),
+        pub get_triangle_mesh_flags: unsafe extern "system" fn(this: NonNull<PxTriangleMesh>, &mut u8) -> u8,
     }
 
     #[repr(C)]
@@ -1130,6 +1135,66 @@ unsafe extern "system" fn exec_get_mesh_vertices(
                     c.z as f32 * 800. + vert.z,
                 );
                 ret.push(position);
+            }
+        }
+    }
+
+    if !stack.code.is_null() {
+        stack.code = stack.code.add(1);
+    }
+}
+
+unsafe extern "system" fn exec_get_mesh_triangles(
+    _context: *mut ue::UObject,
+    stack: *mut ue::kismet::FFrame,
+    _result: *mut c_void,
+) {
+    let stack = stack.as_mut().unwrap();
+
+    let mesh: Option<NonNull<UDeepProceduralMeshComponent>> = arg(stack);
+    let _world_context: Option<NonNull<UObject>> = arg(stack);
+
+    #[derive(Debug, Clone, Copy)]
+    #[repr(C)]
+    struct Tri<T> {
+        a: T,
+        b: T,
+        c: T,
+    }
+    impl From<Tri<u16>> for Tri<u32> {
+        fn from(value: Tri<u16>) -> Self {
+            Self {
+                a: value.a as u32,
+                b: value.b as u32,
+                c: value.c as u32,
+            }
+        }
+    }
+
+    stack.most_recent_property_address = std::ptr::null();
+    ue::kismet::arg(stack, &mut TArray::<Tri<u32>>::default());
+    let ret = (stack.most_recent_property_address as *mut TArray<Tri<u32>>)
+        .as_mut()
+        .unwrap();
+
+    ret.clear();
+
+    if let Some(mesh) = mesh {
+        if let Some(triangle_mesh) = element_ptr!(mesh => .triangle_mesh.*).nn() {
+            let vtable = element_ptr!(triangle_mesh => .vftable.*);
+            let num = element_ptr!(vtable => .get_nb_triangles.*)(triangle_mesh);
+            let ptr = element_ptr!(vtable => .get_triangles.*)(triangle_mesh);
+            let mut flags = 0;
+            let _ = element_ptr!(vtable => .get_triangle_mesh_flags.*)(triangle_mesh, &mut flags);
+            if flags & 2 != 0 {
+                for tri in std::slice::from_raw_parts(ptr as *const Tri<u16>, num as usize) {
+                    ret.push((*tri).into());
+                }
+            } else {
+                ret.extend_from_slice(std::slice::from_raw_parts(
+                    ptr as *const Tri<u32>,
+                    num as usize,
+                ));
             }
         }
     }
