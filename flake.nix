@@ -42,6 +42,7 @@
             rustToolchain
             pkg-config
             mingwCompiler
+            makeWrapper
         ];
 
         libraryPath = lib.makeLibraryPath libs;
@@ -70,6 +71,12 @@
             preConfigure = ''
                 export LD_LIBRARY_PATH="${libraryPath}"
                 export CARGO_TARGET_X86_64_PC_WINDOWS_GNU_RUSTFLAGS="${mingwRustflags}";
+            '';
+
+            postInstall = ''
+              wrapProgram $out/bin/mint \
+                --prefix LD_LIBRARY_PATH : "${libraryPath}" \
+                --prefix XDG_DATA_DIRS : "${pkgs.gtk3}/share/gsettings-schemas/${pkgs.gtk3.name}"
             '';
 
             meta = with lib; {
