@@ -6,7 +6,7 @@ use na::{Matrix, Matrix4, Point3, Vector3};
 use nalgebra as na;
 
 use crate::hooks::ExecFn;
-use crate::ue::{self, FLinearColor, FRotator, FVector, TArray};
+use crate::ue::{self, FLinearColor, FRotator, FVector, TArray, UObject};
 
 pub fn kismet_hooks() -> &'static [(&'static str, ExecFn)] {
     &[
@@ -49,6 +49,10 @@ pub fn kismet_hooks() -> &'static [(&'static str, ExecFn)] {
         (
             "/Game/_AssemblyStorm/TestMod/DebugStuff.DebugStuff_C:ReceiveTick",
             exec_tick as ExecFn,
+        ),
+        (
+            "/Game/_AssemblyStorm/TestMod/MintDebugStuff/InitCave.InitCave_C:GetVertices",
+            exec_debug_mesh as ExecFn,
         ),
     ]
 }
@@ -139,6 +143,16 @@ unsafe fn get_batcher(world: NonNull<UWorld>, duration: f32) -> NonNull<ULineBat
     .unwrap()
 }
 
+#[derive(Debug, Default, Copy, Clone)]
+#[repr(C)]
+struct FBatchedPoint {
+    position: FVector,
+    color: FLinearColor,
+    point_size: f32,
+    remaining_life_time: f32,
+    depth_priority: u8,
+}
+
 unsafe fn draw_lines(batcher: NonNull<ULineBatchComponent>, lines: &[FBatchedLine]) {
     if let Some((last, lines_)) = lines.split_last() {
         let batched_lines: &mut TArray<_> = element_ptr!(batcher => .batched_lines).as_mut();
@@ -153,6 +167,24 @@ unsafe fn draw_lines(batcher: NonNull<ULineBatchComponent>, lines: &[FBatchedLin
             &last.color,
             last.depth_priority,
             last.thickness,
+            last.remaining_life_time,
+        );
+    }
+}
+
+unsafe fn draw_points(batcher: NonNull<ULineBatchComponent>, lines: &[FBatchedPoint]) {
+    if let Some((last, lines)) = lines.split_last() {
+        let batched_points: &mut TArray<_> = element_ptr!(batcher => .batched_points).as_mut();
+        batched_points.extend_from_slice(lines);
+
+        // call draw_point directly on last element so it gets properly marked as dirty
+        let draw_point = element_ptr!(batcher => .vftable.*.draw_point.*);
+        draw_point(
+            batcher,
+            &last.position,
+            &last.color,
+            last.point_size,
+            last.depth_priority,
             last.remaining_life_time,
         );
     }
@@ -1050,12 +1082,113 @@ unsafe extern "system" fn exec_tick(
     }
 }
 
+#[derive(Debug, Clone)]
+#[repr(C)]
+pub struct UDeepProceduralMeshComponent {
+    padding: [u8; 0x488],
+    chunk_id: nav::FChunkId,
+    triangle_mesh: *const physx::PxTriangleMesh,
+}
+
+mod physx {
+    use super::*;
+
+    #[repr(C)]
+    #[rustfmt::skip]
+    pub struct PxTriangleVTable {
+        padding: [u8; 0x28],
+        pub get_nb_vertices: unsafe extern "system" fn(this: NonNull<PxTriangleMesh>) -> u32,
+        pub get_vertices: unsafe extern "system" fn(this: NonNull<PxTriangleMesh>) -> *const FVector,
+        pub get_vertices_for_modification: unsafe extern "system" fn(this: NonNull<PxTriangleMesh>) -> *const FVector,
+        pub refit_bvh: *const (),
+        pub get_nb_triangles: unsafe extern "system" fn(this: NonNull<PxTriangleMesh>) -> u32,
+        pub get_triangles: unsafe extern "system" fn(this: NonNull<PxTriangleMesh>) -> *const (),
+    }
+
+    #[repr(C)]
+    pub struct PxTriangleMesh {
+        pub vftable: NonNull<PxTriangleVTable>,
+        // TODO rest
+    }
+}
+
+unsafe extern "system" fn exec_debug_mesh(
+    context: *mut ue::UObject,
+    stack: *mut ue::kismet::FFrame,
+    _result: *mut c_void,
+) {
+    let stack = stack.as_mut().unwrap();
+
+    let mesh: Option<NonNull<UDeepProceduralMeshComponent>> = stack.arg();
+
+    let mut ret: TArray<FVector> = Default::default();
+
+    drop(stack.arg::<TArray<FVector>>());
+    let ret: &mut TArray<FVector> = &mut *(stack.most_recent_property_address as *mut _);
+    *ret = TArray::new();
+
+    //let ret: &mut TArray<FVector> = stack.arg();
+
+    //let mut ret = TArray::new();
+
+    if let Some(world) = get_world(context.nn()) {
+        if let Some(mesh) = mesh {
+            if let Some(triangle_mesh) = element_ptr!(mesh => .triangle_mesh.*).nn() {
+                let num =
+                    element_ptr!(triangle_mesh => .vftable.*.get_nb_vertices.*)(triangle_mesh);
+                let ptr = element_ptr!(triangle_mesh => .vftable.*.get_vertices.*)(triangle_mesh);
+                let slice = std::slice::from_raw_parts(ptr, num as usize);
+                //ret.extend_from_slice(slice);
+                let c = element_ptr!(mesh => .chunk_id.*);
+
+                let mut points = vec![];
+                let mut lines = vec![];
+                for vert in slice {
+                    let position = FVector::new(
+                        c.x as f32 * 800. + vert.x,
+                        c.y as f32 * 800. + vert.y,
+                        c.z as f32 * 800. + vert.z,
+                    );
+                    ret.push(position);
+                    //nav::draw_box(
+                    //    &mut lines,
+                    //    position,
+                    //    FVector::new(20., 20., 20.),
+                    //    FLinearColor::new(0., 0., 1., 1.),
+                    //);
+                    //points.push(FBatchedPoint {
+                    //    position: FVector::new(
+                    //        c.x as f32 * 800. + vert.x,
+                    //        c.y as f32 * 800. + vert.y,
+                    //        c.z as f32 * 800. + vert.z,
+                    //    ),
+                    //    color: FLinearColor::new(0., 0., 1., 1.),
+                    //    point_size: 40.,
+                    //    remaining_life_time: 0.,
+                    //    depth_priority: 0,
+                    //})
+                }
+
+                let batcher = element_ptr!(world => .line_batcher.*).nn().unwrap();
+                draw_points(batcher, &points);
+                draw_lines(batcher, &lines);
+            }
+        }
+    }
+
+    std::mem::forget(ret);
+
+    if !stack.code.is_null() {
+        stack.code = stack.code.add(1);
+    }
+}
+
 mod nav {
     use self::ue::TArray;
 
     use super::*;
 
-    unsafe fn draw_box(
+    pub unsafe fn draw_box(
         lines: &mut Vec<FBatchedLine>,
         center: FVector,
         extent: FVector,
@@ -1111,7 +1244,11 @@ mod nav {
         }
     }
 
-    unsafe fn path_stuff(lines: &mut Vec<FBatchedLine>, csg_world: NonNull<ADeepCSGWorld>) {
+    unsafe fn path_stuff(
+        lines: &mut Vec<FBatchedLine>,
+        points: &mut Vec<FBatchedPoint>,
+        csg_world: NonNull<ADeepCSGWorld>,
+    ) {
         //println!("csg_world {csg_world:?}");
         //let nav = element_ptr!(csg_world => .active_nav_data.*.nav_sets5);
         //let nodes = element_ptr!(nav => .nodes.*);
@@ -1287,19 +1424,31 @@ mod nav {
                                         }
 
                                         let w = pos.to_world_pos();
-                                        draw_box(
-                                            lines,
-                                            FVector {
-                                                x: w.x + (2. * x as f32 + 1.) / r as f32 * 100.
-                                                    - 100.,
-                                                y: w.y + (2. * y as f32 + 1.) / r as f32 * 100.
-                                                    - 100.,
-                                                z: w.z + (2. * z as f32 + 1.) / r as f32 * 100.
-                                                    - 100.,
-                                            },
-                                            FVector::new(20., 20., 20.),
-                                            FLinearColor::new(0., d as f32 / 256., 0., 1.),
-                                        );
+                                        let position = FVector {
+                                            x: w.x + (2. * x as f32 + 1.) / r as f32 * 100. - 100.,
+                                            y: w.y + (2. * y as f32 + 1.) / r as f32 * 100. - 100.,
+                                            z: w.z + (2. * z as f32 + 1.) / r as f32 * 100. - 100.,
+                                        };
+                                        points.push(FBatchedPoint {
+                                            position,
+                                            color: red,
+                                            point_size: 40.,
+                                            remaining_life_time: 0.,
+                                            depth_priority: 0,
+                                        })
+                                        //draw_box(
+                                        //    lines,
+                                        //    FVector {
+                                        //        x: w.x + (2. * x as f32 + 1.) / r as f32 * 100.
+                                        //            - 100.,
+                                        //        y: w.y + (2. * y as f32 + 1.) / r as f32 * 100.
+                                        //            - 100.,
+                                        //        z: w.z + (2. * z as f32 + 1.) / r as f32 * 100.
+                                        //            - 100.,
+                                        //    },
+                                        //    FVector::new(20., 20., 20.),
+                                        //    FLinearColor::new(0., d as f32 / 256., 0., 1.),
+                                        //);
                                     }
                                 }
                             }
@@ -1391,7 +1540,11 @@ mod nav {
         //println!("tick {csg_world:?} {}", nodes.count);
     }
 
-    unsafe fn nav_stuff(lines: &mut Vec<FBatchedLine>, csg_world: NonNull<ADeepCSGWorld>) {
+    unsafe fn nav_stuff(
+        lines: &mut Vec<FBatchedLine>,
+        points: &mut Vec<FBatchedPoint>,
+        csg_world: NonNull<ADeepCSGWorld>,
+    ) {
         let nav = element_ptr!(csg_world => .active_nav_data.*.nav_sets5);
         let nodes = element_ptr!(nav => .nodes.*);
         let connections = element_ptr!(nav => .connections);
@@ -1417,6 +1570,7 @@ mod nav {
         let batcher = element_ptr!(world => .line_batcher.*).nn().unwrap();
 
         let mut lines = vec![];
+        let mut points = vec![];
 
         //let get_all_spawn_points: FnGetAllSpawnPointsInSphere = std::mem::transmute(0x143dc28a0 as usize);
 
@@ -1425,11 +1579,12 @@ mod nav {
         if let Some(csg_world) = csg_world {
             //println!("csg_world {csg_world:?}");
 
-            //path_stuff(&mut lines, csg_world);
-            nav_stuff(&mut lines, csg_world);
+            path_stuff(&mut lines, &mut points, csg_world);
+            //nav_stuff(&mut lines, &mut points, csg_world);
         }
 
         draw_lines(batcher, &lines);
+        draw_points(batcher, &points);
     }
 
     #[derive(Debug, Clone)]
@@ -1441,17 +1596,17 @@ mod nav {
     #[derive(Debug, Clone, Copy)]
     #[repr(C)]
     pub struct FChunkId {
-        x: i16,
-        y: i16,
-        z: i16,
+        pub x: i16,
+        pub y: i16,
+        pub z: i16,
     }
 
     #[derive(Debug, Clone, Copy)]
     #[repr(C)]
     pub struct FChunkOffset {
-        x: i16,
-        y: i16,
-        z: i16,
+        pub x: i16,
+        pub y: i16,
+        pub z: i16,
     }
 
     #[derive(Debug, Clone, Copy)]
