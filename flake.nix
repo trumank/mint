@@ -74,7 +74,7 @@
             '';
 
             postInstall = ''
-              wrapProgram $out/bin/mint \
+              wrapProgram $out/bin/${packageName} \
                 --prefix LD_LIBRARY_PATH : "${libraryPath}" \
                 --prefix XDG_DATA_DIRS : "${pkgs.gtk3}/share/gsettings-schemas/${pkgs.gtk3.name}"
             '';
@@ -83,6 +83,7 @@
                 description = "Deep Rock Galactic mod loader and integration";
                 license = licenses.mit;
                 homepage = "https://github.com/trumank/mint";
+                mainProgram = packageName;
             };
         };
 
