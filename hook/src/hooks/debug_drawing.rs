@@ -51,6 +51,14 @@ pub fn kismet_hooks() -> &'static [(&'static str, ExecFn)] {
             exec_tick as ExecFn,
         ),
         (
+            "/Game/_AssemblyStorm/TestMod/MintDebugStuff/InitCave.InitCave_C:PathTo",
+            exec_path_to as ExecFn,
+        ),
+        (
+            "/Game/_AssemblyStorm/TestMod/MintDebugStuff/InitCave.InitCave_C:SpawnPoints",
+            exec_spawn_points as ExecFn,
+        ),
+        (
             "/Game/_mint/BPL_CSG.BPL_CSG_C:Get Procedural Mesh Vertices",
             exec_get_mesh_vertices as ExecFn,
         ),
@@ -1076,6 +1084,49 @@ unsafe extern "system" fn exec_tick(
     }
 }
 
+unsafe extern "system" fn exec_path_to(
+    context: *mut ue::UObject,
+    stack: *mut ue::kismet::FFrame,
+    _result: *mut c_void,
+) {
+    let stack = stack.as_mut().unwrap();
+
+    let dest: FVector = arg(stack);
+    let size: nav::DeepPathFinderSize = arg(stack);
+    let type_: nav::DeepPathFinderType = arg(stack);
+    let pref: nav::DeepPathFinderPreference = arg(stack);
+    let follow_player: bool = arg(stack);
+
+    if let Some(world) = get_world(context.nn()) {
+        nav::path_to(world, follow_player.then_some(dest), size, type_, pref);
+    }
+
+    if !stack.code.is_null() {
+        stack.code = stack.code.add(1);
+    }
+}
+
+unsafe extern "system" fn exec_spawn_points(
+    context: *mut ue::UObject,
+    stack: *mut ue::kismet::FFrame,
+    _result: *mut c_void,
+) {
+    let stack = stack.as_mut().unwrap();
+
+    let dest: FVector = arg(stack);
+    let radius: f32 = arg(stack);
+    let size: nav::DeepPathFinderSize = arg(stack);
+    let type_: nav::DeepPathFinderType = arg(stack);
+
+    if let Some(world) = get_world(context.nn()) {
+        nav::spawn_points(world, &dest, radius, size, type_);
+    }
+
+    if !stack.code.is_null() {
+        stack.code = stack.code.add(1);
+    }
+}
+
 #[derive(Debug, Clone)]
 #[repr(C)]
 pub struct UDeepProceduralMeshComponent {
@@ -1234,8 +1285,18 @@ mod nav {
         pathfinder: NonNull<DeepPathfinder>,
         start: &FVector,
         end: &FVector,
+        size: DeepPathFinderSize,
+        type_: DeepPathFinderType,
+        pref: DeepPathFinderPreference,
     ) -> Option<Vec<FVector>> {
-        let get_path: FnGetPath = std::mem::transmute(0x143dae9b0 as usize);
+        let Ok(get_path) = crate::globals()
+            .resolution
+            .get_path
+            .as_ref()
+            .map(|r| std::mem::transmute::<usize, FnGetPath>(r.0 as usize))
+        else {
+            return None;
+        };
 
         let mut path = vec![];
 
@@ -1246,9 +1307,9 @@ mod nav {
             let mut complete = false;
             let res = get_path(
                 pathfinder,
-                DeepPathFinderType::Walk,
-                DeepPathFinderSize::Small,
-                DeepPathFinderPreference::None,
+                type_,
+                size,
+                pref,
                 &start,
                 end,
                 &mut tmp,
@@ -1268,7 +1329,11 @@ mod nav {
     unsafe fn path_stuff(
         lines: &mut Vec<FBatchedLine>,
         points: &mut Vec<FBatchedPoint>,
+        dest: Option<FVector>,
         csg_world: NonNull<ADeepCSGWorld>,
+        size: DeepPathFinderSize,
+        type_: DeepPathFinderType,
+        pref: DeepPathFinderPreference,
     ) {
         //println!("csg_world {csg_world:?}");
         //let nav = element_ptr!(csg_world => .active_nav_data.*.nav_sets5);
@@ -1280,7 +1345,10 @@ mod nav {
                 let path = get_path(
                     pathfinder,
                     &FVector::new(1000.0, i as f32 * 100.0, 0.),
-                    &FVector::new(-1000.0, i as f32 * 100.0, 0.),
+                    &dest.unwrap_or_else(|| FVector::new(-1000.0, i as f32 * 100.0, 0.)),
+                    size,
+                    type_,
+                    pref,
                 );
                 //println!("{} {:?}", complete, res);
                 if let Some(path) = path {
@@ -1325,7 +1393,8 @@ mod nav {
         //for n in 0..(nodes.count as usize) {
         //    let node = element_ptr!(nodes.start => + (n).*);
         //    let pos = node.pathfinder_pos.chunk_id_and_offset;
-        for x in 0..1 {
+        for x in 0..0 {
+            // TODO
             for y in 0..1 {
                 for z in 0..1 {
                     let pos = FChunkIDAndOffset {
@@ -1587,6 +1656,71 @@ mod nav {
         }
     }
 
+    pub unsafe fn path_to(
+        world: NonNull<UWorld>,
+        dest: Option<FVector>,
+        size: DeepPathFinderSize,
+        type_: DeepPathFinderType,
+        pref: DeepPathFinderPreference,
+    ) {
+        let batcher = element_ptr!(world => .line_batcher.*).nn().unwrap();
+
+        let mut lines = vec![];
+        let mut points = vec![];
+
+        let game_state = element_ptr!(world => .game_state.* as AFSDGameState);
+        let csg_world = element_ptr!(game_state => .csg_world.*).nn();
+        if let Some(csg_world) = csg_world {
+            path_stuff(&mut lines, &mut points, dest, csg_world, size, type_, pref);
+        }
+
+        draw_lines(batcher, &lines);
+        draw_points(batcher, &points);
+    }
+
+    pub unsafe fn spawn_points(
+        world: NonNull<UWorld>,
+        dest: &FVector,
+        radius: f32,
+        size: DeepPathFinderSize,
+        type_: DeepPathFinderType,
+    ) {
+        let Ok(get_all_spawn_points) = crate::globals()
+            .resolution
+            .get_all_spawn_points_in_sphere
+            .as_ref()
+            .map(|r| std::mem::transmute::<usize, FnGetAllSpawnPointsInSphere>(r.0 as usize))
+        else {
+            return;
+        };
+
+        let batcher = element_ptr!(world => .line_batcher.*).nn().unwrap();
+
+        let mut lines = vec![];
+        let mut points = vec![];
+
+        let game_state = element_ptr!(world => .game_state.* as AFSDGameState);
+        let csg_world = element_ptr!(game_state => .csg_world.*).nn();
+        if let Some(csg_world) = csg_world {
+            if let Some(pathfinder) = element_ptr!(csg_world => .pathfinder.*).nn() {
+                let mut spawn_points = TArray::default();
+                get_all_spawn_points(pathfinder, type_, size, dest, radius, &mut spawn_points);
+
+                for point in spawn_points.as_slice() {
+                    draw_box(
+                        &mut lines,
+                        *point,
+                        FVector::new(30., 30., 30.),
+                        FLinearColor::new(0., 0., 1., 1.),
+                    );
+                }
+            }
+        }
+
+        draw_lines(batcher, &lines);
+        draw_points(batcher, &points);
+    }
+
     pub unsafe fn render(world: NonNull<UWorld>) {
         let batcher = element_ptr!(world => .line_batcher.*).nn().unwrap();
 
@@ -1600,7 +1734,7 @@ mod nav {
         if let Some(csg_world) = csg_world {
             //println!("csg_world {csg_world:?}");
 
-            path_stuff(&mut lines, &mut points, csg_world);
+            //path_stuff(&mut lines, &mut points, csg_world);
             //nav_stuff(&mut lines, &mut points, csg_world);
         }
 
@@ -2139,18 +2273,20 @@ mod nav {
     )
         -> Option<NonNull<FDeepCellStoredServer>>;
 
-    #[derive(Debug)]
+    #[derive(Debug, Default, Clone, Copy)]
     #[repr(u8)]
-    enum DeepPathFinderType {
+    pub enum DeepPathFinderType {
+        #[default]
         Walk = 0x0,
         Fly = 0x1,
         MAX = 0x2,
     }
 
-    #[derive(Debug)]
+    #[derive(Debug, Default, Clone, Copy)]
     #[repr(u8)]
-    enum DeepPathFinderSize {
+    pub enum DeepPathFinderSize {
         Invalid = 0x0,
+        #[default]
         Small = 0x3,
         Medium = 0x2,
         Large = 0x1,
@@ -2167,9 +2303,10 @@ mod nav {
         Failed_UnknownError = 0x6,
     }
 
-    #[derive(Debug)]
+    #[derive(Debug, Default, Clone, Copy)]
     #[repr(u8)]
-    enum DeepPathFinderPreference {
+    pub enum DeepPathFinderPreference {
+        #[default]
         None = 0x0,
         Floor = 0x1,
         Walls = 0x2,

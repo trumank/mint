@@ -129,6 +129,36 @@ impl_resolver_singleton!(PEImage, ProcessMulticastDelegate, |ctx| async {
     Ok(Self(ensure_one(res.into_iter().flatten())?))
 });
 
+#[derive(Debug, PartialEq)]
+#[cfg_attr(
+    feature = "serde-resolvers",
+    derive(serde::Serialize, serde::Deserialize)
+)]
+pub struct GetAllSpawnPointsInSphere(pub usize);
+impl_resolver_singleton!(collect, GetAllSpawnPointsInSphere);
+impl_resolver_singleton!(PEImage, GetAllSpawnPointsInSphere, |ctx| async {
+    let patterns = ["48 89 75 ?? 48 89 75 ?? E8 | ?? ?? ?? ?? B8 01 00 00 00"];
+    let res = join_all(patterns.iter().map(|p| ctx.scan(Pattern::new(p).unwrap()))).await;
+    Ok(Self(try_ensure_one(res.iter().flatten().map(
+        |a| -> Result<usize> { Ok(ctx.image().memory.rip4(*a)?) },
+    ))?))
+});
+
+#[derive(Debug, PartialEq)]
+#[cfg_attr(
+    feature = "serde-resolvers",
+    derive(serde::Serialize, serde::Deserialize)
+)]
+pub struct GetPath(pub usize);
+impl_resolver_singleton!(collect, GetPath);
+impl_resolver_singleton!(PEImage, GetPath, |ctx| async {
+    let patterns = ["49 8B CA 48 8D 45 ?? 48 89 44 24 ?? 48 8D 45 ?? 48 89 44 24 ?? E8 | ?? ?? ??"];
+    let res = join_all(patterns.iter().map(|p| ctx.scan(Pattern::new(p).unwrap()))).await;
+    Ok(Self(try_ensure_one(res.iter().flatten().map(
+        |a| -> Result<usize> { Ok(ctx.image().memory.rip4(*a)?) },
+    ))?))
+});
+
 impl_try_collector! {
     #[derive(Debug, PartialEq)]
     #[cfg_attr(feature = "serde-resolvers", derive(Serialize, Deserialize))]
@@ -193,5 +223,7 @@ impl_collector! {
         pub save_game: SaveGameResolution,
         pub gas_fix: GasFixResolution,
         pub core: CoreResolution,
+        pub get_path: GetPath,
+        pub get_all_spawn_points_in_sphere: GetAllSpawnPointsInSphere,
     }
 }
