@@ -335,13 +335,10 @@ unsafe extern "system" fn exec_get_mod_json(
 ) {
     let stack = stack.as_mut().unwrap();
 
-    let mut ctx: Option<&ue::UObject> = None;
-    let mut ret = ue::FString::default();
-
-    ue::kismet::arg(stack, &mut ctx);
+    let _ctx: Option<&ue::UObject> = stack.arg();
 
     stack.most_recent_property_address = std::ptr::null();
-    ue::kismet::arg(stack, &mut ret);
+    let ret: Option<ue::FString> = stack.arg();
     let ret_address = (stack.most_recent_property_address as *mut ue::FString)
         .as_mut()
         .unwrap();
