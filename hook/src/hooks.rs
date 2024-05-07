@@ -3,6 +3,7 @@
 use std::{
     ffi::c_void,
     path::{Path, PathBuf},
+    ptr::NonNull,
     sync::Arc,
 };
 
@@ -12,7 +13,10 @@ use hook_resolvers::GasFixResolution;
 use mint_lib::DRGInstallationType;
 use windows::Win32::System::Memory::{VirtualProtect, PAGE_EXECUTE_READWRITE};
 
-use crate::{globals, ue};
+use crate::{
+    globals,
+    ue::{self, FLinearColor, UObject},
+};
 
 retour::static_detour! {
     static HookUFunctionBind: unsafe extern "system" fn(*mut ue::UFunction);
@@ -35,10 +39,16 @@ pub type FnLoadGameFromMemory =
 pub unsafe fn initialize() -> Result<()> {
     type ExecFn = unsafe extern "system" fn(*mut ue::UObject, *mut ue::kismet::FFrame, *mut c_void);
 
-    let hooks = [(
-        "/Game/_mint/BPL_MINT.BPL_MINT_C:Get Mod JSON",
-        exec_get_mod_json as ExecFn,
-    )]
+    let hooks = [
+        (
+            "/Game/_mint/BPL_MINT.BPL_MINT_C:Get Mod JSON",
+            exec_get_mod_json as ExecFn,
+        ),
+        (
+            "/Script/Engine.KismetSystemLibrary:PrintString",
+            exec_print_string as ExecFn,
+        ),
+    ]
     .into_iter()
     .collect::<std::collections::HashMap<_, ExecFn>>();
 
@@ -349,6 +359,25 @@ unsafe extern "system" fn exec_get_mod_json(
     ret_address.extend_from_slice(&json.encode_utf16().chain([0]).collect::<Vec<_>>());
 
     std::mem::forget(ret);
+
+    stack.code = stack.code.add(1);
+}
+
+unsafe extern "system" fn exec_print_string(
+    _context: *mut ue::UObject,
+    stack: *mut ue::kismet::FFrame,
+    _result: *mut c_void,
+) {
+    let stack = stack.as_mut().unwrap();
+
+    let _ctx: Option<NonNull<UObject>> = stack.arg();
+    let string: ue::FString = stack.arg();
+    let _print_to_screen: bool = stack.arg();
+    let _print_to_log: bool = stack.arg();
+    let _color: FLinearColor = stack.arg();
+    let _duration: f32 = stack.arg();
+
+    println!("PrintString({string})");
 
     stack.code = stack.code.add(1);
 }
