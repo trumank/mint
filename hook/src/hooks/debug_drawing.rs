@@ -66,6 +66,10 @@ pub fn kismet_hooks() -> &'static [(&'static str, ExecFn)] {
             "/Game/_mint/BPL_CSG.BPL_CSG_C:Get Procedural Mesh Triangles",
             exec_get_mesh_triangles as ExecFn,
         ),
+        (
+            "/Script/Engine.KismetSystemLibrary:PrintString",
+            exec_print_string as ExecFn,
+        ),
     ]
 }
 #[repr(C)]
@@ -1125,6 +1129,25 @@ unsafe extern "system" fn exec_spawn_points(
     if !stack.code.is_null() {
         stack.code = stack.code.add(1);
     }
+}
+
+unsafe extern "system" fn exec_print_string(
+    _context: *mut ue::UObject,
+    stack: *mut ue::kismet::FFrame,
+    _result: *mut c_void,
+) {
+    let stack = stack.as_mut().unwrap();
+
+    let _ctx: Option<NonNull<UObject>> = arg(stack);
+    let string: ue::FString = arg(stack);
+    let _print_to_screen: bool = arg(stack);
+    let _print_to_log: bool = arg(stack);
+    let _color: FLinearColor = arg(stack);
+    let _duration: f32 = arg(stack);
+
+    println!("PrintString({string})");
+
+    stack.code = stack.code.add(1);
 }
 
 #[derive(Debug, Clone)]
