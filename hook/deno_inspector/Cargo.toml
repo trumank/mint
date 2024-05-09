@@ -1,0 +1,14 @@
+[package]
+name = "deno_inspector"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+deno_core = { version = "0.279.0", default-features = false }
+http = "1.0"
+http-body-util = "0.1"
+hyper = { version = "=1.1.0", features = ["full"] }
+tokio = { version = "1.36.0", features = ["full"] }
+uuid = { version = "1.3.0", features = ["v4"] }
+fastwebsockets = { version = "0.6", features = ["upgrade", "unstable-split"] }
+hyper-util = { version = "=0.1.2", features = ["tokio", "server", "server-auto"] }
