@@ -6,7 +6,7 @@ use std::ptr::NonNull;
 use super::*;
 
 bitflags::bitflags! {
-    #[derive(Debug, Clone)]
+    #[derive(Debug, Clone, Copy)]
     #[repr(C)]
     pub struct EObjectFlags: u32 {
         const RF_NoFlags = 0x0000;
@@ -40,7 +40,7 @@ bitflags::bitflags! {
         const RF_WillBeLoaded = 0x08000000;
     }
 
-    #[derive(Debug, Clone)]
+    #[derive(Debug, Clone, Copy)]
     #[repr(C)]
     pub struct EFunctionFlags: u32 {
         const FUNC_None = 0x0000;
@@ -77,7 +77,7 @@ bitflags::bitflags! {
         const FUNC_AllFlags = 0xffffffff;
     }
 
-    #[derive(Debug, Clone)]
+    #[derive(Debug, Clone, Copy)]
     #[repr(C)]
     pub struct EClassFlags: i32 {
         const CLASS_None = 0x0000;
@@ -116,7 +116,7 @@ bitflags::bitflags! {
     }
 
 
-    #[derive(Debug, Clone)]
+    #[derive(Debug, Clone, Copy)]
     #[repr(C)]
     pub struct EClassCastFlags : u64
     {
@@ -181,7 +181,7 @@ bitflags::bitflags! {
         const CASTCLASS_UVerseVMClass = 0x0400000000000000;
     }
 
-    #[derive(Debug, Clone)]
+    #[derive(Debug, Clone, Copy)]
     #[repr(C)]
     pub struct  EPropertyFlags: u64 {
         const CPF_None = 0x0000;

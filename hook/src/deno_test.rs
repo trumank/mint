@@ -1,6 +1,3 @@
-//use deno_runtime::deno_core;
-//use deno_runtime::deno_core::*;
-
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::ffi::c_void;
@@ -13,64 +10,6 @@ use deno_core::*;
 use element_ptr::element_ptr;
 
 use crate::ue::{self, UClassTrait, UObjectBaseTrait, UObjectTrait, NN as _};
-
-struct FVector {
-    x: f32,
-    y: f32,
-    z: f32,
-}
-
-struct ExternalObject(RefCell<u32>);
-struct ExternalVector(RefCell<Vec<u32>>);
-
-external!(ExternalObject, "test external object");
-external!(ExternalVector, "test external object");
-
-#[op2(fast)]
-fn op_xyz() {
-    println!("HUH");
-}
-
-#[op2(fast)]
-fn op_ext_obj() -> *const std::ffi::c_void {
-    // This operation is safe because we know
-    ExternalPointer::new(ExternalObject(RefCell::new(42))).into_raw()
-}
-#[op2(fast)]
-fn op_ext_obj_process(ptr: *const std::ffi::c_void) {
-    let ptr = ExternalPointer::<ExternalObject>::from_raw(ptr);
-    *(unsafe { ptr.unsafely_deref() }.0.borrow_mut()) += 1;
-}
-#[op2(fast)]
-fn op_ext_obj_take(ptr: *const std::ffi::c_void) -> u32 {
-    let ptr = ExternalPointer::<ExternalObject>::from_raw(ptr);
-    *unsafe { ptr.unsafely_take() }.0.borrow()
-}
-
-#[op2(fast)]
-fn op_ext_vec() -> *const std::ffi::c_void {
-    // This operation is safe because we know
-    ExternalPointer::new(ExternalVector(RefCell::new(vec![]))).into_raw()
-}
-#[op2(fast)]
-fn op_ext_vec_process(ptr: *const std::ffi::c_void) {
-    let ptr = ExternalPointer::<ExternalVector>::from_raw(ptr);
-    let mut buf = unsafe { ptr.unsafely_deref() }.0.borrow_mut();
-    let next = buf.len() as u32;
-    buf.push(next);
-}
-#[op2]
-#[serde]
-fn op_ext_vec_take(ptr: *const std::ffi::c_void) -> Vec<u32> {
-    let ptr = ExternalPointer::<ExternalVector>::from_raw(ptr);
-    unsafe { ptr.unsafely_take() }.0.borrow().to_vec()
-}
-
-static mut DATA: FVector = FVector {
-    x: 1.,
-    y: 2.,
-    z: 4.,
-};
 
 struct UEContext {
     templates: HashMap<NonNull<ue::UClass>, v8::Global<v8::FunctionTemplate>>,
@@ -112,18 +51,18 @@ impl UEContext {
                         .contains(ue::EClassCastFlags::CASTCLASS_FProperty)
                     {
                         let prop: NonNull<ue::FProperty> = field.cast();
-
-                        let name = element_ptr!(field => .name_private.*);
-                        let string = name.to_string();
-
-                        let name = v8::String::new(scope, &string).unwrap();
-
                         let prop_data = v8::External::new(scope, prop.as_ptr() as *mut c_void);
+
+                        let name = v8::String::new(
+                            scope,
+                            &element_ptr!(field => .name_private.*).to_string(),
+                        )
+                        .unwrap();
 
                         template.set_accessor_with_configuration(
                             name.into(),
-                            v8::AccessorConfiguration::new(get_x)
-                                .setter(set_x)
+                            v8::AccessorConfiguration::new(get_prop)
+                                .setter(set_prop)
                                 .data(prop_data.into()),
                         );
                     }
@@ -182,9 +121,9 @@ fn js_obj<'s>(
         instance
     }
 }
-fn get_x(
+fn get_prop(
     scope: &mut v8::HandleScope,
-    property: v8::Local<v8::Name>,
+    _property: v8::Local<v8::Name>,
     args: v8::PropertyCallbackArguments,
     mut ret: v8::ReturnValue,
 ) {
@@ -194,136 +133,125 @@ fn get_x(
         (ext.value() as *const ue::FProperty).as_ref().unwrap()
     };
 
-    //dbg!(prop);
+    let prop_class = unsafe { prop.ffield.class_private.as_ref().unwrap() };
+
+    unsafe {
+        let external = v8::Local::<v8::External>::cast(this.get_internal_field(scope, 0).unwrap());
+        let ptr = external.value().byte_offset(prop.offset_internal as isize) as *mut c_void;
+
+        let flags = prop_class.cast_flags;
+
+        if flags.contains(ue::EClassCastFlags::CASTCLASS_FObjectProperty) {
+            if let Some(obj) = NonNull::new(*(ptr as *mut *mut ue::UObject)) {
+                ret.set(js_obj(scope, obj).into());
+            } else {
+                ret.set(v8::null(scope).into());
+            }
+        } else if flags.contains(ue::EClassCastFlags::CASTCLASS_FBoolProperty) {
+            // TODO bitfields
+            ret.set(v8::Boolean::new(scope, 0 != *(ptr as *mut u8)).into());
+        } else if flags.contains(ue::EClassCastFlags::CASTCLASS_FByteProperty) {
+            ret.set(v8::Number::new(scope, *(ptr as *mut i8) as f64).into());
+        } else if flags.contains(ue::EClassCastFlags::CASTCLASS_FIntProperty) {
+            ret.set(v8::Number::new(scope, *(ptr as *mut i32) as f64).into());
+        } else if flags.contains(ue::EClassCastFlags::CASTCLASS_FDoubleProperty) {
+            ret.set(v8::Number::new(scope, *(ptr as *mut f64)).into());
+        } else if flags.contains(ue::EClassCastFlags::CASTCLASS_FFloatProperty) {
+            ret.set(v8::Number::new(scope, *(ptr as *mut f32) as f64).into());
+        } else if flags.contains(ue::EClassCastFlags::CASTCLASS_FStrProperty) {
+            let s = (ptr as *mut ue::FString).as_ref().unwrap().to_string();
+            ret.set(v8::String::new(scope, &s).unwrap().into());
+        } else if flags.contains(ue::EClassCastFlags::CASTCLASS_FNameProperty) {
+            let s = (ptr as *mut ue::FName).as_ref().unwrap().to_string();
+            ret.set(v8::String::new(scope, &s).unwrap().into());
+        } else {
+            //dbg!(prop);
+            //dbg!(prop_class);
+
+            ret.set(
+                v8::String::new(scope, &format!("<TODO> {:?}", flags))
+                    .unwrap()
+                    .into(),
+            );
+        }
+    }
+}
+fn set_prop(
+    scope: &mut v8::HandleScope,
+    _property: v8::Local<v8::Name>,
+    value: v8::Local<v8::Value>,
+    args: v8::PropertyCallbackArguments,
+    mut _ret: v8::ReturnValue,
+) {
+    let this = args.this();
+    let prop = unsafe {
+        let ext = v8::Local::<v8::External>::cast(args.data());
+        (ext.value() as *const ue::FProperty).as_ref().unwrap()
+    };
+    dbg!(value);
 
     let prop_class = unsafe { prop.ffield.class_private.as_ref().unwrap() };
 
-    //dbg!(prop_class);
+    unsafe {
+        let external = v8::Local::<v8::External>::cast(this.get_internal_field(scope, 0).unwrap());
+        let ptr = external.value().byte_offset(prop.offset_internal as isize) as *mut c_void;
 
-    let external = this.get_internal_field(scope, 0).unwrap();
-    let external = unsafe { v8::Local::<v8::External>::cast(external) };
-    let obj = unsafe {
-        NonNull::new(
-            *(external.value().byte_offset(prop.offset_internal as isize)
-                as *const *mut ue::UObject),
-        )
-    };
+        let flags = prop_class.cast_flags;
 
-    if prop_class
-        .cast_flags
-        .contains(ue::EClassCastFlags::CASTCLASS_FObjectProperty)
-    {
-        if let Some(obj) = obj {
-            ret.set(js_obj(scope, obj).into());
+        //if flags.contains(ue::EClassCastFlags::CASTCLASS_FObjectProperty) {
+        //    if let Some(obj) = NonNull::new(*(ptr as *mut *mut ue::UObject)) {
+        //        ret.set(js_obj(scope, obj).into());
+        //    } else {
+        //        ret.set(v8::null(scope).into());
+        //    }
+        //} else
+        //if flags.contains(ue::EClassCastFlags::CASTCLASS_FBoolProperty) {
+        //    // TODO bitfields
+        //    ret.set(v8::Boolean::new(scope, 0 != *(ptr as *mut u8)).into());
+        //} else
+        if flags.contains(ue::EClassCastFlags::CASTCLASS_FByteProperty) {
+            if let Some(num) = value.number_value(scope) {
+                *(ptr as *mut i8) = num as i8;
+            }
+        } else if flags.contains(ue::EClassCastFlags::CASTCLASS_FIntProperty) {
+            if let Some(num) = value.number_value(scope) {
+                *(ptr as *mut i32) = num as i32;
+            }
+        } else if flags.contains(ue::EClassCastFlags::CASTCLASS_FDoubleProperty) {
+            if let Some(num) = value.number_value(scope) {
+                *(ptr as *mut f64) = num;
+            }
+        } else if flags.contains(ue::EClassCastFlags::CASTCLASS_FFloatProperty) {
+            if let Some(num) = value.number_value(scope) {
+                *(ptr as *mut f32) = num as f32;
+            }
+        } else if flags.contains(ue::EClassCastFlags::CASTCLASS_FStrProperty) {
+            let prop = (ptr as *mut ue::FString).as_mut().unwrap();
+            prop.clear();
+            prop.extend_from_slice(
+                &value
+                    .to_rust_string_lossy(scope)
+                    .encode_utf16()
+                    .chain([0])
+                    .collect::<Vec<_>>(),
+            );
+        //} else if flags.contains(ue::EClassCastFlags::CASTCLASS_FNameProperty) {
+        //    let s = (ptr as *mut ue::FName).as_ref().unwrap().to_string();
+        //    ret.set(v8::String::new(scope, &s).unwrap().into());
         } else {
-            ret.set(v8::null(scope).into());
-        }
-    } else {
-        ret.set(v8::String::new(scope, "<TODO>").unwrap().into());
-    }
-}
-fn set_x(
-    scope: &mut v8::HandleScope,
-    property: v8::Local<v8::Name>,
-    value: v8::Local<v8::Value>,
-    args: v8::PropertyCallbackArguments,
-    mut ret: v8::ReturnValue,
-) {
-    if value.is_number() {
-        if let Some(num) = value.to_number(scope) {
-            let this = args.this();
+            //dbg!(prop);
+            //dbg!(prop_class);
 
-            println!("num fields {}", this.internal_field_count());
-
-            let external = this.get_internal_field(scope, 0).unwrap();
-            let external = unsafe { v8::Local::<v8::External>::cast(external) };
-            let vec = unsafe { (external.value() as *mut FVector).as_mut().unwrap() };
-            vec.x = num.value() as f32;
+            println!("TODO");
+            //ret.set(v8::String::new(scope, &format!("<TODO> {:?}", flags)).unwrap().into());
         }
     }
-
-    //ret.set(v8::Number::new(scope, vec.x.into()).into());
 }
 
 #[op2]
 fn op_ext_uobject<'s>(scope: &mut v8::HandleScope<'s>, addr: f64) -> v8::Local<'s, v8::Object> {
-    let context = state_from_scope(scope);
-
     let obj: Option<NonNull<ue::UObject>> = NonNull::new((addr as u64) as *mut ue::UObject);
-    return js_obj(scope, obj.unwrap());
-
-    //context.templates.
-
-    //let obj = v8::Object::new(scope);
-    //let key = v8::String::new(scope, "key").unwrap();
-    //let value = v8::String::new(scope, "value").unwrap();
-    //obj.set(scope, key.into(), value.into());
-
-    //let key = v8::String::new(scope, "key2").unwrap();
-    //let value = v8::External::new(
-    //    scope,
-    //    ExternalPointer::new(ExternalVector(RefCell::new(vec![1])))
-    //        .into_raw()
-    //        .cast_mut(),
-    //);
-    //obj.set(scope, key.into(), value.into());
-
-    let x_name = v8::String::new(scope, "x").unwrap();
-
-    let vector_template = v8::ObjectTemplate::new(scope);
-    vector_template.set_internal_field_count(1);
-    vector_template.set_accessor_with_setter(x_name.into(), get_x, set_x);
-
-    let instance = vector_template.new_instance(scope).unwrap();
-    instance.set_internal_field(
-        0,
-        v8::External::new(scope, unsafe {
-            std::ptr::addr_of_mut!(DATA) as *mut std::ffi::c_void
-        })
-        .into(),
-    );
-
-    println!("num fields {}", instance.internal_field_count());
-
-    //instance.set_accessor(scope, v8::String::new(scope, "x").unwrap().into(), get_x);
-    //instance.set_accessor(scope, v8::String::new(scope, "x").unwrap().into(), get_x);
-    //vector_template.set
-    //file_template->Set(isolate, "read", FunctionTemplate::New(isolate, Shell::ReadFile));
-
-    instance
-    //obj
-}
-
-#[allow(clippy::needless_pass_by_value)] // this function should follow the callback type
-fn request_prop_handler(
-    scope: &mut v8::HandleScope,
-    key: v8::Local<v8::Name>,
-    args: v8::PropertyCallbackArguments,
-    mut rv: v8::ReturnValue,
-) {
-    //let this = args.this();
-    //let external = Self::unwrap_request(scope, this);
-
-    //assert!(
-    //  !external.is_null(),
-    //  "the pointer to Box<dyn HttpRequest> should not be null"
-    //);
-
-    //let request = unsafe { &mut *external };
-
-    //let key = key.to_string(scope).unwrap().to_rust_string_lossy(scope);
-
-    //let value = match &*key {
-    //  "path" => request.path(),
-    //  "userAgent" => request.user_agent(),
-    //  "referrer" => request.referrer(),
-    //  "host" => request.host(),
-    //  _ => {
-    //    return;
-    //  }
-    //};
-
-    //rv.set(v8::String::new(scope, value).unwrap().into());
+    js_obj(scope, obj.unwrap())
 }
 
 #[op2]
@@ -364,17 +292,7 @@ pub fn main() {
 async fn main_async() -> Result<(), AnyError> {
     println!("v8 version: {}", deno_core::v8_version());
 
-    const OPS: &[OpDecl] = &[
-        op_xyz(),
-        op_ext_obj(),
-        op_ext_obj_take(),
-        op_ext_obj_process(),
-        op_ext_vec(),
-        op_ext_vec_take(),
-        op_ext_vec_process(),
-        op_ext_uobject(),
-        op_ext_callback(),
-    ];
+    const OPS: &[OpDecl] = &[op_ext_uobject(), op_ext_callback()];
     let ext = Extension {
         name: "my_ext",
         ops: std::borrow::Cow::Borrowed(&OPS),
@@ -388,7 +306,6 @@ async fn main_async() -> Result<(), AnyError> {
         ..Default::default()
     });
 
-    let ctx = runtime.main_context().clone();
     runtime.main_context().open(runtime.v8_isolate()).set_slot(
         runtime.v8_isolate(),
         Rc::new(RefCell::new(UEContext {
