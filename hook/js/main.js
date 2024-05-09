@@ -18,10 +18,11 @@ if (globalThis.Deno) {
    }
    const asdf = "asdf";
    const msg = encode("calling a rust function from deno");
-   const resUi8 = Deno.core.ops.op_xyz(msg);
 
-
-   console.log(resUi8);
+   if (Deno.core.op_xyz) {
+      const resUi8 = Deno.core.ops.op_xyz(msg);
+      console.log(resUi8);
+   }
 
    console.log("WHAT asdfd asdfds afdsaf sf");
 }
@@ -63,6 +64,20 @@ let proxy1 = new Proxy(target, handler1);
 
 
 console.log(proxy1);
+
+
+function setInterval(callback, delay = 0) {
+  return Deno.core.queueUserTimer(
+    Deno.core.getTimerDepth() + 1,
+    true,
+    delay,
+    callback,
+  );
+}
+
+
+
+setInterval(() => console.log('asdf'), 1000);
 
 debugger;
 

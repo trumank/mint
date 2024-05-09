@@ -4,10 +4,11 @@ use std::ffi::c_void;
 use std::ptr::NonNull;
 use std::rc::Rc;
 
-use deno_core::error::AnyError;
 use deno_core::*;
+use deno_core::{error::AnyError, unsync::MaskFutureAsSend};
 
 use element_ptr::element_ptr;
+use tokio::task;
 
 use crate::ue::{self, UClassTrait, UObjectBaseTrait, UObjectTrait, NN as _};
 
@@ -277,16 +278,28 @@ pub fn op_ext_callback<'s>(
 //deno_ops()
 
 pub fn main() {
-    // Create the runtime
     let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_time()
         .build()
         .unwrap();
 
-    // Spawn a future onto the runtime
-    rt.block_on(async {
-        println!("now running on a worker thread");
-        main_async().await.unwrap();
+    let mut task = rt.spawn(unsafe {
+        MaskFutureAsSend::new(async {
+            println!("now running on a worker thread");
+            main_async().await.unwrap();
+        })
     });
+
+    loop {
+        println!("running loop");
+        rt.block_on(async {
+            tokio::select! {
+                _ = &mut task => Some(Ok::<(), tokio::task::JoinError>(())),
+                _ = tokio::task::yield_now() => None,
+            }
+        });
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
 }
 
 async fn main_async() -> Result<(), AnyError> {
@@ -342,7 +355,7 @@ async fn main_async() -> Result<(), AnyError> {
     let file_path = "./main.js";
     let main_module = deno_core::resolve_path(
         "main.js",
-        std::path::Path::new("z:/home/truman/projects/drg-modding/tools/mint/hook/js/"),
+        std::path::Path::new("/home/truman/projects/drg-modding/tools/mint/hook/js/"),
     )?;
 
     let mod_id = runtime.load_main_es_module(&main_module).await?;
