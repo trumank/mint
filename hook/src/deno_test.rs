@@ -72,52 +72,77 @@ static mut DATA: FVector = FVector {
     z: 4.,
 };
 
-//fn get_templates() -> &'static mut HashMap<*const c_void, v8::ObjectTemplate> {
-//}
-
 struct UEContext {
-    templates: HashMap<NonNull<ue::UClass>, v8::Global<v8::ObjectTemplate>>,
+    templates: HashMap<NonNull<ue::UClass>, v8::Global<v8::FunctionTemplate>>,
 }
 impl UEContext {
     fn template<'s>(
         &mut self,
         scope: &mut v8::HandleScope<'s>,
         class: NonNull<ue::UClass>,
-    ) -> &v8::Global<v8::ObjectTemplate> {
-        self.templates.entry(class).or_insert_with(|| unsafe {
-            println!("NEW TEMPLATE");
-            let ustruct = class.ustruct();
+    ) -> v8::Global<v8::FunctionTemplate> {
+        if let Some(template) = self.templates.get(&class) {
+            template.clone()
+        } else {
+            let template = unsafe {
+                println!("NEW TEMPLATE");
+                let ustruct = class.ustruct();
 
-            let template = v8::ObjectTemplate::new(scope);
-            template.set_internal_field_count(1);
-
-            let mut next_field: Option<NonNull<ue::FField>> =
-                element_ptr!(ustruct => .child_properties.*).nn();
-            while let Some(field) = next_field {
-                if element_ptr!(field => .class_private.*.cast_flags.*)
-                    .contains(ue::EClassCastFlags::CASTCLASS_FProperty)
-                {
-                    let prop: NonNull<ue::FProperty> = field.cast();
-
-                    let name = element_ptr!(field => .name_private.*);
-                    let string = name.to_string();
-
-                    let name = v8::String::new(scope, &string).unwrap();
-
-                    let prop_data = v8::External::new(scope, prop.as_ptr() as *mut c_void);
-
-                    template.set_accessor_with_configuration(
-                        name.into(),
-                        v8::AccessorConfiguration::new(get_x)
-                            .setter(set_x)
-                            .data(prop_data.into()),
-                    );
+                fn callback<'s>(
+                    _: &mut v8::HandleScope<'s>,
+                    _: v8::FunctionCallbackArguments<'s>,
+                    _: v8::ReturnValue<'_>,
+                ) {
+                    unimplemented!("function callback")
                 }
-                next_field = element_ptr!(field => .next.*).nn();
-            }
 
-            v8::Global::new(scope, template)
-        })
+                let func_template = v8::FunctionTemplate::new(scope, callback);
+
+                let name = element_ptr!(class.uobject_base() => .name_private.*).to_string();
+
+                func_template.set_class_name(v8::String::new(scope, &name).unwrap().into());
+
+                let template = func_template.instance_template(scope);
+                template.set_internal_field_count(1);
+
+                let mut next_field: Option<NonNull<ue::FField>> =
+                    element_ptr!(ustruct => .child_properties.*).nn();
+                while let Some(field) = next_field {
+                    if element_ptr!(field => .class_private.*.cast_flags.*)
+                        .contains(ue::EClassCastFlags::CASTCLASS_FProperty)
+                    {
+                        let prop: NonNull<ue::FProperty> = field.cast();
+
+                        let name = element_ptr!(field => .name_private.*);
+                        let string = name.to_string();
+
+                        let name = v8::String::new(scope, &string).unwrap();
+
+                        let prop_data = v8::External::new(scope, prop.as_ptr() as *mut c_void);
+
+                        template.set_accessor_with_configuration(
+                            name.into(),
+                            v8::AccessorConfiguration::new(get_x)
+                                .setter(set_x)
+                                .data(prop_data.into()),
+                        );
+                    }
+                    next_field = element_ptr!(field => .next.*).nn();
+                }
+
+                // TODO is this always a UClass?
+                if let Some(parent_class) =
+                    element_ptr!(ustruct => .super_struct.* as ue::UClass).nn()
+                {
+                    let parent = self.template(scope, parent_class);
+                    func_template.inherit(v8::Local::new(scope, parent));
+                }
+
+                v8::Global::new(scope, func_template)
+            };
+            self.templates.insert(class, template.clone());
+            template
+        }
     }
 }
 
@@ -143,7 +168,11 @@ fn js_obj<'s>(
         let mut state_mut = state.borrow_mut();
         let template = state_mut.template(scope, class);
 
-        let instance = template.open(scope).new_instance(scope).unwrap();
+        let instance = template
+            .open(scope)
+            .instance_template(scope)
+            .new_instance(scope)
+            .unwrap();
 
         instance.set_internal_field(
             0,
