@@ -24,6 +24,7 @@ retour::static_detour! {
     static DoesSaveGameExist: unsafe extern "system" fn(*const FString, i32) -> bool;
     static USessionHandlingFSDFillSessionSetting: unsafe extern "system" fn(*const c_void, *mut c_void, bool);
     static UObjectTemperatureComponentTimerCallback: unsafe extern "system" fn(*mut c_void);
+    pub static UGameEngineTick: unsafe extern "system" fn(*mut c_void, f32, bool);
 }
 
 #[repr(C)]

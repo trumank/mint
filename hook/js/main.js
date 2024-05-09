@@ -66,20 +66,19 @@ let proxy1 = new Proxy(target, handler1);
 console.log(proxy1);
 
 
-function setInterval(callback, delay = 0) {
-  return Deno.core.queueUserTimer(
-    Deno.core.getTimerDepth() + 1,
-    true,
-    delay,
-    callback,
-  );
-}
+globalThis.setInterval = (callback, delay = 0) => Deno.core.queueUserTimer(
+   Deno.core.getTimerDepth() + 1,
+   true,
+   delay,
+   callback
+)
 
 
 
-setInterval(() => console.log('asdf'), 1000);
+//setInterval(() => console.log('asdf'), 1000);
+setInterval(() => console.log('some time long in the future to keep the VM alive'), 1000000);
 
-debugger;
+//debugger;
 
 //throw new Error(`result: ${decodeAscii(resUi8)}`);
 //import {

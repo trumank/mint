@@ -1,10 +1,11 @@
+pub mod deno_test;
 mod hooks;
 mod ue;
-pub mod deno_test;
 
 use std::{io::BufReader, path::Path};
 
 use anyhow::{Context, Result};
+use deno_core::futures::FutureExt;
 use fs_err as fs;
 use hooks::{FnLoadGameFromMemory, FnSaveGameToMemory};
 use mint_lib::mod_info::Meta;
@@ -158,11 +159,64 @@ unsafe fn patch() -> Result<()> {
 
     info!("hook initialized");
 
-    std::thread::spawn(|| {
-        deno_test::main();
-    });
+    //std::thread::spawn(|| {
+    //    deno_test::main();
+    //});
 
     //loop{std::thread::sleep(std::time::Duration::from_secs(1))};
+
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_time()
+        .build()
+        .unwrap();
+
+    let task = rt.spawn(async {
+        println!("now running on a worker thread");
+        unsafe {
+            deno_core::unsync::MaskFutureAsSend::new(deno_test::main_async())
+                .await
+                .into_inner()
+                .unwrap();
+        }
+    });
+
+    type Handle = tokio::task::JoinHandle<()>;
+
+    thread_local! {
+        static TASK: std::cell::RefCell<Option<Handle>> = Default::default();
+    }
+    TASK.with(move |local_task| {
+        *local_task.borrow_mut() = Some(task);
+    });
+
+    hooks::UGameEngineTick
+        .initialize(
+            std::mem::transmute(
+                globals()
+                    .resolution
+                    .core
+                    .as_ref()
+                    .unwrap()
+                    .game_engine_tick
+                    .0,
+            ),
+            move |game_engine, delta_seconds, idle_mode| {
+                hooks::UGameEngineTick.call(game_engine, delta_seconds, idle_mode);
+                TASK.with(|local_task| {
+                    let mut binding = local_task.borrow_mut();
+                    rt.block_on(async {
+                        tokio::select! {
+                            _ = binding.as_mut().unwrap() => Some(Ok::<(), tokio::task::JoinError>(())),
+                            _ = tokio::task::yield_now() => None,
+                        }
+                    });
+                });
+            },
+        )
+        .unwrap();
+    hooks::UGameEngineTick.enable().unwrap();
+
+    //deno_test::fake_event_loop();
 
     Ok(())
 }

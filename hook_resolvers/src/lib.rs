@@ -1,6 +1,7 @@
 use patternsleuth::resolvers::futures::future::join_all;
 use patternsleuth::resolvers::unreal::blueprint_library::UFunctionBind;
 use patternsleuth::resolvers::unreal::fname::FNameToString;
+use patternsleuth::resolvers::unreal::game_loop::UGameEngineTick;
 use patternsleuth::resolvers::unreal::gmalloc::GMalloc;
 use patternsleuth::resolvers::unreal::kismet::{FFrameStep, FFrameStepExplicitProperty};
 use patternsleuth::resolvers::unreal::save_game::{
@@ -221,6 +222,7 @@ impl_try_collector! {
         pub ufunction_bind: UFunctionBind,
         pub fframe_step: FFrameStep,
         pub fframe_step_explicit_property: FFrameStepExplicitProperty,
+        pub game_engine_tick: UGameEngineTick,
     }
 }
 

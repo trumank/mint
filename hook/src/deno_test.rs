@@ -99,7 +99,7 @@ fn js_obj<'s>(
     obj: NonNull<ue::UObject>,
 ) -> v8::Local<'s, v8::Object> {
     unsafe {
-        println!("OBJ: {}", obj.uobject_base().get_path_name(None));
+        //println!("OBJ: {}", obj.uobject_base().get_path_name(None));
 
         let class = obj.uobject_base().class().unwrap();
 
@@ -189,7 +189,7 @@ fn set_prop(
         let ext = v8::Local::<v8::External>::cast(args.data());
         (ext.value() as *const ue::FProperty).as_ref().unwrap()
     };
-    dbg!(value);
+    //dbg!(value);
 
     let prop_class = unsafe { prop.ffield.class_private.as_ref().unwrap() };
 
@@ -302,7 +302,47 @@ pub fn main() {
     }
 }
 
-async fn main_async() -> Result<(), AnyError> {
+pub fn fake_event_loop() {
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_time()
+        .build()
+        .unwrap();
+
+    let task = rt.spawn(async {
+        println!("now running on a worker thread");
+        unsafe {
+            deno_core::unsync::MaskFutureAsSend::new(main_async())
+                .await
+                .into_inner()
+                .unwrap();
+        }
+    });
+
+    type Handle = tokio::task::JoinHandle<()>;
+
+    thread_local! {
+        static TASK: std::cell::RefCell<Option<Handle>> = Default::default();
+    }
+    TASK.with(move |local_task| {
+        *local_task.borrow_mut() = Some(task);
+    });
+
+    loop {
+        println!("fake event loop");
+        TASK.with(|local_task| {
+            let mut binding = local_task.borrow_mut();
+            rt.block_on(async {
+                tokio::select! {
+                    _ = binding.as_mut().unwrap() => Some(Ok::<(), tokio::task::JoinError>(())),
+                    _ = tokio::task::yield_now() => None,
+                }
+            });
+        });
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+}
+
+pub async fn main_async() -> Result<(), AnyError> {
     println!("v8 version: {}", deno_core::v8_version());
 
     const OPS: &[OpDecl] = &[op_ext_uobject(), op_ext_callback()];
@@ -346,17 +386,17 @@ async fn main_async() -> Result<(), AnyError> {
     let inspector = runtime.inspector();
     op_state.borrow_mut().put(inspector);
 
-    runtime
-        .inspector()
-        .borrow_mut()
-        .wait_for_session_and_break_on_next_statement();
+    //runtime
+    //    .inspector()
+    //    .borrow_mut()
+    //    .wait_for_session_and_break_on_next_statement();
 
-    //let file_path = "file:///home/truman/projects/drg-modding/tools/mint/hook/js/main.js";
-    let file_path = "./main.js";
-    let main_module = deno_core::resolve_path(
-        "main.js",
-        std::path::Path::new("/home/truman/projects/drg-modding/tools/mint/hook/js/"),
-    )?;
+    #[cfg(target_os = "windows")]
+    let path = std::path::Path::new("z:/home/truman/projects/drg-modding/tools/mint/hook/js/");
+    #[cfg(target_os = "linux")]
+    let path = std::path::Path::new("/home/truman/projects/drg-modding/tools/mint/hook/js/");
+
+    let main_module = deno_core::resolve_path("main.js", path)?;
 
     let mod_id = runtime.load_main_es_module(&main_module).await?;
     let result = runtime.mod_evaluate(mod_id);
