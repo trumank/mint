@@ -11,7 +11,7 @@ pub use name::*;
 pub use object::*;
 pub use string::*;
 
-use std::ffi::c_void;
+use std::{ffi::c_void, ptr::NonNull};
 
 use crate::globals;
 
@@ -25,7 +25,7 @@ pub type FnFFrameStepExplicitProperty = unsafe extern "system" fn(
 pub type FnFNameToString = unsafe extern "system" fn(&FName, &mut FString);
 
 pub type FnUObjectBaseUtilityGetPathName =
-    unsafe extern "system" fn(&UObjectBase, Option<&UObject>, &mut FString);
+    unsafe extern "system" fn(NonNull<UObjectBase>, Option<NonNull<UObject>>, &mut FString);
 
 #[derive(Debug, Default)]
 #[repr(C)]

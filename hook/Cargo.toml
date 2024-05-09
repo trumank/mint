@@ -8,7 +8,7 @@ edition.workspace = true
 
 [lib]
 path = "src/lib.rs"
-crate-type = ["cdylib"]
+crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 anyhow.workspace = true
@@ -19,7 +19,7 @@ postcard.workspace = true
 fs-err.workspace = true
 tracing.workspace = true
 patternsleuth = { workspace = true, features = ["process-internal", "image-pe"] }
-retour = { version = "0.3.1", features = ["static-detour"] }
+retour = { git = "https://github.com/Hpmason/retour-rs", features = ["static-detour"] }
 hook_resolvers = { path = "../hook_resolvers" }
 windows = { version = "0.52.0", features = [
   "Win32_Foundation",
@@ -32,3 +32,6 @@ mint_lib = { path = "../mint_lib" }
 bitflags = "2.4.1"
 widestring = "1.0.2"
 tokio = { workspace = true, features = ["full"] }
+element-ptr = "0.0.2"
+deno_core = { version = "0.279.0", default-features = false }
+deno_inspector = { version = "0.1.0", path = "deno_inspector" }

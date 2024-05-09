@@ -1,5 +1,6 @@
 mod hooks;
 mod ue;
+pub mod deno_test;
 
 use std::{io::BufReader, path::Path};
 
@@ -156,6 +157,12 @@ unsafe fn patch() -> Result<()> {
     hooks::initialize()?;
 
     info!("hook initialized");
+
+    std::thread::spawn(|| {
+        deno_test::main();
+    });
+
+    //loop{std::thread::sleep(std::time::Duration::from_secs(1))};
 
     Ok(())
 }
