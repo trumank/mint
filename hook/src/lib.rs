@@ -159,12 +159,20 @@ unsafe fn patch() -> Result<()> {
 
     info!("hook initialized");
 
-    //std::thread::spawn(|| {
-    //    deno_test::main();
-    //});
+    init_js();
 
-    //loop{std::thread::sleep(std::time::Duration::from_secs(1))};
+    Ok(())
+}
 
+struct JsContextHandle {
+    task: tokio::task::JoinHandle<()>,
+}
+
+thread_local! {
+    static JS_CONTEXT: std::cell::RefCell<Option<JsContextHandle>> = Default::default();
+}
+
+unsafe fn init_js() {
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_time()
         .build()
@@ -180,13 +188,8 @@ unsafe fn patch() -> Result<()> {
         }
     });
 
-    type Handle = tokio::task::JoinHandle<()>;
-
-    thread_local! {
-        static TASK: std::cell::RefCell<Option<Handle>> = Default::default();
-    }
-    TASK.with(move |local_task| {
-        *local_task.borrow_mut() = Some(task);
+    JS_CONTEXT.with_borrow_mut(move |ctx| {
+        *ctx = Some(JsContextHandle { task });
     });
 
     hooks::UGameEngineTick
@@ -202,11 +205,10 @@ unsafe fn patch() -> Result<()> {
             ),
             move |game_engine, delta_seconds, idle_mode| {
                 hooks::UGameEngineTick.call(game_engine, delta_seconds, idle_mode);
-                TASK.with(|local_task| {
-                    let mut binding = local_task.borrow_mut();
+                JS_CONTEXT.with_borrow_mut(|ctx| {
                     rt.block_on(async {
                         tokio::select! {
-                            _ = binding.as_mut().unwrap() => Some(Ok::<(), tokio::task::JoinError>(())),
+                            _ = &mut ctx.as_mut().unwrap().task => Some(Ok::<(), tokio::task::JoinError>(())),
                             _ = tokio::task::yield_now() => None,
                         }
                     });
@@ -215,8 +217,4 @@ unsafe fn patch() -> Result<()> {
         )
         .unwrap();
     hooks::UGameEngineTick.enable().unwrap();
-
-    //deno_test::fake_event_loop();
-
-    Ok(())
 }
