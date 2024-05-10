@@ -4,8 +4,8 @@ use std::ffi::c_void;
 use std::ptr::NonNull;
 use std::rc::Rc;
 
+use deno_core::error::AnyError;
 use deno_core::*;
-use deno_core::{error::AnyError, unsync::MaskFutureAsSend};
 
 use element_ptr::element_ptr;
 
@@ -39,7 +39,7 @@ impl UEContext {
 
                 let name = element_ptr!(class.uobject_base() => .name_private.*).to_string();
 
-                func_template.set_class_name(v8::String::new(scope, &name).unwrap().into());
+                func_template.set_class_name(v8::String::new(scope, &name).unwrap());
 
                 let template = func_template.instance_template(scope);
                 template.set_internal_field_count(1);
@@ -137,7 +137,7 @@ fn get_prop(
 
     unsafe {
         let external = v8::Local::<v8::External>::cast(this.get_internal_field(scope, 0).unwrap());
-        let ptr = external.value().byte_offset(prop.offset_internal as isize) as *mut c_void;
+        let ptr = external.value().byte_offset(prop.offset_internal as isize);
 
         let flags = prop_class.cast_flags;
 
@@ -194,7 +194,7 @@ fn set_prop(
 
     unsafe {
         let external = v8::Local::<v8::External>::cast(this.get_internal_field(scope, 0).unwrap());
-        let ptr = external.value().byte_offset(prop.offset_internal as isize) as *mut c_void;
+        let ptr = external.value().byte_offset(prop.offset_internal as isize);
 
         let flags = prop_class.cast_flags;
 
@@ -275,6 +275,11 @@ pub struct JsUeRuntime {
     runtime_inner: JsRuntime,
     inspector_server: Option<deno_inspector::inspector_server::InspectorServer>,
 }
+impl Default for JsUeRuntime {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl JsUeRuntime {
     pub fn new() -> Self {
@@ -283,7 +288,7 @@ impl JsUeRuntime {
         const OPS: &[OpDecl] = &[op_ext_uobject(), op_ext_callback()];
         let ext = Extension {
             name: "my_ext",
-            ops: std::borrow::Cow::Borrowed(&OPS),
+            ops: std::borrow::Cow::Borrowed(OPS),
             ..Default::default()
         };
 
