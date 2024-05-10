@@ -8,7 +8,6 @@ use deno_core::*;
 use deno_core::{error::AnyError, unsync::MaskFutureAsSend};
 
 use element_ptr::element_ptr;
-use tokio::task;
 
 use crate::ue::{self, UClassTrait, UObjectBaseTrait, UObjectTrait, NN as _};
 
@@ -272,152 +271,81 @@ pub fn op_ext_callback<'s>(
     //context_state.timers.queue_timer(0, (task, 0)) as _
 }
 
-//deno_core::ops!(deno_ops, [op_xyz]);
-
-// Use the ops:
-//deno_ops()
-
-pub fn main() {
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_time()
-        .build()
-        .unwrap();
-
-    let mut task = rt.spawn(unsafe {
-        MaskFutureAsSend::new(async {
-            println!("now running on a worker thread");
-            main_async().await.unwrap();
-        })
-    });
-
-    loop {
-        println!("running loop");
-        rt.block_on(async {
-            tokio::select! {
-                _ = &mut task => Some(Ok::<(), tokio::task::JoinError>(())),
-                _ = tokio::task::yield_now() => None,
-            }
-        });
-        std::thread::sleep(std::time::Duration::from_millis(100));
-    }
+pub struct JsUeRuntime {
+    runtime_inner: JsRuntime,
+    inspector_server: Option<deno_inspector::inspector_server::InspectorServer>,
 }
 
-pub fn fake_event_loop() {
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_time()
-        .build()
+impl JsUeRuntime {
+    pub fn new() -> Self {
+        println!("v8 version: {}", deno_core::v8_version());
+
+        const OPS: &[OpDecl] = &[op_ext_uobject(), op_ext_callback()];
+        let ext = Extension {
+            name: "my_ext",
+            ops: std::borrow::Cow::Borrowed(&OPS),
+            ..Default::default()
+        };
+
+        let mut runtime = deno_core::JsRuntime::new(deno_core::RuntimeOptions {
+            extensions: vec![ext],
+            module_loader: Some(Rc::new(deno_core::FsModuleLoader)),
+            inspector: true,
+            ..Default::default()
+        });
+
+        runtime.main_context().open(runtime.v8_isolate()).set_slot(
+            runtime.v8_isolate(),
+            Rc::new(RefCell::new(UEContext {
+                templates: Default::default(),
+            })),
+        );
+
+        let inspector_server = deno_inspector::inspector_server::InspectorServer::new(
+            std::net::SocketAddr::new(
+                std::net::IpAddr::V4(std::net::Ipv4Addr::new(127, 0, 0, 1)),
+                8080,
+            ),
+            "asdf",
+        )
         .unwrap();
 
-    let task = rt.spawn(async {
-        println!("now running on a worker thread");
-        unsafe {
-            deno_core::unsync::MaskFutureAsSend::new(main_async())
-                .await
-                .into_inner()
-                .unwrap();
+        inspector_server.register_inspector("main".to_string(), &mut runtime, true);
+        let inspector = runtime.inspector();
+        runtime.op_state().borrow_mut().put(inspector.clone());
+
+        runtime
+            .inspector()
+            .borrow_mut()
+            .wait_for_session_and_break_on_next_statement();
+
+        Self {
+            runtime_inner: runtime,
+            inspector_server: Some(inspector_server),
         }
-    });
-
-    type Handle = tokio::task::JoinHandle<()>;
-
-    thread_local! {
-        static TASK: std::cell::RefCell<Option<Handle>> = Default::default();
     }
-    TASK.with(move |local_task| {
-        *local_task.borrow_mut() = Some(task);
-    });
 
-    loop {
-        println!("fake event loop");
-        TASK.with(|local_task| {
-            let mut binding = local_task.borrow_mut();
-            rt.block_on(async {
-                tokio::select! {
-                    _ = binding.as_mut().unwrap() => Some(Ok::<(), tokio::task::JoinError>(())),
-                    _ = tokio::task::yield_now() => None,
-                }
-            });
-        });
-        std::thread::sleep(std::time::Duration::from_millis(100));
+    pub async fn init(&mut self) -> Result<(), AnyError> {
+        #[cfg(target_os = "windows")]
+        let path = std::path::Path::new("z:/home/truman/projects/drg-modding/tools/mint/hook/js/");
+        #[cfg(target_os = "linux")]
+        let path = std::path::Path::new("/home/truman/projects/drg-modding/tools/mint/hook/js/");
+
+        let main_module = deno_core::resolve_path("main.js", path)?;
+
+        let mod_id = self.runtime_inner.load_main_es_module(&main_module).await?;
+        let _result = self.runtime_inner.mod_evaluate(mod_id);
+
+        Ok(())
     }
-}
 
-pub async fn main_async() -> Result<(), AnyError> {
-    println!("v8 version: {}", deno_core::v8_version());
-
-    const OPS: &[OpDecl] = &[op_ext_uobject(), op_ext_callback()];
-    let ext = Extension {
-        name: "my_ext",
-        ops: std::borrow::Cow::Borrowed(&OPS),
-        ..Default::default()
-    };
-
-    let mut runtime = deno_core::JsRuntime::new(deno_core::RuntimeOptions {
-        extensions: vec![ext],
-        module_loader: Some(Rc::new(deno_core::FsModuleLoader)),
-        inspector: true,
-        ..Default::default()
-    });
-
-    runtime.main_context().open(runtime.v8_isolate()).set_slot(
-        runtime.v8_isolate(),
-        Rc::new(RefCell::new(UEContext {
-            templates: Default::default(),
-        })),
-    );
-
-    //server.register_inspector(
-    //    main_module.to_string(),
-    //    &mut js_runtime,
-    //    options.should_break_on_first_statement || options.should_wait_for_inspector_session,
-    //);
-
-    let inspector = deno_inspector::inspector_server::InspectorServer::new(
-        std::net::SocketAddr::new(
-            std::net::IpAddr::V4(std::net::Ipv4Addr::new(127, 0, 0, 1)),
-            8080,
-        ),
-        "asdf",
-    )
-    .unwrap();
-
-    inspector.register_inspector("main".to_string(), &mut runtime, true);
-    let op_state = runtime.op_state();
-    let inspector = runtime.inspector();
-    op_state.borrow_mut().put(inspector);
-
-    //runtime
-    //    .inspector()
-    //    .borrow_mut()
-    //    .wait_for_session_and_break_on_next_statement();
-
-    #[cfg(target_os = "windows")]
-    let path = std::path::Path::new("z:/home/truman/projects/drg-modding/tools/mint/hook/js/");
-    #[cfg(target_os = "linux")]
-    let path = std::path::Path::new("/home/truman/projects/drg-modding/tools/mint/hook/js/");
-
-    let main_module = deno_core::resolve_path("main.js", path)?;
-
-    let mod_id = runtime.load_main_es_module(&main_module).await?;
-    let result = runtime.mod_evaluate(mod_id);
-    runtime
-        .run_event_loop(PollEventLoopOptions {
-            wait_for_inspector: true,
-            pump_v8_message_loop: true,
-        })
-        .await?;
-    result.await?;
-
-    //let module = runtime
-    //    .load_main_es_module(
-    //        &url::Url::parse("https://x.nest.land/ramda@0.27.0/source/index.js").unwrap(),
-    //    )
-    //    .await
-    //    .unwrap();
-
-    //let ret = runtime.mod_evaluate(module).await;
-
-    //println!("ret => {:?}", ret);
-
-    Ok(())
+    pub async fn run_loop(&mut self) -> Result<(), AnyError> {
+        self.runtime_inner
+            .run_event_loop(PollEventLoopOptions {
+                wait_for_inspector: true,
+                pump_v8_message_loop: true,
+            })
+            .await?;
+        Ok(())
+    }
 }

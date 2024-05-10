@@ -125,3 +125,6 @@ unix-archive = ".zip"
 
 [dev-dependencies]
 mockall = "0.12.1"
+
+[patch.crates-io]
+deno_core = { path = "/home/truman/src/deno_core/core" }

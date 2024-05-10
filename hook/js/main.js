@@ -75,7 +75,7 @@ globalThis.setInterval = (callback, delay = 0) => Deno.core.queueUserTimer(
 
 
 
-//setInterval(() => console.log('asdf'), 1000);
+setInterval(() => console.log('asdf'), 1000);
 setInterval(() => console.log('some time long in the future to keep the VM alive'), 1000000);
 
 //debugger;

@@ -178,15 +178,19 @@ unsafe fn init_js() {
         .build()
         .unwrap();
 
-    let task = rt.spawn(async {
-        println!("now running on a worker thread");
+    let mut js_runtime = deno_test::JsUeRuntime::new();
+
+    rt.block_on(js_runtime.init()).unwrap();
+
+    let task = rt.spawn(
         unsafe {
-            deno_core::unsync::MaskFutureAsSend::new(deno_test::main_async())
-                .await
-                .into_inner()
-                .unwrap();
+            deno_core::unsync::MaskFutureAsSend::new(async move {
+                println!("now running on a worker thread");
+                js_runtime.run_loop().await.unwrap();
+            })
         }
-    });
+        .map(|_| ()),
+    );
 
     JS_CONTEXT.with_borrow_mut(move |ctx| {
         *ctx = Some(JsContextHandle { task });
