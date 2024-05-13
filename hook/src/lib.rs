@@ -2,7 +2,7 @@ pub mod deno_test;
 mod hooks;
 mod ue;
 
-use std::{io::BufReader, path::Path};
+use std::{cell::RefCell, collections::HashMap, io::BufReader, path::Path, rc::Rc};
 
 use anyhow::{Context, Result};
 use deno_core::futures::FutureExt;
@@ -164,12 +164,17 @@ unsafe fn patch() -> Result<()> {
     Ok(())
 }
 
+use deno_core::v8;
+
+#[derive(Default)]
 struct JsContextHandle {
-    task: tokio::task::JoinHandle<()>,
+    task: Option<Rc<RefCell<tokio::task::JoinHandle<()>>>>,
+    runtime: Option<Rc<RefCell<deno_test::JsUeRuntime>>>,
+    hooks: RefCell<HashMap<String, v8::Global<v8::Function>>>,
 }
 
 thread_local! {
-    static JS_CONTEXT: std::cell::RefCell<Option<JsContextHandle>> = Default::default();
+    static JS_CONTEXT: std::cell::RefCell<JsContextHandle> = Default::default();
 }
 
 unsafe fn init_js() {
@@ -179,21 +184,23 @@ unsafe fn init_js() {
         .unwrap();
 
     let mut js_runtime = deno_test::JsUeRuntime::new();
-
     rt.block_on(js_runtime.init()).unwrap();
+    let js_runtime = Rc::new(RefCell::new(js_runtime));
 
     let task = rt.spawn(
         unsafe {
+            let js_runtime = js_runtime.clone();
             deno_core::unsync::MaskFutureAsSend::new(async move {
                 println!("now running on a worker thread");
-                js_runtime.run_loop().await.unwrap();
+                js_runtime.borrow().run_loop().await.unwrap();
             })
         }
         .map(|_| ()),
     );
 
     JS_CONTEXT.with_borrow_mut(move |ctx| {
-        *ctx = Some(JsContextHandle { task });
+        ctx.task = Some(Rc::new(RefCell::new(task)));
+        ctx.runtime = Some(js_runtime);
     });
 
     hooks::UGameEngineTick
@@ -209,10 +216,11 @@ unsafe fn init_js() {
             ),
             move |game_engine, delta_seconds, idle_mode| {
                 hooks::UGameEngineTick.call(game_engine, delta_seconds, idle_mode);
-                JS_CONTEXT.with_borrow_mut(|ctx| {
+                JS_CONTEXT.with_borrow(|ctx| {
                     rt.block_on(async {
+                        let binding = ctx.task.as_ref().unwrap();
                         tokio::select! {
-                            _ = &mut ctx.as_mut().unwrap().task => Some(Ok::<(), tokio::task::JoinError>(())),
+                            _ = &mut *binding.borrow_mut() => Some(Ok::<(), tokio::task::JoinError>(())),
                             _ = tokio::task::yield_now() => None,
                         }
                     });

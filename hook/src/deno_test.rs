@@ -255,6 +255,20 @@ fn op_ext_uobject<'s>(scope: &mut v8::HandleScope<'s>, addr: f64) -> v8::Local<'
 }
 
 #[op2]
+fn op_ue_hook<'s>(
+    scope: &mut v8::HandleScope<'s>,
+    #[string] path: String,
+    #[global] callback: v8::Global<v8::Function>,
+) {
+    println!("creating hook for {}", path);
+
+    crate::JS_CONTEXT.with_borrow(|ctx| {
+        let mut binding = ctx.hooks.borrow_mut();
+        binding.insert(path, callback);
+    });
+}
+
+#[op2]
 pub fn op_ext_callback<'s>(
     scope: &mut v8::HandleScope<'s>,
     #[global] task: v8::Global<v8::Function>,
@@ -272,7 +286,9 @@ pub fn op_ext_callback<'s>(
 }
 
 pub struct JsUeRuntime {
-    runtime_inner: JsRuntime,
+    pub runtime_inner: Rc<RefCell<JsRuntime>>,
+    pub main_context: Rc<v8::Global<v8::Context>>,
+    pub isolate: *mut v8::Isolate,
     inspector_server: Option<deno_inspector::inspector_server::InspectorServer>,
 }
 impl Default for JsUeRuntime {
@@ -285,7 +301,7 @@ impl JsUeRuntime {
     pub fn new() -> Self {
         println!("v8 version: {}", deno_core::v8_version());
 
-        const OPS: &[OpDecl] = &[op_ext_uobject(), op_ext_callback()];
+        const OPS: &[OpDecl] = &[op_ext_uobject(), op_ue_hook(), op_ext_callback()];
         let ext = Extension {
             name: "my_ext",
             ops: std::borrow::Cow::Borrowed(OPS),
@@ -299,8 +315,11 @@ impl JsUeRuntime {
             ..Default::default()
         });
 
-        runtime.main_context().open(runtime.v8_isolate()).set_slot(
-            runtime.v8_isolate(),
+        let main_context = runtime.main_context();
+        let mut isolate = runtime.v8_isolate();
+
+        main_context.open(&mut isolate).set_slot(
+            isolate,
             Rc::new(RefCell::new(UEContext {
                 templates: Default::default(),
             })),
@@ -325,7 +344,9 @@ impl JsUeRuntime {
             .wait_for_session_and_break_on_next_statement();
 
         Self {
-            runtime_inner: runtime,
+            isolate: runtime.v8_isolate_ptr(),
+            main_context: main_context.into(),
+            runtime_inner: Rc::new(RefCell::new(runtime)),
             inspector_server: Some(inspector_server),
         }
     }
@@ -338,14 +359,17 @@ impl JsUeRuntime {
 
         let main_module = deno_core::resolve_path("main.js", path)?;
 
-        let mod_id = self.runtime_inner.load_main_es_module(&main_module).await?;
-        let _result = self.runtime_inner.mod_evaluate(mod_id);
+        let mut runtime = self.runtime_inner.borrow_mut();
+
+        let mod_id = runtime.load_main_es_module(&main_module).await?;
+        let _result = runtime.mod_evaluate(mod_id);
 
         Ok(())
     }
 
-    pub async fn run_loop(&mut self) -> Result<(), AnyError> {
+    pub async fn run_loop(&self) -> Result<(), AnyError> {
         self.runtime_inner
+            .borrow_mut()
             .run_event_loop(PollEventLoopOptions {
                 wait_for_inspector: true,
                 pump_v8_message_loop: true,

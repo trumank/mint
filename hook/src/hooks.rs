@@ -41,10 +41,10 @@ pub unsafe fn initialize() -> Result<()> {
             "/Game/_mint/BPL_MINT.BPL_MINT_C:Get Mod JSON",
             exec_get_mod_json as ExecFn,
         ),
-        (
-            "/Script/Engine.KismetSystemLibrary:PrintString",
-            exec_print_string as ExecFn,
-        ),
+        //(
+        //    "/Script/Engine.KismetSystemLibrary:PrintString",
+        //    exec_print_string as ExecFn,
+        //),
     ]
     .into_iter()
     .collect::<std::collections::HashMap<_, ExecFn>>();
@@ -61,6 +61,77 @@ pub unsafe fn initialize() -> Result<()> {
                         .insert(EFunctionFlags::FUNC_Native | EFunctionFlags::FUNC_Final);
                     *element_ptr!(function => .func).as_ptr() = *hook;
                 }
+
+                crate::JS_CONTEXT.with_borrow(|ctx| {
+                    //println!("{path:?}");
+                    if let Some(hook) = ctx.hooks.borrow().get(&path) {
+                        println!("HOOKING {} {:?}", path, function);
+
+                        element_ptr!(function => .function_flags)
+                            .as_mut()
+                            .insert(EFunctionFlags::FUNC_Native | EFunctionFlags::FUNC_Final);
+                        *element_ptr!(function => .func).as_ptr() = exec_hook;
+
+                        unsafe extern "system" fn exec_hook(
+                            _context: *mut UObject,
+                            stack: *mut kismet::FFrame,
+                            _result: *mut c_void,
+                        ) {
+                            let stack = stack.as_mut().unwrap();
+
+                            let ctx: Option<NonNull<UObject>> = stack.arg();
+                            let string: FString = stack.arg();
+                            let _print_to_screen: bool = stack.arg();
+                            let _print_to_log: bool = stack.arg();
+                            let _color: FLinearColor = stack.arg();
+                            let _duration: f32 = stack.arg();
+
+                            //if let Some(ctx) = ctx {
+                            //    let class = ctx.uobject_base().class();
+                            //    dbg!(class);
+                            //    if let Some(class) = class {
+                            //        class.ustruct().child_properties();
+                            //    }
+                            //}
+                            //
+
+                            println!("INSIDE HOOK {:?}", stack.current_native_function);
+
+                            crate::JS_CONTEXT.with_borrow(|ctx| {
+                                use deno_core::v8;
+
+                                let binding = ctx.runtime.as_ref().unwrap().borrow();
+                                let context = &binding.main_context;
+                                let isolate = binding.isolate;
+
+                                let mut scope = v8::HandleScope::with_context(
+                                    unsafe { isolate.as_mut().unwrap_unchecked() },
+                                    context.as_ref(),
+                                );
+                                let undefined: v8::Local<v8::Value> =
+                                    v8::undefined(&mut scope).into();
+
+                                //let tc_scope = &mut v8::TryCatch::new(&mut scope);
+                                //let js_event_loop_tick_cb = context_state.js_event_loop_tick_cb.borrow();
+                                let binding = ctx.hooks.borrow();
+                                let js_event_loop_tick_cb =
+                                    binding.values().next().unwrap().open(&mut scope);
+
+                                js_event_loop_tick_cb.call(&mut scope, undefined, &[]);
+                            });
+
+                            //crate::JS_CONTEXT.with_borrow(|ctx| {
+                            //    if let Some(hook) = ctx.hooks.borrow().get(&path) {
+                            //        println!("INSIDE HOOK {:?}", hook);
+                            //    }
+                            //});
+
+                            //println!("{ctx:?} PrintString({string})");
+
+                            stack.code = stack.code.add(1);
+                        }
+                    }
+                });
             }
         },
     )?;

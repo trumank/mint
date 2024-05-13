@@ -78,6 +78,8 @@ globalThis.setInterval = (callback, delay = 0) => Deno.core.queueUserTimer(
 setInterval(() => console.log('asdf'), 1000);
 setInterval(() => console.log('some time long in the future to keep the VM alive'), 1000000);
 
+Deno.core.ops.op_ue_hook('/Script/Engine.KismetSystemLibrary:PrintString', () => { console.log('hooked from JS!!') })
+
 //debugger;
 
 //throw new Error(`result: ${decodeAscii(resUi8)}`);
