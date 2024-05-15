@@ -9,7 +9,7 @@ use deno_core::*;
 
 use element_ptr::element_ptr;
 
-use crate::ue::{self, UClassTrait, UObjectBaseTrait, UObjectTrait, NN as _};
+use crate::ue::{self, UClassTrait, UObjectBaseTrait, UObjectTrait, NN};
 
 struct UEContext {
     templates: HashMap<NonNull<ue::UClass>, v8::Global<v8::FunctionTemplate>>,
@@ -121,6 +121,74 @@ pub fn js_obj<'s>(
         instance
     }
 }
+fn js_prop<'s>(
+    scope: &mut v8::HandleScope<'s>,
+    data: *const c_void,
+    prop: &ue::FProperty,
+) -> v8::Local<'s, v8::Value> {
+    let prop_class = unsafe { prop.ffield.class_private.as_ref().unwrap() };
+
+    unsafe {
+        let ptr = data;
+
+        let flags = prop_class.cast_flags;
+
+        if flags.contains(ue::EClassCastFlags::CASTCLASS_FObjectProperty) {
+            if let Some(obj) = NonNull::new(*(ptr as *mut *mut ue::UObject)) {
+                js_obj(scope, obj).into()
+            } else {
+                v8::null(scope).into()
+            }
+        } else if flags.contains(ue::EClassCastFlags::CASTCLASS_FBoolProperty) {
+            // TODO bitfields
+            v8::Boolean::new(scope, 0 != *(ptr as *mut u8)).into()
+        } else if flags.contains(ue::EClassCastFlags::CASTCLASS_FByteProperty) {
+            v8::Number::new(scope, *(ptr as *mut i8) as f64).into()
+        } else if flags.contains(ue::EClassCastFlags::CASTCLASS_FIntProperty) {
+            v8::Number::new(scope, *(ptr as *mut i32) as f64).into()
+        } else if flags.contains(ue::EClassCastFlags::CASTCLASS_FDoubleProperty) {
+            v8::Number::new(scope, *(ptr as *mut f64)).into()
+        } else if flags.contains(ue::EClassCastFlags::CASTCLASS_FFloatProperty) {
+            v8::Number::new(scope, *(ptr as *mut f32) as f64).into()
+        } else if flags.contains(ue::EClassCastFlags::CASTCLASS_FStrProperty) {
+            let s = (ptr as *mut ue::FString).as_ref().unwrap().to_string();
+            v8::String::new(scope, &s).unwrap().into()
+        } else if flags.contains(ue::EClassCastFlags::CASTCLASS_FNameProperty) {
+            let s = (ptr as *mut ue::FName).as_ref().unwrap().to_string();
+            v8::String::new(scope, &s).unwrap().into()
+        } else if flags.contains(ue::EClassCastFlags::CASTCLASS_FArrayProperty) {
+            let prop: &ue::FArrayProperty = &*(prop as *const _ as *const ue::FArrayProperty);
+            let inner = prop.inner.nn().unwrap().as_ref();
+
+            #[repr(C)]
+            struct ArrayStruct {
+                data: *const c_void,
+                num: u32,
+                max: u32,
+            }
+
+            let array_data = (ptr as *const ArrayStruct).as_ref().unwrap();
+            let array = v8::Array::new(scope, array_data.num as i32);
+
+            for i in 0..array_data.num {
+                let elm = js_prop(
+                    scope,
+                    array_data
+                        .data
+                        .byte_add((i * inner.element_size as u32) as usize),
+                    inner,
+                );
+                array.set_index(scope, i, elm);
+            }
+
+            array.into()
+        } else {
+            v8::String::new(scope, &format!("<TODO> {:?}", flags))
+                .unwrap()
+                .into()
+        }
+    }
+}
 fn get_prop(
     scope: &mut v8::HandleScope,
     _property: v8::Local<v8::Name>,
@@ -133,47 +201,10 @@ fn get_prop(
         (ext.value() as *const ue::FProperty).as_ref().unwrap()
     };
 
-    let prop_class = unsafe { prop.ffield.class_private.as_ref().unwrap() };
-
     unsafe {
         let external = v8::Local::<v8::External>::cast(this.get_internal_field(scope, 0).unwrap());
         let ptr = external.value().byte_offset(prop.offset_internal as isize);
-
-        let flags = prop_class.cast_flags;
-
-        if flags.contains(ue::EClassCastFlags::CASTCLASS_FObjectProperty) {
-            if let Some(obj) = NonNull::new(*(ptr as *mut *mut ue::UObject)) {
-                ret.set(js_obj(scope, obj).into());
-            } else {
-                ret.set(v8::null(scope).into());
-            }
-        } else if flags.contains(ue::EClassCastFlags::CASTCLASS_FBoolProperty) {
-            // TODO bitfields
-            ret.set(v8::Boolean::new(scope, 0 != *(ptr as *mut u8)).into());
-        } else if flags.contains(ue::EClassCastFlags::CASTCLASS_FByteProperty) {
-            ret.set(v8::Number::new(scope, *(ptr as *mut i8) as f64).into());
-        } else if flags.contains(ue::EClassCastFlags::CASTCLASS_FIntProperty) {
-            ret.set(v8::Number::new(scope, *(ptr as *mut i32) as f64).into());
-        } else if flags.contains(ue::EClassCastFlags::CASTCLASS_FDoubleProperty) {
-            ret.set(v8::Number::new(scope, *(ptr as *mut f64)).into());
-        } else if flags.contains(ue::EClassCastFlags::CASTCLASS_FFloatProperty) {
-            ret.set(v8::Number::new(scope, *(ptr as *mut f32) as f64).into());
-        } else if flags.contains(ue::EClassCastFlags::CASTCLASS_FStrProperty) {
-            let s = (ptr as *mut ue::FString).as_ref().unwrap().to_string();
-            ret.set(v8::String::new(scope, &s).unwrap().into());
-        } else if flags.contains(ue::EClassCastFlags::CASTCLASS_FNameProperty) {
-            let s = (ptr as *mut ue::FName).as_ref().unwrap().to_string();
-            ret.set(v8::String::new(scope, &s).unwrap().into());
-        } else {
-            //dbg!(prop);
-            //dbg!(prop_class);
-
-            ret.set(
-                v8::String::new(scope, &format!("<TODO> {:?}", flags))
-                    .unwrap()
-                    .into(),
-            );
-        }
+        ret.set(js_prop(scope, ptr, prop));
     }
 }
 fn set_prop(
@@ -255,7 +286,7 @@ fn op_ext_uobject<'s>(scope: &mut v8::HandleScope<'s>, addr: f64) -> v8::Local<'
 }
 
 #[op2]
-fn op_fname<'s>(
+fn op_find_object<'s>(
     scope: &mut v8::HandleScope<'s>,
     #[string] string: String,
 ) -> v8::Local<'s, v8::Value> {
@@ -327,7 +358,7 @@ impl JsUeRuntime {
         const OPS: &[OpDecl] = &[
             op_ext_uobject(),
             op_ue_hook(),
-            op_fname(),
+            op_find_object(),
             op_ext_callback(),
         ];
         let ext = Extension {

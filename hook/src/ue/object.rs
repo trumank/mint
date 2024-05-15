@@ -347,6 +347,21 @@ pub struct FProperty {
 }
 
 #[derive(Debug)]
+#[repr(u32)]
+pub enum EArrayPropertyFlags {
+    None = 0x0,
+    UsesMemoryImageAllocator = 0x1,
+}
+
+#[derive(Debug)]
+#[repr(C)]
+pub struct FArrayProperty {
+    pub fproperty: FProperty,
+    pub inner: *const FProperty,
+    pub array_flags: EArrayPropertyFlags,
+}
+
+#[derive(Debug)]
 #[repr(C)]
 pub struct UStruct {
     pub ufield: UField,
