@@ -118,8 +118,7 @@ bitflags::bitflags! {
 
     #[derive(Debug, Clone, Copy)]
     #[repr(C)]
-    pub struct EClassCastFlags : u64
-    {
+    pub struct EClassCastFlags : u64 {
         const CASTCLASS_None = 0x0000000000000000;
 
         const CASTCLASS_UField = 0x0000000000000001;
@@ -234,6 +233,22 @@ bitflags::bitflags! {
         const CPF_NativeAccessSpecifierProtected = 0x20000000000000;
         const CPF_NativeAccessSpecifierPrivate = 0x40000000000000;
         const CPF_SkipSerialization = 0x80000000000000;
+    }
+
+    #[derive(Debug, Clone, Copy)]
+    #[repr(C)]
+    pub struct EInternalObjectFlags: u32 {
+        const None = 0x0;
+        const ReachableInCluster = 0x800000;
+        const ClusterRoot = 0x1000000;
+        const Native = 0x2000000;
+        const Async = 0x4000000;
+        const AsyncLoading = 0x8000000;
+        const Unreachable = 0x10000000;
+        const PendingKill = 0x20000000;
+        const RootSet = 0x40000000;
+        const GarbageCollectionKeepFlags = 0xe000000;
+        const AllFlags = 0x7f800000;
     }
 }
 
@@ -519,10 +534,11 @@ impl UStructTrait for NonNull<UStruct> {
                 {
                     let prop: NonNull<FProperty> = field.cast();
                     let offset: i32 = element_ptr!(prop => .offset_internal.*);
+                    let size: i32 = element_ptr!(prop => .element_size.*);
 
                     let name = element_ptr!(field => .name_private.*);
                     let string = name.to_string();
-                    println!("{i}: 0x{offset:X} {string}");
+                    println!("{i}: 0x{offset:02X} 0x{size:02X} {string}");
                     i += 1;
                 }
                 next_field = element_ptr!(field => .next.*).nn();

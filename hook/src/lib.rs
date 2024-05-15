@@ -10,6 +10,7 @@ use fs_err as fs;
 use hooks::{FnLoadGameFromMemory, FnSaveGameToMemory};
 use mint_lib::mod_info::Meta;
 use tracing::{info, warn};
+use ue::FnStaticFindObjectFast;
 use windows::Win32::{
     Foundation::HMODULE,
     System::{
@@ -85,6 +86,9 @@ impl Globals {
     pub fn fname_to_string(&self) -> ue::FnFNameToString {
         unsafe { std::mem::transmute(self.resolution.core.as_ref().unwrap().fnametostring.0) }
     }
+    pub fn fname_ctor(&self) -> ue::FnFNameCtor {
+        unsafe { std::mem::transmute(self.resolution.core.as_ref().unwrap().fname_ctor.0) }
+    }
     pub fn uobject_base_utility_get_path_name(&self) -> ue::FnUObjectBaseUtilityGetPathName {
         unsafe {
             std::mem::transmute(
@@ -117,6 +121,19 @@ impl Globals {
                     .as_ref()
                     .unwrap()
                     .load_game_from_memory
+                    .0,
+            )
+        }
+    }
+    pub fn static_find_object_fast(&self) -> FnStaticFindObjectFast {
+        unsafe {
+            std::mem::transmute(
+                globals()
+                    .resolution
+                    .core
+                    .as_ref()
+                    .unwrap()
+                    .static_find_object_fast
                     .0,
             )
         }

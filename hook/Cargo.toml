@@ -35,3 +35,4 @@ tokio = { workspace = true, features = ["full"] }
 element-ptr = "0.0.2"
 deno_core = { version = "0.279.0", default-features = false }
 deno_inspector = { version = "0.1.0", path = "deno_inspector" }
+seq-macro = "0.3.5"

@@ -1254,6 +1254,7 @@ dependencies = [
 [[package]]
 name = "deno_core"
 version = "0.279.0"
+source = "git+https://github.com/trumank/deno_core?branch=patches#cccd0264e6932937acd35232c508ab0350082e89"
 dependencies = [
  "anyhow",
  "bincode",
@@ -1296,6 +1297,7 @@ dependencies = [
 [[package]]
 name = "deno_ops"
 version = "0.155.0"
+source = "git+https://github.com/trumank/deno_core?branch=patches#cccd0264e6932937acd35232c508ab0350082e89"
 dependencies = [
  "proc-macro-rules",
  "proc-macro2",
@@ -2392,6 +2394,7 @@ dependencies = [
  "postcard",
  "repak",
  "retour",
+ "seq-macro",
  "serde",
  "serde_json",
  "tokio",
@@ -3589,7 +3592,7 @@ checksum = "1e91099d4268b0e11973f036e885d652fb0b21fedcf69738c627f94db6a44f42"
 [[package]]
 name = "patternsleuth"
 version = "0.1.0"
-source = "git+https://github.com/trumank/patternsleuth#0d5175345a4827f98bc51df893cf2079ebf53306"
+source = "git+https://github.com/trumank/patternsleuth#184147ec556897ee367232b0087b2d8cf00fb5d4"
 dependencies = [
  "anyhow",
  "futures",
@@ -3610,7 +3613,7 @@ dependencies = [
 [[package]]
 name = "patternsleuth_scanner"
 version = "0.1.0"
-source = "git+https://github.com/trumank/patternsleuth#0d5175345a4827f98bc51df893cf2079ebf53306"
+source = "git+https://github.com/trumank/patternsleuth#184147ec556897ee367232b0087b2d8cf00fb5d4"
 dependencies = [
  "anyhow",
  "memchr",
@@ -4519,6 +4522,7 @@ dependencies = [
 [[package]]
 name = "serde_v8"
 version = "0.188.0"
+source = "git+https://github.com/trumank/deno_core?branch=patches#cccd0264e6932937acd35232c508ab0350082e89"
 dependencies = [
  "num-bigint",
  "serde",

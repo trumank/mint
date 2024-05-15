@@ -127,4 +127,4 @@ unix-archive = ".zip"
 mockall = "0.12.1"
 
 [patch.crates-io]
-deno_core = { path = "/home/truman/src/deno_core/core" }
+deno_core = { git = "https://github.com/trumank/deno_core", branch = "patches" }

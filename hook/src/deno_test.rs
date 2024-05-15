@@ -93,7 +93,7 @@ fn state_from_scope(scope: &mut v8::HandleScope) -> Rc<RefCell<UEContext>> {
         .clone()
 }
 
-fn js_obj<'s>(
+pub fn js_obj<'s>(
     scope: &mut v8::HandleScope<'s>,
     obj: NonNull<ue::UObject>,
 ) -> v8::Local<'s, v8::Object> {
@@ -255,6 +255,29 @@ fn op_ext_uobject<'s>(scope: &mut v8::HandleScope<'s>, addr: f64) -> v8::Local<'
 }
 
 #[op2]
+fn op_fname<'s>(
+    scope: &mut v8::HandleScope<'s>,
+    #[string] string: String,
+) -> v8::Local<'s, v8::Value> {
+    ue::FName::find(&string)
+        .and_then(|name| {
+            dbg!(name);
+            let obj = ue::static_find_object_fast(
+                None,
+                None,
+                name,
+                false,
+                true,
+                ue::EObjectFlags::empty(),
+                ue::EInternalObjectFlags::empty(),
+            );
+            dbg!(obj)
+        })
+        .map(|obj| js_obj(scope, obj).into())
+        .unwrap_or_else(|| v8::null(scope).into())
+}
+
+#[op2]
 fn op_ue_hook<'s>(
     scope: &mut v8::HandleScope<'s>,
     #[string] path: String,
@@ -301,7 +324,12 @@ impl JsUeRuntime {
     pub fn new() -> Self {
         println!("v8 version: {}", deno_core::v8_version());
 
-        const OPS: &[OpDecl] = &[op_ext_uobject(), op_ue_hook(), op_ext_callback()];
+        const OPS: &[OpDecl] = &[
+            op_ext_uobject(),
+            op_ue_hook(),
+            op_fname(),
+            op_ext_callback(),
+        ];
         let ext = Extension {
             name: "my_ext",
             ops: std::borrow::Cow::Borrowed(OPS),
@@ -338,10 +366,10 @@ impl JsUeRuntime {
         let inspector = runtime.inspector();
         runtime.op_state().borrow_mut().put(inspector.clone());
 
-        runtime
-            .inspector()
-            .borrow_mut()
-            .wait_for_session_and_break_on_next_statement();
+        //runtime
+        //    .inspector()
+        //    .borrow_mut()
+        //    .wait_for_session_and_break_on_next_statement();
 
         Self {
             isolate: runtime.v8_isolate_ptr(),
