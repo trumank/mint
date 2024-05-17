@@ -40,20 +40,28 @@ pub type FnLoadGameFromMemory = unsafe extern "system" fn(*const TArray<u8>) -> 
 
 struct HookPool([Hook; MAX_HOOKS]);
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 struct Hook {
     native: ExecFn,
-    function: Option<NonNull<UFunction>>,
+    data: Option<HookData>,
+}
+
+#[derive(Debug, Clone)]
+struct HookData {
+    function: NonNull<UFunction>,
+    original: ExecFn,
+    original_flags: EFunctionFlags,
 }
 
 const MAX_HOOKS: usize = 1000;
 const fn gen_hooks() -> HookPool {
-    let mut array: [MaybeUninit<Hook>; MAX_HOOKS] = [MaybeUninit::uninit(); MAX_HOOKS];
+    const TMP_NEW: MaybeUninit<Hook> = MaybeUninit::uninit();
+    let mut array: [MaybeUninit<Hook>; MAX_HOOKS] = [TMP_NEW; MAX_HOOKS];
 
     seq_macro::seq!(N in 0..1000 { // TODO hardcoded
         array[N] = MaybeUninit::new(Hook {
             native: hook_exec_wrapper::<N> as ExecFn,
-            function: None,
+            data: None,
          });
     });
 
@@ -69,6 +77,8 @@ unsafe extern "system" fn hook_exec_wrapper<const N: usize>(
     frame: *mut kismet::FFrame,
     ret: *mut c_void,
 ) {
+    //let f: ExecFn = std::mem::transmute(0x143a2f6d0 as usize);
+    //f(ctx, frame, ret);
     hook_exec(N, ctx, frame, ret);
 }
 
@@ -78,67 +88,81 @@ unsafe extern "system" fn hook_exec(
     stack: *mut kismet::FFrame,
     ret: *mut c_void,
 ) {
-    let hook = HOOKS.with_borrow(|hooks| hooks.0[n]);
-    hook.function.unwrap().ustruct().child_properties();
+    let data = HOOKS.with_borrow(|hooks| hooks.0[n].data.clone().unwrap());
 
-    let stack = stack.as_mut().unwrap();
+    //data.original;
+    let a: EFunctionFlags = *element_ptr!(data.function => .function_flags).as_mut();
+    let b: ExecFn = *element_ptr!(data.function => .func).as_mut();
 
-    let ctx: Option<NonNull<UObject>> = stack.arg();
-    let string: FString = stack.arg();
-    let _print_to_screen: bool = stack.arg();
-    let _print_to_log: bool = stack.arg();
-    let _color: FLinearColor = stack.arg();
-    let _duration: f32 = stack.arg();
+    //(*element_ptr!(data.function => .function_flags).as_mut()) = data.original_flags;
+    //(*element_ptr!(data.function => .func).as_mut()) = data.original;
 
-    //if let Some(ctx) = ctx {
-    //    let class = ctx.uobject_base().class();
-    //    dbg!(class);
-    //    if let Some(class) = class {
-    //        class.ustruct().child_properties();
-    //    }
-    //}
-    //
+    dbg!((ctx, data.original, data.original_flags));
+    (data.original)(ctx, stack, ret);
 
-    println!("INSIDE HOOK {:?}", stack.current_native_function);
+    //(*element_ptr!(data.function => .function_flags).as_mut()) = a;
+    //(*element_ptr!(data.function => .func).as_mut()) = b;
 
-    crate::JS_CONTEXT.with_borrow(|js_ctx| {
-        use deno_core::v8;
+    //let stack = stack.as_mut().unwrap();
 
-        let binding = js_ctx.runtime.as_ref().unwrap().borrow();
-        let context = &binding.main_context;
-        let isolate = binding.isolate;
+    //dbg!(&stack);
 
-        let mut scope = v8::HandleScope::with_context(
-            unsafe { isolate.as_mut().unwrap_unchecked() },
-            context.as_ref(),
-        );
-        let undefined: v8::Local<v8::Value> = v8::undefined(&mut scope).into();
+    //let ctx: Option<NonNull<UObject>> = stack.arg();
+    //let string: FString = stack.arg();
+    //let _print_to_screen: bool = stack.arg();
+    //let _print_to_log: bool = stack.arg();
+    //let _color: FLinearColor = stack.arg();
+    //let _duration: f32 = stack.arg();
 
-        //let tc_scope = &mut v8::TryCatch::new(&mut scope);
-        //let js_event_loop_tick_cb = context_state.js_event_loop_tick_cb.borrow();
-        let binding = js_ctx.hooks.borrow();
-        let js_event_loop_tick_cb = binding.values().next().unwrap().open(&mut scope);
+    ////if let Some(ctx) = ctx {
+    ////    let class = ctx.uobject_base().class();
+    ////    dbg!(class);
+    ////    if let Some(class) = class {
+    ////        class.ustruct().child_properties();
+    ////    }
+    ////}
+    ////
 
-        let js_obj = crate::deno_test::js_obj(&mut scope, ctx.unwrap());
+    //println!("INSIDE HOOK {:?}", stack.current_native_function);
 
-        js_event_loop_tick_cb.call(&mut scope, undefined, &[js_obj.into()]);
-    });
+    //crate::JS_CONTEXT.with_borrow(|js_ctx| {
+    //    use deno_core::v8;
 
-    //crate::JS_CONTEXT.with_borrow(|ctx| {
-    //    if let Some(hook) = ctx.hooks.borrow().get(&path) {
-    //        println!("INSIDE HOOK {:?}", hook);
-    //    }
+    //    let binding = js_ctx.runtime.as_ref().unwrap().borrow();
+    //    let context = &binding.main_context;
+    //    let isolate = binding.isolate;
+
+    //    let mut scope = v8::HandleScope::with_context(
+    //        unsafe { isolate.as_mut().unwrap_unchecked() },
+    //        context.as_ref(),
+    //    );
+    //    let undefined: v8::Local<v8::Value> = v8::undefined(&mut scope).into();
+
+    //    //let tc_scope = &mut v8::TryCatch::new(&mut scope);
+    //    //let js_event_loop_tick_cb = context_state.js_event_loop_tick_cb.borrow();
+    //    let binding = js_ctx.hooks.borrow();
+    //    let js_event_loop_tick_cb = binding.values().next().unwrap().open(&mut scope);
+
+    //    let js_obj = crate::deno_test::js_obj(&mut scope, ctx.unwrap());
+
+    //    js_event_loop_tick_cb.call(&mut scope, undefined, &[js_obj.into()]);
     //});
 
-    //println!("{ctx:?} PrintString({string})");
+    ////crate::JS_CONTEXT.with_borrow(|ctx| {
+    ////    if let Some(hook) = ctx.hooks.borrow().get(&path) {
+    ////        println!("INSIDE HOOK {:?}", hook);
+    ////    }
+    ////});
 
-    stack.code = stack.code.add(1);
+    ////println!("{ctx:?} PrintString({string})");
+
+    //stack.code = stack.code.add(1);
 }
 
 pub unsafe fn initialize() -> Result<()> {
     let hooks = [
         (
-            "/Game/_mint/BPL_MINT.BPL_MINT_C:Get Mod JSON",
+            "A/Game/_mint/BPL_MINT.BPL_MINT_C:Get Mod JSON",
             exec_get_mod_json as ExecFn,
         ),
         //(
@@ -160,27 +184,31 @@ pub unsafe fn initialize() -> Result<()> {
                         .as_mut()
                         .insert(EFunctionFlags::FUNC_Native | EFunctionFlags::FUNC_Final);
                     *element_ptr!(function => .func).as_ptr() = *hook;
+                } else {
+                    crate::JS_CONTEXT.with_borrow(|ctx| {
+                        if let Some(hook) = ctx.hooks.borrow().get(&path) {
+                            println!("HOOKING {} {:?}", path, function);
+
+                            HOOKS.with_borrow_mut(|hooks| {
+                                let free_hook = hooks
+                                    .0
+                                    .iter_mut()
+                                    .find(|h| h.data.is_none())
+                                    .expect("hooks exhausted");
+                                free_hook.data = Some(HookData {
+                                    function,
+                                    original: element_ptr!(function => .func.*),
+                                    original_flags: element_ptr!(function => .function_flags.*),
+                                });
+
+                                element_ptr!(function => .function_flags).as_mut().insert(
+                                    EFunctionFlags::FUNC_Native | EFunctionFlags::FUNC_Final,
+                                );
+                                *element_ptr!(function => .func).as_ptr() = free_hook.native;
+                            });
+                        }
+                    });
                 }
-
-                crate::JS_CONTEXT.with_borrow(|ctx| {
-                    if let Some(hook) = ctx.hooks.borrow().get(&path) {
-                        println!("HOOKING {} {:?}", path, function);
-
-                        HOOKS.with_borrow_mut(|hooks| {
-                            let free_hook = hooks
-                                .0
-                                .iter_mut()
-                                .find(|h| h.function.is_none())
-                                .expect("hooks exhausted");
-                            free_hook.function = Some(function);
-
-                            element_ptr!(function => .function_flags)
-                                .as_mut()
-                                .insert(EFunctionFlags::FUNC_Native | EFunctionFlags::FUNC_Final);
-                            *element_ptr!(function => .func).as_ptr() = free_hook.native;
-                        });
-                    }
-                });
             }
         },
     )?;

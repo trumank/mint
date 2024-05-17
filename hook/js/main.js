@@ -83,6 +83,11 @@ Deno.core.ops.op_ue_hook('/Script/Engine.KismetSystemLibrary:PrintString', (ctx)
    console.log('hooked from JS!!')
 })
 
+Deno.core.ops.op_ue_hook('/Game/_mint/BPL_MINT.BPL_MINT_C:Get Mod JSON', (ctx) => {
+   //console.log(ctx) // causes stack overflow for large objects
+   console.log('hooked BP function from JS!!')
+})
+
 //debugger;
 
 //throw new Error(`result: ${decodeAscii(resUi8)}`);
