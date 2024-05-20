@@ -332,8 +332,7 @@ unsafe extern "system" fn exec_draw_debug_sphere(
         let mut cos_y1 = 1.0;
         let center: Vector3<f32> = center.into();
 
-        let mut lines = Vec::new();
-        lines.reserve(num_segments_y as usize * segments as usize * 2);
+        let mut lines = Vec::with_capacity(num_segments_y as usize * segments as usize * 2);
 
         while num_segments_y > 0 {
             let sin_y2 = latitude.sin();
@@ -493,8 +492,8 @@ unsafe fn draw_cone(
 
     let num_sides = num_sides.max(4) as usize;
 
-    let angle1 = angle_height.clamp(std::f32::EPSILON, std::f32::consts::PI - std::f32::EPSILON);
-    let angle2 = angle_width.clamp(std::f32::EPSILON, std::f32::consts::PI - std::f32::EPSILON);
+    let angle1 = angle_height.clamp(f32::EPSILON, std::f32::consts::PI - f32::EPSILON);
+    let angle2 = angle_width.clamp(f32::EPSILON, std::f32::consts::PI - f32::EPSILON);
 
     let sin_x_2 = (0.5 * angle1).sin();
     let sin_y_2 = (0.5 * angle2).sin();
@@ -502,7 +501,7 @@ unsafe fn draw_cone(
     let sin_sq_x_2 = sin_x_2 * sin_x_2;
     let sin_sq_y_2 = sin_y_2 * sin_y_2;
 
-    let mut cone_verts = Vec::with_capacity(num_sides as usize);
+    let mut cone_verts = Vec::with_capacity(num_sides);
 
     for i in 0..num_sides {
         let fraction = i as f32 / num_sides as f32;
@@ -540,8 +539,8 @@ unsafe fn draw_cone(
     let mut current_point = Vector3::zeros();
     let mut prev_point = Vector3::zeros();
     let mut first_point = Vector3::zeros();
-    for i in 0..num_sides {
-        current_point = cone_to_world.transform_point(&cone_verts[i].into()).coords;
+    for (i, vert) in cone_verts.iter().enumerate().take(num_sides) {
+        current_point = cone_to_world.transform_point(&(*vert).into()).coords;
         lines.push(FBatchedLine {
             start: get_origin(&cone_to_world).into(),
             end: current_point.into(),
