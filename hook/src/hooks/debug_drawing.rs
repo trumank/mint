@@ -6,13 +6,17 @@ use na::{Matrix, Matrix4, Point3, Vector3};
 use nalgebra as na;
 
 use crate::hooks::ExecFn;
-use crate::ue::{self, FLinearColor, FRotator, FVector};
+use crate::ue::{self, FLinearColor, FRotator, FVector, TArray};
 
 pub fn kismet_hooks() -> &'static [(&'static str, ExecFn)] {
     &[
         (
             "/Script/Engine.KismetSystemLibrary:DrawDebugLine",
             exec_draw_debug_line as ExecFn,
+        ),
+        (
+            "/Script/Engine.KismetSystemLibrary:DrawDebugPoint",
+            exec_draw_debug_point as ExecFn,
         ),
         (
             "/Script/Engine.KismetSystemLibrary:DrawDebugCircle",
@@ -58,6 +62,9 @@ struct UWorld {
 #[repr(C)]
 struct ULineBatchComponent {
     vftable: *const ULineBatchComponentVTable,
+    padding: [u8; 0x448],
+    batched_lines: TArray<FBatchedLine>,
+    batched_points: TArray<FBatchedPoint>,
     // lots more
 }
 
@@ -75,23 +82,45 @@ struct FBatchedLine {
     start: FVector,
     end: FVector,
     color: FLinearColor,
-    life_time: f32,
     thickness: f32,
+    remaining_life_time: f32,
     depth_priority: u8,
-    batch_id: u32,
+}
+#[derive(Debug, Default, Copy, Clone)]
+#[repr(C)]
+struct FBatchedPoint {
+    position: FVector,
+    color: FLinearColor,
+    point_size: f32,
+    remaining_life_time: f32,
+    depth_priority: u8,
+}
+
+unsafe fn get_batcher(world: NonNull<UWorld>, duration: f32) -> NonNull<ULineBatchComponent> {
+    if duration > 0. {
+        element_ptr!(world => .persistent_line_batcher.*)
+    } else {
+        element_ptr!(world => .line_batcher.*)
+    }
+    .nn()
+    .unwrap()
 }
 
 unsafe fn draw_lines(batcher: NonNull<ULineBatchComponent>, lines: &[FBatchedLine]) {
-    let draw_line = element_ptr!(batcher => .vftable.*.draw_line.*);
-    for line in lines {
+    if let Some((last, lines_)) = lines.split_last() {
+        let batched_lines: &mut TArray<_> = element_ptr!(batcher => .batched_lines).as_mut();
+        batched_lines.extend_from_slice(lines_);
+
+        // call draw_line directly on last element so it gets properly marked as dirty
+        let draw_line = element_ptr!(batcher => .vftable.*.draw_line.*);
         draw_line(
             batcher,
-            &line.start,
-            &line.end,
-            &line.color,
-            line.depth_priority,
-            line.thickness,
-            line.life_time,
+            &last.start,
+            &last.end,
+            &last.color,
+            last.depth_priority,
+            last.thickness,
+            last.remaining_life_time,
         );
     }
 }
@@ -157,9 +186,33 @@ unsafe extern "system" fn exec_draw_debug_line(
     let thickness: f32 = stack.arg();
 
     if let Some(world) = get_world(world_context) {
-        let batcher = element_ptr!(world => .line_batcher.*).nn().unwrap();
+        let batcher = get_batcher(world, duration);
         let f = element_ptr!(batcher => .vftable.*.draw_line.*);
         f(batcher, &start, &end, &color, 0, thickness, duration);
+    }
+
+    if !stack.code.is_null() {
+        stack.code = stack.code.add(1);
+    }
+}
+
+unsafe extern "system" fn exec_draw_debug_point(
+    _context: *mut ue::UObject,
+    stack: *mut ue::kismet::FFrame,
+    _result: *mut c_void,
+) {
+    let stack = stack.as_mut().unwrap();
+
+    let world_context: Option<NonNull<ue::UObject>> = stack.arg();
+    let position: FVector = stack.arg();
+    let size: f32 = stack.arg();
+    let color: FLinearColor = stack.arg();
+    let duration: f32 = stack.arg();
+
+    if let Some(world) = get_world(world_context) {
+        let batcher = get_batcher(world, duration);
+        let f = element_ptr!(batcher => .vftable.*.draw_point.*);
+        f(batcher, &position, &color, size, 0, duration);
     }
 
     if !stack.code.is_null() {
@@ -186,11 +239,11 @@ unsafe extern "system" fn exec_draw_debug_circle(
     let draw_axis: bool = stack.arg();
 
     if let Some(world) = get_world(world_context) {
-        let batcher = element_ptr!(world => .line_batcher.*).nn().unwrap();
+        let batcher = get_batcher(world, duration);
 
         let line_config = FBatchedLine {
             color,
-            life_time: duration,
+            remaining_life_time: duration,
             thickness,
             ..Default::default()
         };
@@ -261,11 +314,11 @@ unsafe extern "system" fn exec_draw_debug_sphere(
     let thickness: f32 = stack.arg();
 
     if let Some(world) = get_world(world_context) {
-        let batcher = element_ptr!(world => .line_batcher.*).nn().unwrap();
+        let batcher = get_batcher(world, duration);
 
         let line_config = FBatchedLine {
             color,
-            life_time: duration,
+            remaining_life_time: duration,
             thickness,
             ..Default::default()
         };
@@ -365,7 +418,6 @@ fn add_half_circle(
     life_time: f32,
     depth_priority: u8,
     thickness: f32,
-    batch_id: u32,
 ) {
     let num_sides = num_sides.max(2);
     let angle_delta = 2.0 * std::f32::consts::PI / num_sides as f32;
@@ -378,10 +430,9 @@ fn add_half_circle(
             start: last_vertex.into(),
             end: vertex.into(),
             color: *color,
-            life_time,
+            remaining_life_time: life_time,
             thickness,
             depth_priority,
-            batch_id,
         });
         last_vertex = vertex;
     }
@@ -398,7 +449,6 @@ fn add_circle(
     life_time: f32,
     depth_priority: u8,
     thickness: f32,
-    batch_id: u32,
 ) {
     let num_sides = num_sides.max(2);
     let angle_delta = 2.0 * std::f32::consts::PI / num_sides as f32;
@@ -411,10 +461,9 @@ fn add_circle(
             start: last_vertex.into(),
             end: vertex.into(),
             color: *color,
-            life_time,
+            remaining_life_time: life_time,
             thickness,
             depth_priority,
-            batch_id,
         });
         last_vertex = vertex;
     }
@@ -434,7 +483,7 @@ unsafe fn draw_cone(
 ) {
     let line_config = FBatchedLine {
         color,
-        life_time: duration,
+        remaining_life_time: duration,
         thickness,
         ..Default::default()
     };
@@ -539,7 +588,7 @@ unsafe extern "system" fn exec_draw_debug_cone(
     let thickness: f32 = stack.arg();
 
     if let Some(world) = get_world(world_context) {
-        let batcher = element_ptr!(world => .line_batcher.*).nn().unwrap();
+        let batcher = get_batcher(world, duration);
         draw_cone(
             batcher,
             origin,
@@ -577,7 +626,7 @@ unsafe extern "system" fn exec_draw_debug_cone_in_degrees(
     let thickness: f32 = stack.arg();
 
     if let Some(world) = get_world(world_context) {
-        let batcher = element_ptr!(world => .line_batcher.*).nn().unwrap();
+        let batcher = get_batcher(world, duration);
         draw_cone(
             batcher,
             origin,
@@ -614,11 +663,11 @@ unsafe extern "system" fn exec_draw_debug_cylinder(
     let thickness: f32 = stack.arg();
 
     if let Some(world) = get_world(world_context) {
-        let batcher = element_ptr!(world => .line_batcher.*).nn().unwrap();
+        let batcher = get_batcher(world, duration);
 
         let line_config = FBatchedLine {
             color,
-            life_time: duration,
+            remaining_life_time: duration,
             thickness,
             ..Default::default()
         };
@@ -697,11 +746,11 @@ unsafe extern "system" fn exec_draw_debug_capsule(
     let thickness: f32 = stack.arg();
 
     if let Some(world) = get_world(world_context) {
-        let batcher = element_ptr!(world => .line_batcher.*).nn().unwrap();
+        let batcher = get_batcher(world, duration);
 
         let line_config = FBatchedLine {
             color,
-            life_time: duration,
+            remaining_life_time: duration,
             thickness,
             ..Default::default()
         };
@@ -737,7 +786,6 @@ unsafe extern "system" fn exec_draw_debug_capsule(
             duration,
             0,
             thickness,
-            0,
         );
         add_circle(
             &mut lines,
@@ -750,7 +798,6 @@ unsafe extern "system" fn exec_draw_debug_capsule(
             duration,
             0,
             thickness,
-            0,
         );
 
         // Draw domed caps
@@ -765,7 +812,6 @@ unsafe extern "system" fn exec_draw_debug_capsule(
             duration,
             0,
             thickness,
-            0,
         );
         add_half_circle(
             &mut lines,
@@ -778,7 +824,6 @@ unsafe extern "system" fn exec_draw_debug_capsule(
             duration,
             0,
             thickness,
-            0,
         );
 
         let neg_z_axis = -z_axis;
@@ -794,7 +839,6 @@ unsafe extern "system" fn exec_draw_debug_capsule(
             duration,
             0,
             thickness,
-            0,
         );
         add_half_circle(
             &mut lines,
@@ -807,7 +851,6 @@ unsafe extern "system" fn exec_draw_debug_capsule(
             duration,
             0,
             thickness,
-            0,
         );
 
         // Draw connected lines
@@ -856,11 +899,11 @@ unsafe extern "system" fn exec_draw_debug_box(
     let thickness: f32 = stack.arg();
 
     if let Some(world) = get_world(world_context) {
-        let batcher = element_ptr!(world => .line_batcher.*).nn().unwrap();
+        let batcher = get_batcher(world, duration);
 
         let line_config = FBatchedLine {
             color,
-            life_time: duration,
+            remaining_life_time: duration,
             thickness,
             ..Default::default()
         };
