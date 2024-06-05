@@ -36,9 +36,9 @@ pub type FnSaveGameToMemory =
 pub type FnLoadGameFromMemory =
     unsafe extern "system" fn(*const ue::TArray<u8>) -> *const USaveGame;
 
-pub unsafe fn initialize() -> Result<()> {
-    type ExecFn = unsafe extern "system" fn(*mut ue::UObject, *mut ue::kismet::FFrame, *mut c_void);
+type ExecFn = unsafe extern "system" fn(*mut ue::UObject, *mut ue::kismet::FFrame, *mut c_void);
 
+pub unsafe fn initialize() -> Result<()> {
     let hooks = [
         (
             "/Game/_mint/BPL_MINT.BPL_MINT_C:Get Mod JSON",
