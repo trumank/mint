@@ -1,0 +1,17 @@
+[package]
+name = "workspace_hack"
+repository.workspace = true
+authors.workspace = true
+license.workspace = true
+version.workspace = true
+edition.workspace = true
+
+[features]
+default = []
+oodle_platform_dependent = ["dep:repak"]
+
+[target.'cfg(any(target_os = "windows", target_os = "linux"))'.dependencies]
+repak = { workspace = true, optional = true, features = ["oodle_implicit_dynamic"] }
+
+[target.'cfg(not(any(target_os = "windows", target_os = "linux")))'.dependencies]
+repak = { workspace = true, optional = true }
