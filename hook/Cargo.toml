@@ -32,3 +32,6 @@ mint_lib = { path = "../mint_lib" }
 bitflags = "2.4.1"
 widestring = "1.0.2"
 tokio = { workspace = true, features = ["full"] }
+tokio-tungstenite = { version = "0.23.0", features = ["rustls"] }
+futures-util = "0.3.30"
+futures = "0.3.30"

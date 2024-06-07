@@ -1,6 +1,7 @@
 #![allow(clippy::missing_transmute_annotations)]
 
 mod server_list;
+mod ws;
 
 use std::{
     ffi::c_void,
@@ -51,6 +52,7 @@ pub unsafe fn initialize() -> Result<()> {
     ]
     .iter()
     .chain(server_list::kismet_hooks().iter())
+    .chain(ws::kismet_hooks().iter())
     .cloned()
     .collect::<std::collections::HashMap<_, ExecFn>>();
 
