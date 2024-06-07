@@ -1,5 +1,7 @@
 #![allow(clippy::missing_transmute_annotations)]
 
+mod server_list;
+
 use std::{
     ffi::c_void,
     path::{Path, PathBuf},
@@ -20,11 +22,9 @@ use crate::{
 
 retour::static_detour! {
     static HookUFunctionBind: unsafe extern "system" fn(*mut ue::UFunction);
-    static GetServerName: unsafe extern "system" fn(*const c_void, *const c_void) -> *const ue::FString;
     static SaveGameToSlot: unsafe extern "system" fn(*const USaveGame, *const ue::FString, i32) -> bool;
     static LoadGameFromSlot: unsafe extern "system" fn(*const ue::FString, i32) -> *const USaveGame;
     static DoesSaveGameExist: unsafe extern "system" fn(*const ue::FString, i32) -> bool;
-    static USessionHandlingFSDFillSessionSetting: unsafe extern "system" fn(*const c_void, *mut c_void, bool);
     static UObjectTemperatureComponentTimerCallback: unsafe extern "system" fn(*mut c_void);
 }
 
@@ -49,7 +49,9 @@ pub unsafe fn initialize() -> Result<()> {
             exec_print_string as ExecFn,
         ),
     ]
-    .into_iter()
+    .iter()
+    .chain(server_list::kismet_hooks().iter())
+    .cloned()
     .collect::<std::collections::HashMap<_, ExecFn>>();
 
     HookUFunctionBind.initialize(
@@ -75,59 +77,7 @@ pub unsafe fn initialize() -> Result<()> {
     )?;
     HookUFunctionBind.enable()?;
 
-    if let Ok(server_name) = &globals().resolution.server_name {
-        GetServerName
-            .initialize(
-                std::mem::transmute(server_name.get_server_name.0),
-                get_server_name_detour,
-            )?
-            .enable()?;
-    }
-
-    if let Ok(server_mods) = &globals().resolution.server_mods {
-        let patch_addr = server_mods.semicolon_h_replace.0 as *mut u8;
-        patch_mem(patch_addr.add(2), [0xC3])?;
-        patch_mem(patch_addr.add(7), [0x0F, 0x1F, 0x44, 0x00, 0x00])?;
-        patch_mem(patch_addr.add(102), [0xEB])?;
-
-        let mods_fname = server_mods.mods_fname.0;
-        let set_fstring = server_mods.set_fstring.0;
-        USessionHandlingFSDFillSessionSetting
-            .initialize(
-                std::mem::transmute(server_mods.fill_session_setting.0),
-                move |world, game_settings, full_server| {
-                    USessionHandlingFSDFillSessionSetting.call(world, game_settings, full_server);
-
-                    #[derive(serde::Serialize)]
-                    struct Wrapper {
-                        name: String,
-                        version: String,
-                        category: i32,
-                    }
-
-                    let s = serde_json::to_string(&vec![Wrapper {
-                        name: globals().meta.to_server_list_string(),
-                        version: "mint".into(),
-                        category: 0,
-                    }])
-                    .unwrap();
-
-                    let s = ue::FString::from(s.as_str());
-
-                    type Fn = unsafe extern "system" fn(
-                        *const c_void,
-                        *const c_void,
-                        *const ue::FString,
-                        u32,
-                    );
-
-                    let f: Fn = std::mem::transmute(set_fstring);
-
-                    f(game_settings, *(mods_fname as *const *const c_void), &s, 3);
-                },
-            )?
-            .enable()?;
-    }
+    server_list::init_hooks()?;
 
     if !globals().meta.config.disable_fix_exploding_gas {
         if let Ok(gas_fix) = &globals().resolution.gas_fix {
@@ -319,22 +269,6 @@ fn does_save_game_exist_detour(slot_name: *const ue::FString, user_index: i32) -
         } else {
             false
         }
-    }
-}
-
-fn get_server_name_detour(a: *const c_void, b: *const c_void) -> *const ue::FString {
-    unsafe {
-        let name = GetServerName.call(a, b).cast_mut().as_mut().unwrap();
-
-        let mut new_name = widestring::U16String::new();
-        new_name.push_str("[MODDED] ");
-        new_name.push_slice(name.as_slice());
-
-        name.clear();
-        name.extend_from_slice(new_name.as_slice());
-        name.push(0);
-
-        name
     }
 }
 

@@ -1172,19 +1172,46 @@ fn patch_server_list_entry<C: Seek + Read>(asset: &mut Asset<C>) -> Result<(), I
         })
         .map(|(pi, _)| PackageIndex::from_import(pi as i32).unwrap());
 
+    let fsd_target_platform = asset
+        .imports
+        .iter()
+        .enumerate()
+        .find(|(_, i)| {
+            i.class_package.get_content(|s| s == "/Script/CoreUObject")
+                && i.class_name.get_content(|s| s == "Function")
+                && i.object_name.get_content(|s| s == "FSDTargetPlatform")
+        })
+        .map(|(pi, _)| PackageIndex::from_import(pi as i32).unwrap());
+
     let ver = AssetVersion::new_from(asset);
     let mut statements = extract_tracked_statements(asset, ver, &None);
 
-    for (_pi, statements) in statements.iter_mut() {
+    for (pi, statements) in statements.iter_mut() {
+        let name = &asset
+            .asset_data
+            .get_export(*pi)
+            .unwrap()
+            .get_base_export()
+            .object_name;
+
+        let swap_platform = name.get_content(|c| ["GetMissionToolTip", "SetSession"].contains(&c));
+
         for statement in statements {
             walk(&mut statement.ex, &|ex| {
-                if let KismetExpression::ExCallMath(ex) = ex {
-                    if Some(ex.stack_node) == get_mods_installed && ex.parameters.len() == 2 {
-                        ex.parameters[1] = ExFalse {
+                if let KismetExpression::ExCallMath(cm) = ex {
+                    if Some(cm.stack_node) == get_mods_installed && cm.parameters.len() == 2 {
+                        cm.parameters[1] = ExFalse {
                             token: EExprToken::ExFalse,
                         }
                         .into();
                         info!("patched server list entry");
+                    }
+                    if swap_platform && Some(cm.stack_node) == fsd_target_platform {
+                        *ex = ExByteConst {
+                            token: EExprToken::ExByteConst,
+                            value: 0,
+                        }
+                        .into();
                     }
                 }
             });

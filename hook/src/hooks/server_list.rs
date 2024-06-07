@@ -46,7 +46,7 @@ fn detour_get_server_name(a: *const c_void, b: *const c_void) -> *const ue::FStr
         let name = GetServerName.call(a, b).cast_mut().as_mut().unwrap();
 
         let mut new_name = widestring::U16String::new();
-        new_name.push_slice([0x5b, 0x4d, 0x4f, 0x44, 0x44, 0x45, 0x44, 0x5d, 0x20, 0x0a]);
+        new_name.push_slice([0x5b, 0x4d, 0x4f, 0x44, 0x44, 0x45, 0x44, 0x5d, 0x20]);
         new_name.push_slice(name.as_slice());
 
         name.clear();
