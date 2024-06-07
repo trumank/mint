@@ -1,3 +1,5 @@
+use std::mem::MaybeUninit;
+
 use super::*;
 
 #[derive(Debug)]
@@ -19,19 +21,18 @@ pub struct FFrame {
 }
 
 impl FFrame {
-    pub fn arg<T: Sized + Default>(self: &mut FFrame) -> T {
-        let mut ret: T = Default::default();
-        unsafe {
-            let ptr = &mut ret as *mut T as *mut _;
+    pub unsafe fn arg<T: Sized>(self: &mut FFrame) -> T {
+        let mut value: MaybeUninit<T> = MaybeUninit::zeroed();
+        let ptr = value.as_mut_ptr() as *mut _;
 
-            if self.code.is_null() {
-                let cur = self.property_chain_for_compiled_in;
-                self.property_chain_for_compiled_in = (*cur).next;
-                (globals().fframe_step_explicit_property())(self, ptr, cur as *const FProperty);
-            } else {
-                (globals().fframe_step())(self, self.object, ptr);
-            }
+        if self.code.is_null() {
+            let cur = self.property_chain_for_compiled_in;
+            self.property_chain_for_compiled_in = (*cur).next;
+            (globals().fframe_step_explicit_property())(self, ptr, cur as *const FProperty);
+        } else {
+            (globals().fframe_step())(self, self.object, ptr);
         }
-        ret
+
+        value.assume_init()
     }
 }
