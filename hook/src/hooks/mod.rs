@@ -18,6 +18,7 @@ use windows::Win32::System::Memory::{VirtualProtect, PAGE_EXECUTE_READWRITE};
 use crate::{
     globals,
     ue::{self, FLinearColor, UObject},
+    LOG_GUARD,
 };
 
 retour::static_detour! {
@@ -26,6 +27,8 @@ retour::static_detour! {
     static LoadGameFromSlot: unsafe extern "system" fn(*const ue::FString, i32) -> *const USaveGame;
     static DoesSaveGameExist: unsafe extern "system" fn(*const ue::FString, i32) -> bool;
     static UObjectTemperatureComponentTimerCallback: unsafe extern "system" fn(*mut c_void);
+    static WinMain: unsafe extern "system" fn(*mut (), *mut (), *mut (), i32, *const ()) -> i32;
+
 }
 
 #[repr(C)]
@@ -53,6 +56,12 @@ pub unsafe fn initialize() -> Result<()> {
     .chain(server_list::kismet_hooks().iter())
     .cloned()
     .collect::<std::collections::HashMap<_, ExecFn>>();
+
+    WinMain.initialize(
+        std::mem::transmute(globals().resolution.core.as_ref().unwrap().main.0),
+        detour_main,
+    )?;
+    WinMain.enable()?;
 
     HookUFunctionBind.initialize(
         std::mem::transmute(globals().resolution.core.as_ref().unwrap().ufunction_bind.0),
@@ -270,6 +279,29 @@ fn does_save_game_exist_detour(slot_name: *const ue::FString, user_index: i32) -
             false
         }
     }
+}
+
+fn detour_main(
+    h_instance: *mut (),
+    h_prev_instance: *mut (),
+    lp_cmd_line: *mut (),
+    n_cmd_show: i32,
+    cmd_line: *const (),
+) -> i32 {
+    let ret = unsafe {
+        WinMain.call(
+            h_instance,
+            h_prev_instance,
+            lp_cmd_line,
+            n_cmd_show,
+            cmd_line,
+        )
+    };
+
+    // about to exit, drop log guard
+    drop(unsafe { LOG_GUARD.take() });
+
+    ret
 }
 
 unsafe extern "system" fn exec_get_mod_json(

@@ -2196,6 +2196,7 @@ dependencies = [
  "serde_json",
  "tokio",
  "tracing",
+ "tracing-appender",
  "widestring",
  "windows 0.52.0",
 ]
@@ -3290,7 +3291,7 @@ checksum = "1e91099d4268b0e11973f036e885d652fb0b21fedcf69738c627f94db6a44f42"
 [[package]]
 name = "patternsleuth"
 version = "0.1.0"
-source = "git+https://github.com/trumank/patternsleuth#0d5175345a4827f98bc51df893cf2079ebf53306"
+source = "git+https://github.com/trumank/patternsleuth#ac36038da71fcb69b79af4506f332b798e87cdcd"
 dependencies = [
  "anyhow",
  "futures",
@@ -3311,7 +3312,7 @@ dependencies = [
 [[package]]
 name = "patternsleuth_scanner"
 version = "0.1.0"
-source = "git+https://github.com/trumank/patternsleuth#0d5175345a4827f98bc51df893cf2079ebf53306"
+source = "git+https://github.com/trumank/patternsleuth#ac36038da71fcb69b79af4506f332b798e87cdcd"
 dependencies = [
  "anyhow",
  "memchr",
