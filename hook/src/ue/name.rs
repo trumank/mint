@@ -1,5 +1,7 @@
 use crate::{globals, ue::FString};
 
+use super::UEHash;
+
 #[derive(Debug, Clone, Copy)]
 #[repr(u32)]
 pub enum EFindName {
@@ -8,7 +10,7 @@ pub enum EFindName {
     ReplaceNotSafeForThreading,
 }
 
-#[derive(Default, Clone, Copy)]
+#[derive(Default, Clone, Copy, Eq, PartialEq, PartialOrd, Ord)]
 #[repr(C)]
 pub struct FName {
     pub comparison_index: FNameEntryId,
@@ -32,7 +34,7 @@ impl std::fmt::Debug for FName {
     }
 }
 
-#[derive(Default, Debug, Clone, Copy)]
+#[derive(Default, Debug, Clone, Copy, Eq, PartialEq, PartialOrd, Ord)]
 #[repr(C)]
 pub struct FNameEntryId {
     pub value: u32,
@@ -45,5 +47,17 @@ impl std::fmt::Display for FName {
             (globals().fname_to_string())(self, &mut string);
         };
         write!(f, "{string}")
+    }
+}
+impl UEHash for FNameEntryId {
+    fn ue_hash(&self) -> u32 {
+        let value = self.value;
+        (value >> 4) + value.wrapping_mul(0x10001) + (value >> 0x10).wrapping_mul(0x80001)
+    }
+}
+
+impl UEHash for FName {
+    fn ue_hash(&self) -> u32 {
+        self.comparison_index.ue_hash() + self.number
     }
 }

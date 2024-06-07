@@ -1,12 +1,14 @@
 mod array;
 pub mod kismet;
 mod malloc;
+mod map;
 mod name;
 mod object;
 mod string;
 
 pub use array::*;
 pub use malloc::*;
+pub use map::*;
 pub use name::*;
 pub use object::*;
 pub use string::*;
