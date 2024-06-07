@@ -134,6 +134,10 @@ unsafe fn patch() -> Result<()> {
     if guard.is_none() {
         warn!("failed to set up logging");
     }
+    // Normally this guard should be held in the main scope so it's dropped on exit, but since we
+    // don't control the entrypoint we just leak it so it doesn't get dropped early. In the future
+    // the UE exit could be hooked to drop the guard there instead.
+    std::mem::forget(guard);
 
     let pak_path = bin_dir
         .and_then(Path::parent)
