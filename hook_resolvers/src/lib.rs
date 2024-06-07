@@ -1,6 +1,6 @@
 use patternsleuth::resolvers::futures::future::join_all;
 use patternsleuth::resolvers::unreal::blueprint_library::UFunctionBind;
-use patternsleuth::resolvers::unreal::fname::FNameToString;
+use patternsleuth::resolvers::unreal::fname::{FNameCtorWchar, FNameToString};
 use patternsleuth::resolvers::unreal::gmalloc::GMalloc;
 use patternsleuth::resolvers::unreal::kismet::{FFrameStep, FFrameStepExplicitProperty};
 use patternsleuth::resolvers::unreal::save_game::{
@@ -217,6 +217,7 @@ impl_try_collector! {
     pub struct CoreResolution {
         pub gmalloc: GMalloc,
         pub fnametostring: FNameToString,
+        pub fname_ctor_wchar: FNameCtorWchar,
         pub uobject_base_utility_get_path_name: UObjectBaseUtilityGetPathName,
         pub ufunction_bind: UFunctionBind,
         pub fframe_step: FFrameStep,

@@ -23,6 +23,7 @@ pub type FnFFrameStepExplicitProperty = unsafe extern "system" fn(
     property: *const FProperty,
 );
 pub type FnFNameToString = unsafe extern "system" fn(&FName, &mut FString);
+pub type FnFNameCtorWchar = unsafe extern "system" fn(&mut FName, *const u16, EFindName);
 
 pub type FnUObjectBaseUtilityGetPathName =
     unsafe extern "system" fn(&UObjectBase, Option<&UObject>, &mut FString);

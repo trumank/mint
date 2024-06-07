@@ -83,6 +83,9 @@ impl Globals {
     pub fn fname_to_string(&self) -> ue::FnFNameToString {
         unsafe { std::mem::transmute(self.resolution.core.as_ref().unwrap().fnametostring.0) }
     }
+    pub fn fname_ctor_wchar(&self) -> ue::FnFNameCtorWchar {
+        unsafe { std::mem::transmute(self.resolution.core.as_ref().unwrap().fname_ctor_wchar.0) }
+    }
     pub fn uobject_base_utility_get_path_name(&self) -> ue::FnUObjectBaseUtilityGetPathName {
         unsafe {
             std::mem::transmute(

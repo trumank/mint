@@ -5,34 +5,40 @@ use crate::globals;
 #[derive(Debug)]
 #[repr(C)]
 pub struct TArray<T> {
-    data: *const T,
+    data: *mut T,
     num: i32,
     max: i32,
 }
 impl<T> TArray<T> {
     pub fn new() -> Self {
         Self {
-            data: std::ptr::null(),
+            data: std::ptr::null_mut(),
             num: 0,
             max: 0,
         }
+    }
+    pub fn as_ptr(&self) -> *const T {
+        self.data
+    }
+    pub fn as_mut_ptr(&mut self) -> *mut T {
+        self.data
     }
 }
 impl<T> Drop for TArray<T> {
     fn drop(&mut self) {
         unsafe {
             std::ptr::drop_in_place(std::ptr::slice_from_raw_parts_mut(
-                self.data.cast_mut(),
+                self.data,
                 self.num as usize,
             ))
         }
-        globals().gmalloc().free(self.data as *mut c_void);
+        globals().gmalloc().free(self.data.cast());
     }
 }
 impl<T> Default for TArray<T> {
     fn default() -> Self {
         Self {
-            data: std::ptr::null(),
+            data: std::ptr::null_mut(),
             num: 0,
             max: 0,
         }
@@ -44,7 +50,7 @@ impl<T> TArray<T> {
             data: globals().gmalloc().malloc(
                 capacity * std::mem::size_of::<T>(),
                 std::mem::align_of::<T>() as u32,
-            ) as *const T,
+            ) as *mut _,
             num: 0,
             max: capacity as i32,
         }
@@ -87,14 +93,14 @@ impl<T> TArray<T> {
                 self.data as *mut c_void,
                 self.max as usize * std::mem::size_of::<T>(),
                 std::mem::align_of::<T>() as u32,
-            ) as *const T;
+            ) as *mut _;
             self.data = new;
         }
     }
     pub fn push(&mut self, new_value: T) {
         self.reserve(1);
         unsafe {
-            std::ptr::write(self.data.add(self.num as usize).cast_mut(), new_value);
+            std::ptr::write(self.data.add(self.num as usize), new_value);
         }
         self.num += 1;
     }
