@@ -133,11 +133,17 @@ unsafe fn patch() -> Result<()> {
     let exe_path = std::env::current_exe().ok();
     let bin_dir = exe_path.as_deref().and_then(Path::parent);
 
-    let guard = bin_dir
-        .and_then(|bin_dir| mint_lib::setup_logging(bin_dir.join("mint_hook.log"), "hook").ok());
-    if guard.is_none() {
-        warn!("failed to set up logging");
-    }
+    //let guard = bin_dir
+    //    .and_then(|bin_dir| mint_lib::setup_logging(bin_dir.join("mint_hook.log"), "hook").ok());
+    //if guard.is_none() {
+    //    warn!("failed to set up logging");
+    //}
+    use tracing_subscriber::layer::SubscriberExt;
+
+    tracing::subscriber::set_global_default(
+        tracing_subscriber::registry().with(tracing_tracy::TracyLayer::default()),
+    )
+    .expect("setup tracy layer");
 
     let pak_path = bin_dir
         .and_then(Path::parent)
@@ -156,7 +162,7 @@ unsafe fn patch() -> Result<()> {
     info!("PS scan: {:#x?}", resolution);
 
     GLOBALS = Some(Globals { resolution, meta });
-    LOG_GUARD = guard;
+    //LOG_GUARD = guard;
 
     hooks::initialize()?;
 

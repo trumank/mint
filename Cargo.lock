@@ -1920,6 +1920,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "generator"
+version = "0.7.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5cc16584ff22b460a382b7feec54b23d2908d858152e5739a120b949293bd74e"
+dependencies = [
+ "cc",
+ "libc",
+ "log",
+ "rustversion",
+ "windows 0.48.0",
+]
+
+[[package]]
 name = "generic-array"
 version = "0.14.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2192,11 +2205,14 @@ dependencies = [
  "postcard",
  "repak",
  "retour",
+ "seq-macro",
  "serde",
  "serde_json",
  "tokio",
  "tracing",
  "tracing-appender",
+ "tracing-subscriber",
+ "tracing-tracy",
  "widestring",
  "windows 0.52.0",
 ]
@@ -2611,6 +2627,19 @@ name = "log"
 version = "0.4.20"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b5e6163cb8c49088c2c36f57875e58ccd8c87c7427f7fbd50ea6710b2f3f2e8f"
+
+[[package]]
+name = "loom"
+version = "0.7.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7e045d70ddfbc984eacfa964ded019534e8f6cbf36f6410aee0ed5cefa5a9175"
+dependencies = [
+ "cfg-if",
+ "generator",
+ "scoped-tls",
+ "tracing",
+ "tracing-subscriber",
+]
 
 [[package]]
 name = "lzma-rs"
@@ -3291,7 +3320,7 @@ checksum = "1e91099d4268b0e11973f036e885d652fb0b21fedcf69738c627f94db6a44f42"
 [[package]]
 name = "patternsleuth"
 version = "0.1.0"
-source = "git+https://github.com/trumank/patternsleuth#ac36038da71fcb69b79af4506f332b798e87cdcd"
+source = "git+https://github.com/trumank/patternsleuth#539aa3f86ebb5d5ab9d80e7c5b2adacaf6604b5e"
 dependencies = [
  "anyhow",
  "futures",
@@ -3312,7 +3341,7 @@ dependencies = [
 [[package]]
 name = "patternsleuth_scanner"
 version = "0.1.0"
-source = "git+https://github.com/trumank/patternsleuth#ac36038da71fcb69b79af4506f332b798e87cdcd"
+source = "git+https://github.com/trumank/patternsleuth#539aa3f86ebb5d5ab9d80e7c5b2adacaf6604b5e"
 dependencies = [
  "anyhow",
  "memchr",
@@ -4876,6 +4905,34 @@ dependencies = [
  "tracing",
  "tracing-core",
  "tracing-log",
+]
+
+[[package]]
+name = "tracing-tracy"
+version = "0.11.0"
+source = "git+https://github.com/trumank/rust_tracy_client.git?branch=static-linking#03be8471cb960a7f3dad502df34006e050169b17"
+dependencies = [
+ "tracing-core",
+ "tracing-subscriber",
+ "tracy-client",
+]
+
+[[package]]
+name = "tracy-client"
+version = "0.17.0"
+source = "git+https://github.com/trumank/rust_tracy_client.git?branch=static-linking#03be8471cb960a7f3dad502df34006e050169b17"
+dependencies = [
+ "loom",
+ "once_cell",
+ "tracy-client-sys",
+]
+
+[[package]]
+name = "tracy-client-sys"
+version = "0.22.2"
+source = "git+https://github.com/trumank/rust_tracy_client.git?branch=static-linking#03be8471cb960a7f3dad502df34006e050169b17"
+dependencies = [
+ "cc",
 ]
 
 [[package]]

@@ -3,6 +3,7 @@
 mod server_list;
 
 use std::{
+    collections::HashMap,
     ffi::c_void,
     path::{Path, PathBuf},
     ptr::NonNull,
@@ -17,7 +18,7 @@ use windows::Win32::System::Memory::{VirtualProtect, PAGE_EXECUTE_READWRITE};
 
 use crate::{
     globals,
-    ue::{self, FLinearColor, UObject},
+    ue::{self, kismet::FFrame, FLinearColor, UFunction, UObject},
     LOG_GUARD,
 };
 
@@ -28,6 +29,8 @@ retour::static_detour! {
     static DoesSaveGameExist: unsafe extern "system" fn(*const ue::FString, i32) -> bool;
     static UObjectTemperatureComponentTimerCallback: unsafe extern "system" fn(*mut c_void);
     static WinMain: unsafe extern "system" fn(*mut (), *mut (), *mut (), i32, *const ()) -> i32;
+    static FEngineLoopTick: unsafe extern "system" fn(*mut ());
+    static UGameEngineTick: unsafe extern "system" fn(*mut (), f32, bool);
 
 }
 
@@ -62,6 +65,20 @@ pub unsafe fn initialize() -> Result<()> {
         detour_main,
     )?;
     WinMain.enable()?;
+
+    if let Ok(debug) = &globals().resolution.debug {
+        FEngineLoopTick.initialize(
+            std::mem::transmute(debug.fengine_loop_tick.0),
+            detour_fengine_loop_tick,
+        )?;
+        FEngineLoopTick.enable()?;
+
+        UGameEngineTick.initialize(
+            std::mem::transmute(debug.ugame_engine_tick.0),
+            detour_ugame_engine_tick,
+        )?;
+        UGameEngineTick.enable()?;
+    }
 
     HookUFunctionBind.initialize(
         std::mem::transmute(globals().resolution.core.as_ref().unwrap().ufunction_bind.0),
@@ -281,6 +298,72 @@ fn does_save_game_exist_detour(slot_name: *const ue::FString, user_index: i32) -
     }
 }
 
+struct NativesArray([Option<ExecFn>; 0x100]);
+
+static mut GNATIVES_OLD: NativesArray = NativesArray([None; 0x100]);
+static mut NAME_CACHE: Option<HashMap<usize, String>> = None;
+
+unsafe fn debug(expr: usize, ctx: *mut UObject, frame: *mut FFrame, ret: *mut c_void) {
+    if NAME_CACHE.is_none() {
+        NAME_CACHE = Some(Default::default());
+    }
+
+    let (index, path) = {
+        let stack = &*frame;
+        let func = &*(stack.node as *const UFunction);
+
+        let index = 0;
+        //TODO causes issues for some reason
+        //let index = (stack.code as isize)
+        //    .wrapping_sub(func.ustruct.script.as_ptr() as isize);
+
+        let path = NAME_CACHE
+            .as_mut()
+            .unwrap_unchecked()
+            .entry(stack.node as usize)
+            .or_insert_with(|| {
+                func.ustruct
+                    .ufield
+                    .uobject
+                    .uobject_base_utility
+                    .uobject_base
+                    .get_path_name(None)
+            });
+        (index, path)
+    };
+
+    tracing::info_span!("kismet", path, index).in_scope(|| {
+        ((GNATIVES_OLD.0)[expr].unwrap())(ctx, frame, ret);
+    });
+}
+
+unsafe extern "system" fn hook_exec<const N: usize>(
+    ctx: *mut UObject,
+    frame: *mut FFrame,
+    ret: *mut c_void,
+) {
+    debug(N, ctx, frame, ret);
+}
+
+unsafe fn hook_gnatives(gnatives: &mut NativesArray) {
+    seq_macro::seq!(N in 0..256 {
+        (GNATIVES_OLD.0)[N] = gnatives.0[N];
+        gnatives.0[N] = Some(hook_exec::<N>);
+    });
+}
+
+fn detour_fengine_loop_tick(this: *mut ()) {
+    tracing::warn_span!("FEngineLoop::Tick").in_scope(|| unsafe {
+        FEngineLoopTick.call(this);
+    });
+}
+
+fn detour_ugame_engine_tick(this: *mut (), delta_seconds: f32, b_idle_mode: bool) {
+    tracing::warn_span!("UGameEngine::Tick").in_scope(|| unsafe {
+        UGameEngineTick.call(this, delta_seconds, b_idle_mode);
+    });
+}
+
 fn detour_main(
     h_instance: *mut (),
     h_prev_instance: *mut (),
@@ -288,20 +371,25 @@ fn detour_main(
     n_cmd_show: i32,
     cmd_line: *const (),
 ) -> i32 {
-    let ret = unsafe {
-        WinMain.call(
+    unsafe {
+        if let Ok(debug) = &globals().resolution.debug {
+            tracing::info!("hooking GNatives");
+            hook_gnatives((debug.gnatives.0 as *mut NativesArray).as_mut().unwrap());
+        }
+
+        let ret = WinMain.call(
             h_instance,
             h_prev_instance,
             lp_cmd_line,
             n_cmd_show,
             cmd_line,
-        )
-    };
+        );
 
-    // about to exit, drop log guard
-    drop(unsafe { LOG_GUARD.take() });
+        // about to exit, drop log guard
+        drop(LOG_GUARD.take());
 
-    ret
+        ret
+    }
 }
 
 unsafe extern "system" fn exec_get_mod_json(
