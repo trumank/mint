@@ -21,6 +21,8 @@ behavioural differences. If a mod is crashing or otherwise behaving differently 
 official integration, *please* create an
 [issue](https://github.com/trumank/mint/issues/new) so it can be addressed.
 
+For more details, please consult our [user guide](https://github.com/trumank/mint/wiki).
+
 ## Usage
 
 This section assumes that you are on Windows and is using the steam version of DRG, working with
