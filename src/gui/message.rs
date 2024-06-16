@@ -13,8 +13,9 @@ use tracing::*;
 use super::SelfUpdateProgress;
 use super::{
     request_counter::{RequestCounter, RequestID},
-    App, LastActionStatus, SpecFetchProgress, WindowProviderParameters,
+    App, SpecFetchProgress, WindowProviderParameters,
 };
+use crate::gui::LastAction;
 use crate::integrate::*;
 use crate::mod_lints::{LintId, LintReport};
 use crate::state::{ModData_v0_1_0 as ModData, ModOrGroup};
@@ -92,7 +93,7 @@ impl ResolveMods {
             .unwrap();
             ctx.request_repaint();
         });
-        app.last_action_status = LastActionStatus::Idle;
+        app.last_action = None;
         app.resolve_mod_rid = Some(MessageHandle {
             rid,
             handle,
@@ -155,18 +156,19 @@ impl ResolveMods {
                     app.resolve_mod.clear();
                     app.sort_mods();
                     app.state.mod_data.save().unwrap();
-                    app.last_action_status =
-                        LastActionStatus::Success("mods successfully resolved".to_string());
+                    app.last_action = Some(LastAction::success(
+                        "mods successfully resolved".to_string(),
+                    ));
                 }
                 Err(ProviderError::NoProvider { url: _, factory }) => {
                     app.window_provider_parameters =
                         Some(WindowProviderParameters::new(factory, &app.state));
-                    app.last_action_status = LastActionStatus::Failure("no provider".to_string());
+                    app.last_action = Some(LastAction::failure("no provider".to_string()));
                 }
                 Err(e) => {
                     error!("{}", e);
                     app.problematic_mod_id = e.opt_mod_id();
-                    app.last_action_status = LastActionStatus::Failure(e.to_string());
+                    app.last_action = Some(LastAction::failure(e.to_string()));
                 }
             }
             app.resolve_mod_rid = None;
@@ -211,8 +213,7 @@ impl Integrate {
             match self.result {
                 Ok(()) => {
                     info!("integration complete");
-                    app.last_action_status =
-                        LastActionStatus::Success("integration complete".to_string());
+                    app.last_action = Some(LastAction::success("integration complete".to_string()));
                 }
                 Err(ref e)
                     if let IntegrationError::ProviderError { ref source } = e
@@ -220,12 +221,12 @@ impl Integrate {
                 {
                     app.window_provider_parameters =
                         Some(WindowProviderParameters::new(factory, &app.state));
-                    app.last_action_status = LastActionStatus::Failure("no provider".to_string());
+                    app.last_action = Some(LastAction::failure("no provider".to_string()));
                 }
                 Err(e) => {
                     error!("{}", e);
                     app.problematic_mod_id = e.opt_mod_id();
-                    app.last_action_status = LastActionStatus::Failure(e.to_string());
+                    app.last_action = Some(LastAction::failure(e.to_string()));
                 }
             }
             app.integrate_rid = None;
@@ -267,7 +268,7 @@ impl UpdateCache {
                 .await
                 .unwrap();
         });
-        app.last_action_status = LastActionStatus::Idle;
+        app.last_action = None;
         app.update_rid = Some(MessageHandle {
             rid,
             handle,
@@ -280,18 +281,19 @@ impl UpdateCache {
             match self.result {
                 Ok(()) => {
                     info!("cache update complete");
-                    app.last_action_status =
-                        LastActionStatus::Success("successfully updated cache".to_string());
+                    app.last_action = Some(LastAction::success(
+                        "successfully updated cache".to_string(),
+                    ));
                 }
                 Err(ProviderError::NoProvider { url: _, factory }) => {
                     app.window_provider_parameters =
                         Some(WindowProviderParameters::new(factory, &app.state));
-                    app.last_action_status = LastActionStatus::Failure("no provider".to_string());
+                    app.last_action = Some(LastAction::failure("no provider".to_string()));
                 }
                 Err(e) => {
                     error!("{}", e);
                     app.problematic_mod_id = e.opt_mod_id();
-                    app.last_action_status = LastActionStatus::Failure(e.to_string());
+                    app.last_action = Some(LastAction::failure(e.to_string()));
                 }
             }
             app.update_rid = None;
@@ -469,8 +471,8 @@ impl LintMods {
                 Ok(report) => {
                     info!("lint mod report complete");
                     app.lint_report = Some(report);
-                    app.last_action_status =
-                        LastActionStatus::Success("lint mod report complete".to_string());
+                    app.last_action =
+                        Some(LastAction::success("lint mod report complete".to_string()));
                 }
                 Err(ref e)
                     if let IntegrationError::ProviderError { ref source } = e
@@ -478,12 +480,12 @@ impl LintMods {
                 {
                     app.window_provider_parameters =
                         Some(WindowProviderParameters::new(factory, &app.state));
-                    app.last_action_status = LastActionStatus::Failure("no provider".to_string());
+                    app.last_action = Some(LastAction::failure("no provider".to_string()));
                 }
                 Err(e) => {
                     error!("{}", e);
                     app.problematic_mod_id = e.opt_mod_id();
-                    app.last_action_status = LastActionStatus::Failure(e.to_string());
+                    app.last_action = Some(LastAction::failure(e.to_string()));
                 }
             }
             app.integrate_rid = None;
@@ -568,15 +570,13 @@ impl SelfUpdate {
                 Ok(original_exe_path) => {
                     info!("self update complete");
                     app.original_exe_path = Some(original_exe_path);
-                    app.last_action_status =
-                        LastActionStatus::Success("self update complete".to_string());
+                    app.last_action = Some(LastAction::success("self update complete".to_string()));
                 }
                 Err(e) => {
                     error!("self update failed");
                     error!("{:#?}", e);
                     app.self_update_rid = None;
-                    app.last_action_status =
-                        LastActionStatus::Failure("self update failed".to_string());
+                    app.last_action = Some(LastAction::failure("self update failed".to_string()));
                 }
             }
             app.integrate_rid = None;
