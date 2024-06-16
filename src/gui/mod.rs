@@ -34,6 +34,7 @@ use tokio::{
 };
 use tracing::{debug, trace};
 
+use crate::gui::find_string::searchable_text;
 use crate::mod_lints::{LintId, LintReport, SplitAssetPair};
 use crate::providers::ProviderError;
 use crate::state::SortingConfig;
@@ -47,7 +48,6 @@ use crate::{
     state::{ModConfig, ModData_v0_1_0 as ModData, ModOrGroup, ModProfile, State},
     MintError,
 };
-use find_string::FindString;
 use message::MessageHandle;
 use request_counter::{RequestCounter, RequestID};
 
@@ -286,50 +286,27 @@ impl App {
                          ui: &mut Ui,
                          color: Option<egui::Color32>,
                          hover_str: Option<&str>| {
-                            let text_color = if color.is_some() {
-                                Color32::BLACK
-                            } else {
-                                Color32::GRAY
-                            };
-                            let mut job = LayoutJob::default();
-                            let mut is_match = false;
-                            if !self.search_string.is_empty() {
-                                for (m, chunk) in
-                                    find_string::FindString::new(tag_str, &self.search_string)
-                                {
-                                    let background = if m {
-                                        is_match = true;
-                                        TextFormat {
-                                            background: Color32::YELLOW,
-                                            color: text_color,
-                                            ..Default::default()
-                                        }
+                            let search = searchable_text(tag_str, &self.search_string, {
+                                TextFormat {
+                                    color: if color.is_some() {
+                                        Color32::BLACK
                                     } else {
-                                        TextFormat {
-                                            color: text_color,
-                                            ..Default::default()
-                                        }
-                                    };
-                                    job.append(chunk, 0.0, background);
-                                }
-                            } else {
-                                job.append(
-                                    tag_str,
-                                    0.0,
-                                    TextFormat {
-                                        color: text_color,
-                                        ..Default::default()
+                                        Color32::GRAY
                                     },
-                                );
-                            }
+
+                                    ..Default::default()
+                                }
+                            });
 
                             let button = if let Some(color) = color {
-                                egui::Button::new(job)
+                                egui::Button::new(search.job)
                                     .small()
                                     .fill(color)
                                     .stroke(egui::Stroke::NONE)
                             } else {
-                                egui::Button::new(job).small().stroke(egui::Stroke::NONE)
+                                egui::Button::new(search.job)
+                                    .small()
+                                    .stroke(egui::Stroke::NONE)
                             };
 
                             let res = if let Some(hover_str) = hover_str {
@@ -339,7 +316,7 @@ impl App {
                                 ui.add_enabled(false, button)
                             };
 
-                            if is_match && self.scroll_to_match {
+                            if search.is_match && self.scroll_to_match {
                                 res.scroll_to_me(None);
                                 ctx.scroll_to_match = false;
                             }
@@ -582,30 +559,6 @@ impl App {
                         }
                     }
 
-                    let vis = ui.visuals();
-                    let mut job = LayoutJob::default();
-                    let mut is_match = false;
-                    let default = TextFormat {
-                        color: vis.hyperlink_color,
-                        ..Default::default()
-                    };
-                    if !self.search_string.is_empty() {
-                        for (m, chunk) in FindString::new(&info.name, &self.search_string) {
-                            let background = if m {
-                                is_match = true;
-                                TextFormat {
-                                    background: Color32::YELLOW,
-                                    ..default.clone()
-                                }
-                            } else {
-                                default.clone()
-                            };
-                            job.append(chunk, 0.0, background);
-                        }
-                    } else {
-                        job.append(&info.name, 0.0, default);
-                    }
-
                     match info.provider {
                         "modio" => {
                             let texture: &egui::TextureHandle =
@@ -638,8 +591,15 @@ impl App {
                         _ => unimplemented!("unimplemented provider kind"),
                     }
 
-                    let res = ui.hyperlink_to(job, &mc.spec.url);
-                    if is_match && self.scroll_to_match {
+                    let search = searchable_text(&info.name, &self.search_string, {
+                        TextFormat {
+                            color: ui.visuals().hyperlink_color,
+                            ..Default::default()
+                        }
+                    });
+
+                    let res = ui.hyperlink_to(search.job, &mc.spec.url);
+                    if search.is_match && self.scroll_to_match {
                         res.scroll_to_me(None);
                         ctx.scroll_to_match = false;
                     }
@@ -655,7 +615,19 @@ impl App {
                     {
                         ui.output_mut(|o| o.copied_text = mc.spec.url.to_string());
                     }
-                    ui.hyperlink(&mc.spec.url);
+
+                    let search = searchable_text(&mc.spec.url, &self.search_string, {
+                        TextFormat {
+                            color: ui.visuals().hyperlink_color,
+                            ..Default::default()
+                        }
+                    });
+
+                    let res = ui.hyperlink_to(search.job, &mc.spec.url);
+                    if search.is_match && self.scroll_to_match {
+                        res.scroll_to_me(None);
+                        ctx.scroll_to_match = false;
+                    }
                 }
             };
 

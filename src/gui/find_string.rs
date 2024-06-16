@@ -1,3 +1,5 @@
+use egui::{text::LayoutJob, Color32, TextFormat};
+
 pub(crate) struct FindString<'data> {
     pub(crate) string: &'data str,
     pub(crate) string_lower: String,
@@ -57,4 +59,31 @@ impl<'data> Iterator for FindString<'data> {
         }
         None
     }
+}
+
+pub(crate) struct SearchJob {
+    pub(crate) job: LayoutJob,
+    pub(crate) is_match: bool,
+}
+
+pub(crate) fn searchable_text(text: &str, search_string: &str, format: TextFormat) -> SearchJob {
+    let mut job = LayoutJob::default();
+    let mut is_match = false;
+    if !search_string.is_empty() {
+        for (m, chunk) in FindString::new(text, search_string) {
+            let background = if m {
+                is_match = true;
+                TextFormat {
+                    background: Color32::YELLOW,
+                    ..format.clone()
+                }
+            } else {
+                format.clone()
+            };
+            job.append(chunk, 0.0, background);
+        }
+    } else {
+        job.append(text, 0.0, format);
+    }
+    SearchJob { job, is_match }
 }
