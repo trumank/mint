@@ -94,6 +94,8 @@ postcard.workspace = true
 fs-err.workspace = true
 snafu.workspace = true
 strum = { version = "0.26", features = ["derive"] }
+itertools.workspace = true
+egui_dnd = "0.6.0"
 
 [target.'cfg(target_env = "msvc")'.dependencies]
 hook = { path = "hook", artifact = "cdylib", optional = true, target = "x86_64-pc-windows-msvc"}

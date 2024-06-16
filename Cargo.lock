@@ -931,6 +931,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "concat-idents"
+version = "1.1.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f76990911f2267d837d9d0ad060aa63aaad170af40904b29461734c339030d4d"
+dependencies = [
+ "quote",
+ "syn 2.0.48",
+]
+
+[[package]]
 name = "concurrent-queue"
 version = "2.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1419,9 +1429,20 @@ dependencies = [
  "log",
  "raw-window-handle 0.5.2",
  "smithay-clipboard",
- "web-time",
+ "web-time 0.2.3",
  "webbrowser",
  "winit",
+]
+
+[[package]]
+name = "egui_animation"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e9ccebd83685921eceb3a89df08ce02bbee7c9f7b79472f1a45d12332188a174"
+dependencies = [
+ "egui",
+ "hello_egui_utils",
+ "simple-easing",
 ]
 
 [[package]]
@@ -1433,6 +1454,18 @@ dependencies = [
  "egui",
  "egui_extras",
  "pulldown-cmark",
+]
+
+[[package]]
+name = "egui_dnd"
+version = "0.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "76ff7872d7974d88b5aa5c55d76d4e43b1628005974cb45758402224526233b2"
+dependencies = [
+ "egui",
+ "egui_animation",
+ "simple-easing",
+ "web-time 1.1.0",
 ]
 
 [[package]]
@@ -2144,6 +2177,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "95505c38b4572b2d910cecb0281560f54b440a19336cbbcb27bf6ce6adc6f5a8"
 
 [[package]]
+name = "hello_egui_utils"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7831675138f982346346b0473a4b4e4fe5794a847ef546b0d794a2e4d8c1a364"
+dependencies = [
+ "concat-idents",
+ "egui",
+]
+
+[[package]]
 name = "hermit-abi"
 version = "0.3.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2722,6 +2765,7 @@ dependencies = [
  "eframe",
  "egui",
  "egui_commonmark",
+ "egui_dnd",
  "fs-err",
  "futures",
  "hex",
@@ -2730,6 +2774,7 @@ dependencies = [
  "include_dir",
  "indexmap 2.2.6",
  "inventory",
+ "itertools 0.12.0",
  "mint_lib",
  "mockall",
  "modio",
@@ -4253,6 +4298,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d66dc143e6b11c1eddc06d5c423cfc97062865baf299914ab64caa38182078fe"
 
 [[package]]
+name = "simple-easing"
+version = "1.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "832ddd7df0d98d6fd93b973c330b7c8e0742d5cb8f1afc7dea89dba4d2531aa1"
+
+[[package]]
 name = "slab"
 version = "0.4.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5429,6 +5480,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "web-time"
+version = "1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5a6580f308b1fad9207618087a65c04e7a10bc77e02c8e84e9b00dd4b12fa0bb"
+dependencies = [
+ "js-sys",
+ "wasm-bindgen",
+]
+
+[[package]]
 name = "webbrowser"
 version = "0.8.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5798,7 +5859,7 @@ dependencies = [
  "wayland-protocols",
  "wayland-protocols-plasma",
  "web-sys",
- "web-time",
+ "web-time 0.2.3",
  "windows-sys 0.48.0",
  "x11-dl",
  "x11rb 0.13.0",

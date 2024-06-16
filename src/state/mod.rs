@@ -419,7 +419,7 @@ impl Default for Config!["0.0.0"] {
                 .map(DRGInstallation::main_pak),
             gui_theme: None,
             disable_fix_exploding_gas: false,
-            sorting_config: Some(SortingConfig::default()),
+            sorting_config: None,
         }
     }
 }

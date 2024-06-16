@@ -24,6 +24,7 @@ use eframe::{
     epaint::{text::LayoutJob, Color32, Stroke},
 };
 use egui_commonmark::{CommonMarkCache, CommonMarkViewer};
+use itertools::Itertools as _;
 use mint_lib::error::ResultExt as _;
 use mint_lib::mod_info::{ModioTags, RequiredStatus};
 use mint_lib::update::GitHubRelease;
@@ -94,7 +95,7 @@ impl GuiTheme {
     }
 }
 
-#[derive(PartialEq, Debug, EnumIter, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(PartialEq, Debug, EnumIter, Clone, Copy, serde::Serialize, serde::Deserialize)]
 pub enum SortBy {
     Enabled,
     Name,
@@ -253,6 +254,8 @@ impl App {
     }
 
     fn ui_profile(&mut self, ui: &mut Ui, profile: &str) {
+        let sorting_config = self.get_sorting_config();
+
         let ModData {
             profiles, groups, ..
         } = self.state.mod_data.deref_mut().deref_mut();
@@ -270,7 +273,7 @@ impl App {
             add_deps: None,
         };
 
-        let mut ui_profile = |ui: &mut Ui, profile: &mut ModProfile| {
+        let ui_profile = |ui: &mut Ui, profile: &mut ModProfile| {
             let enabled_specs = profile
                 .mods
                 .iter()
@@ -704,22 +707,62 @@ impl App {
                     }
                 };
 
-            profile
-                .mods
-                .iter_mut()
-                .enumerate()
-                .for_each(|(index, item)| {
-                    let mut frame = egui::Frame::none();
-                    if index % 2 == 1 {
-                        frame.fill = ui.visuals().faint_bg_color
-                    }
-                    frame.show(ui, |ui| {
-                        ui.horizontal(|ui| {
-                            ui_item(&mut ctx, ui, item, index);
+            if let Some(sorting_config) = sorting_config {
+                let comp = sort_mods(sorting_config);
+                profile
+                    .mods
+                    .iter_mut()
+                    .map(|m| {
+                        // fetch ModInfo up front because doing it in the comparator is slow
+                        let ModOrGroup::Individual(mc) = m else {
+                            unimplemented!("Item is not Individual \n{:?}", m);
+                        };
+                        let info = self.state.store.get_mod_info(&mc.spec);
+                        (m, info)
+                    })
+                    .enumerate()
+                    .sorted_by(|a, b| comp((a.1 .0, a.1 .1.as_ref()), (b.1 .0, b.1 .1.as_ref())))
+                    .enumerate()
+                    .for_each(|(visual_index, (store_index, item))| {
+                        let mut frame = egui::Frame::none();
+                        if visual_index % 2 == 1 {
+                            frame.fill = ui.visuals().faint_bg_color
+                        }
+                        frame.show(ui, |ui| {
+                            ui.horizontal(|ui| {
+                                ui_item(&mut ctx, ui, item.0, store_index);
+                            });
                         });
                     });
-                });
+            } else {
+                let res = egui_dnd::dnd(ui, ui.id())
+                    .with_mouse_config(egui_dnd::DragDropConfig::mouse())
+                    .show(
+                        profile.mods.iter_mut().enumerate(),
+                        |ui, (_index, item), handle, state| {
+                            let mut frame = egui::Frame::none();
+                            if state.dragged {
+                                frame.fill = ui.visuals().extreme_bg_color
+                            } else if state.index % 2 == 1 {
+                                frame.fill = ui.visuals().faint_bg_color
+                            }
+                            frame.show(ui, |ui| {
+                                ui.horizontal(|ui| {
+                                    handle.ui(ui, |ui| {
+                                        ui.label("   ☰  ");
+                                    });
 
+                                    ui_item(&mut ctx, ui, item, state.index);
+                                });
+                            });
+                        },
+                    );
+
+                if res.final_update().is_some() {
+                    res.update_vec(&mut profile.mods);
+                    ctx.needs_save = true;
+                }
+            }
             if let Some(remove) = ctx.btn_remove {
                 profile.mods.remove(remove);
                 ctx.needs_save = true;
@@ -1521,104 +1564,72 @@ impl App {
         }
     }
 
-    fn get_sorting_config(&mut self) -> (SortBy, bool) {
-        let default_config = SortingConfig::default();
-        let sorting_config = match self.state.config.sorting_config.as_ref() {
-            Some(config) => config.clone(),
-            None => default_config,
-        };
-        (sorting_config.sort_category, sorting_config.is_ascending)
+    fn get_sorting_config(&self) -> Option<SortingConfig> {
+        self.state.config.sorting_config.clone()
     }
 
-    fn update_sorting_config(&mut self, sort_category: SortBy, is_ascending: bool) {
-        self.state.config.sorting_config = Some(SortingConfig {
+    fn update_sorting_config(&mut self, sort_category: Option<SortBy>, is_ascending: bool) {
+        self.state.config.sorting_config = sort_category.map(|sort_category| SortingConfig {
             sort_category,
             is_ascending,
         });
         self.state.config.save().unwrap();
     }
+}
 
-    fn sort_mods(&mut self) {
-        let (sort_category, is_ascending) = self.get_sorting_config();
-
-        let profile = self.state.mod_data.active_profile.clone();
-        let ModData { profiles, .. } = self.state.mod_data.deref_mut().deref_mut();
-
-        if let Some(active_profile) = profiles.get_mut(&profile) {
-            active_profile.mods.sort_by(|a, b| {
-                if matches!(a, ModOrGroup::Group { .. }) || matches!(b, ModOrGroup::Group { .. }) {
-                    unimplemented!("Groups in sorting not implemented");
-                }
-
-                let ModOrGroup::Individual(mc_a) = a else {
-                    debug!("Item is not Individual \n{:?}", a);
-                    return Ordering::Equal;
-                };
-                let ModOrGroup::Individual(mc_b) = b else {
-                    debug!("Item is not Individual \n{:?}", b);
-                    return Ordering::Equal;
-                };
-
-                let Some(info_a) = self.state.store.get_mod_info(&mc_a.spec) else {
-                    debug!("Failed to get mod info for \n{:?}", mc_a);
-                    return Ordering::Equal;
-                };
-                let Some(info_b) = self.state.store.get_mod_info(&mc_b.spec) else {
-                    debug!("Failed to get mod info for \n{:?}", mc_b);
-                    return Ordering::Equal;
-                };
-
-                let handle_missing_modio_tags = || -> Option<Ordering> {
-                    let mut order = if info_a.modio_tags.is_none() && info_b.modio_tags.is_none() {
-                        Ordering::Equal
-                    } else if info_a.modio_tags.is_none() {
-                        Ordering::Less
-                    } else if info_b.modio_tags.is_none() {
-                        Ordering::Greater
-                    } else {
-                        return None;
-                    };
-                    if is_ascending {
-                        order = order.reverse();
-                    }
-                    Some(order)
-                };
-
-                let name_order = info_a.name.to_lowercase().cmp(&info_b.name.to_lowercase());
-                let approval_order = handle_missing_modio_tags().unwrap_or_else(|| {
-                    info_a
-                        .modio_tags
-                        .clone()
-                        .unwrap()
-                        .approval_status
-                        .cmp(&info_b.modio_tags.clone().unwrap().approval_status)
-                });
-                let required_order = handle_missing_modio_tags().unwrap_or_else(|| {
-                    info_a
-                        .modio_tags
-                        .clone()
-                        .unwrap()
-                        .required_status
-                        .cmp(&info_b.modio_tags.clone().unwrap().required_status)
-                });
-                let mut order = match sort_category {
-                    SortBy::Enabled => mc_b.enabled.cmp(&mc_a.enabled),
-                    SortBy::Name => name_order,
-                    SortBy::Priority => mc_a.priority.cmp(&mc_b.priority),
-                    SortBy::Provider => info_b.provider.cmp(info_a.provider),
-                    SortBy::RequiredStatus => required_order,
-                    SortBy::ApprovalCategory => approval_order,
-                };
-
-                if !is_ascending {
-                    order = order.reverse();
-                }
-                if sort_category != SortBy::Name {
-                    order = order.then(name_order);
-                }
-                order
-            });
+fn sort_mods(
+    config: SortingConfig,
+) -> impl Fn((&ModOrGroup, Option<&ModInfo>), (&ModOrGroup, Option<&ModInfo>)) -> Ordering {
+    move |(a, info_a), (b, info_b)| {
+        if matches!(a, ModOrGroup::Group { .. }) || matches!(b, ModOrGroup::Group { .. }) {
+            unimplemented!("Groups in sorting not implemented");
         }
+
+        let ModOrGroup::Individual(mc_a) = a else {
+            debug!("Item is not Individual \n{:?}", a);
+            return Ordering::Equal;
+        };
+        let ModOrGroup::Individual(mc_b) = b else {
+            debug!("Item is not Individual \n{:?}", b);
+            return Ordering::Equal;
+        };
+
+        fn map_cmp<V, M, F>(a: &V, b: &V, map: F) -> Ordering
+        where
+            M: Ord,
+            F: Fn(&V) -> M,
+        {
+            map(a).cmp(&map(b))
+        }
+
+        let name_order = map_cmp(&(mc_a, info_a), &(mc_b, info_b), |(mc, info)| {
+            (info.map(|i| i.name.to_lowercase()), &mc.spec.url)
+        });
+        let provider_order = map_cmp(&info_a, &info_b, |info| info.map(|i| i.provider));
+        let approval_order = map_cmp(&info_a, &info_b, |info| {
+            info.and_then(|i| i.modio_tags.as_ref())
+                .map(|t| t.approval_status)
+        });
+        let required_order = map_cmp(&info_a, &info_b, |info| {
+            info.and_then(|i| i.modio_tags.as_ref())
+                .map(|t| std::cmp::Reverse(t.required_status))
+        });
+        let mut order = match config.sort_category {
+            SortBy::Enabled => mc_b.enabled.cmp(&mc_a.enabled),
+            SortBy::Name => name_order,
+            SortBy::Priority => mc_a.priority.cmp(&mc_b.priority),
+            SortBy::Provider => provider_order,
+            SortBy::RequiredStatus => required_order,
+            SortBy::ApprovalCategory => approval_order,
+        };
+
+        if config.is_ascending {
+            order = order.reverse();
+        }
+        if config.sort_category != SortBy::Name {
+            order = order.then(name_order);
+        }
+        order
     }
 }
 
@@ -1945,7 +1956,6 @@ impl eframe::App for App {
                 self.state.mod_data.deref_mut().deref_mut(),
                 Some(buttons),
             ) {
-                self.sort_mods();
                 self.state.mod_data.save().unwrap();
             }
 
@@ -1987,27 +1997,29 @@ impl eframe::App for App {
             ui.horizontal(|ui| {
                 ui.label("Sort by: ");
 
-                let (mut sort_category, mut is_ascending) = self.get_sorting_config();
+                let (mut sort_category, mut is_ascending) = self
+                    .get_sorting_config()
+                    .map(|c| (Some(c.sort_category), c.is_ascending))
+                    .unwrap_or_default();
 
+                let mut clicked = ui.radio_value(&mut sort_category, None, "Manual").clicked();
                 for category in SortBy::iter() {
                     let mut radio_label = category.as_str().to_owned();
-                    if sort_category == category {
-                        if is_ascending {
-                            radio_label.push_str(" ⏶");
-                        } else {
-                            radio_label.push_str(" ⏷");
-                        }
+                    if sort_category == Some(category) {
+                        radio_label.push_str(if is_ascending { " ⏶" } else { " ⏷" });
                     }
-                    let resp = ui.radio_value(&mut sort_category, category, radio_label);
+                    let resp = ui.radio_value(&mut sort_category, Some(category), radio_label);
                     if resp.clicked() {
+                        clicked = true;
                         if resp.changed() {
                             is_ascending = true;
                         } else {
                             is_ascending = !is_ascending;
                         }
-                        self.update_sorting_config(sort_category.clone(), is_ascending);
-                        self.sort_mods();
                     };
+                }
+                if clicked {
+                    self.update_sorting_config(sort_category, is_ascending);
                 }
 
                 ui.add_space(16.);

@@ -154,7 +154,6 @@ impl ResolveMods {
                         }
                     }
                     app.resolve_mod.clear();
-                    app.sort_mods();
                     app.state.mod_data.save().unwrap();
                     app.last_action = Some(LastAction::success(
                         "mods successfully resolved".to_string(),
