@@ -4,12 +4,47 @@
 
 ## [Unreleased] - ReleaseDate
 
-- Significantly optimize cache updates (first update will still be a full update)
-- Replace escape menu modding tab with mod integration interface
+### General
+
+- Fix unintentionally linking to libssl on Linux. This used to prevent some users on various Linux
+  distros from being able to launch mint at all.
+
+### User Interface
+
 - Add light/dark mode toggle to settings menu
-- More mod save file fixes for Windows store version
+- Replace escape menu modding tab with new modding menu
+- Show mint mods in public server list
+- Show time since last action
+- Make mod URL searchable for mods without cache data
+- Implement load priority to no longer rely on implicit ordering
+- Add mod list sorting
+- Slightly improved error reporting; mint should now indicate the mod that caused a failure
+- Various GUI improvements
+
+### Core Functionality
+
+- Implement Asset Registry handling. This should be sufficient for most mods that were previously
+  not usable with mint due to the lack of Asset Registry handling.
+- Implement self-update
+- Fix mod url resolution
+- Fix mods sometimes integrating in incorrect order
+- Add patch to fix gas clouds not exploding sometimes
+- Some mod save file fixes for Windows store version
+
+### Internal Changes
+
+- Significantly optimize cache updates (first update will still be a full update)
+- Allow overriding appdata dir via CLI flag
+- Rename cache and config directories from `drg-mod-integration` to `mint` and default to legacy
+  if they exist
 - Fix Windows console being full of garbage characters
-- Fix unintentionally linking to libssl on Linux
+- Disable LTO for dev builds
+- Add nix flake
+- Improved testing
+- Various CI improvements
+- Reduce release size by removing debug symbols
+- Package Linux target with zip instead of tar
+- Compress bundled mod pak
 
 ## [0.2.10] - 2023-08-18
 
