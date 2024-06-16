@@ -147,11 +147,12 @@ pub unsafe fn initialize() -> Result<()> {
 unsafe fn apply_gas_fix(gas_fix: &Arc<GasFixResolution>) -> Result<()> {
     #[repr(C)]
     struct UObjectTemperatureComponent {
-        padding: [u8; 0xc8],
-        on_start_burning: u64,
-        unknown: i64,
+        padding: [u8; 0xd8],
+        on_start_burning: [u64; 2],
+        on_frozen_server: [u64; 2],
         temperature_change_scale: f32,
         burn_temperature: f32,
+        freeze_temperature: f32,
         douse_fire_temperature: f32,
         cooling_rate: f32,
         is_heatsource_when_on_fire: bool,
