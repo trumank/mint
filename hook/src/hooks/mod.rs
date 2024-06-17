@@ -48,6 +48,10 @@ pub unsafe fn initialize() -> Result<()> {
             exec_get_mod_json as ExecFn,
         ),
         (
+            "/Game/_mint/BPL_MINT.BPL_MINT_C:GetUpdateAvailable",
+            exec_get_update_available as ExecFn,
+        ),
+        (
             "/Script/Engine.KismetSystemLibrary:PrintString",
             exec_print_string as ExecFn,
         ),
@@ -327,7 +331,35 @@ unsafe extern "system" fn exec_get_mod_json(
 
     std::mem::forget(ret);
 
-    stack.code = stack.code.add(1);
+    if !stack.code.is_null() {
+        stack.code = stack.code.add(1);
+    }
+}
+
+unsafe extern "system" fn exec_get_update_available(
+    _context: *mut ue::UObject,
+    stack: *mut ue::kismet::FFrame,
+    _result: *mut c_void,
+) {
+    let stack = stack.as_mut().unwrap();
+
+    let _ctx: Option<&ue::UObject> = stack.arg();
+
+    stack.arg::<bool>();
+    let done_checking = &mut *(stack.most_recent_property_address as *mut bool);
+    *done_checking = true;
+
+    stack.arg::<bool>();
+    let available = &mut *(stack.most_recent_property_address as *mut bool);
+    *available = false;
+
+    std::mem::forget(stack.arg::<ue::FString>());
+    let version = &mut *(stack.most_recent_property_address as *mut ue::FString);
+    *version = ue::FString::new();
+
+    if !stack.code.is_null() {
+        stack.code = stack.code.add(1);
+    }
 }
 
 unsafe extern "system" fn exec_print_string(
@@ -346,5 +378,7 @@ unsafe extern "system" fn exec_print_string(
 
     println!("PrintString({string})");
 
-    stack.code = stack.code.add(1);
+    if !stack.code.is_null() {
+        stack.code = stack.code.add(1);
+    }
 }

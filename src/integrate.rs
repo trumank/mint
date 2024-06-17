@@ -18,7 +18,7 @@ use unreal_asset::AssetBuilder;
 
 use crate::mod_lints::LintError;
 use crate::providers::{ModInfo, ProviderError, ReadSeek};
-use mint_lib::mod_info::{ApprovalStatus, Meta, MetaConfig, MetaMod, SemverVersion};
+use mint_lib::mod_info::{ApprovalStatus, Meta, MetaConfig, MetaMod};
 use mint_lib::DRGInstallation;
 
 use unreal_asset::{
@@ -597,15 +597,8 @@ impl<W: Write + Seek> ModBundleWriter<W> {
         config: MetaConfig,
         mods: &[(ModInfo, PathBuf)],
     ) -> Result<(), IntegrationError> {
-        let mut split = env!("CARGO_PKG_VERSION").split('.');
-        let version = SemverVersion {
-            major: split.next().unwrap().parse().unwrap(),
-            minor: split.next().unwrap().parse().unwrap(),
-            patch: split.next().unwrap().parse().unwrap(),
-        };
-
         let meta = Meta {
-            version,
+            version: mint_lib::built_info::version().into(),
             config,
             mods: mods
                 .iter()

@@ -1,4 +1,4 @@
-use std::{collections::BTreeSet, fmt::Display};
+use std::collections::BTreeSet;
 
 use serde::{Deserialize, Serialize};
 
@@ -126,24 +126,13 @@ impl From<&str> for ModIdentifier {
 /// Stripped down mod info stored in the mod pak to be used in game
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Meta {
-    pub version: SemverVersion,
+    pub version: String,
     pub mods: Vec<MetaMod>,
     pub config: MetaConfig,
 }
 #[derive(Debug, Serialize, Deserialize)]
 pub struct MetaConfig {
     pub disable_fix_exploding_gas: bool,
-}
-#[derive(Debug, Serialize, Deserialize)]
-pub struct SemverVersion {
-    pub major: u32,
-    pub minor: u32,
-    pub patch: u32,
-}
-impl Display for SemverVersion {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}.{}.{}", self.major, self.minor, self.patch)
-    }
 }
 #[derive(Debug, Serialize, Deserialize)]
 pub struct MetaMod {
