@@ -5,6 +5,7 @@ authors.workspace = true
 license.workspace = true
 version.workspace = true
 edition.workspace = true
+build = "build.rs"
 
 [dependencies]
 anyhow.workspace = true
@@ -18,3 +19,6 @@ tracing-appender.workspace = true
 tracing-subscriber.workspace = true
 reqwest.workspace = true
 snafu.workspace = true
+
+[build-dependencies]
+built = { version = "0.7.3", features = ["semver", "git2"] }

@@ -62,7 +62,7 @@ pub fn gui(dirs: Dirs, args: Option<Vec<String>>) -> Result<(), MintError> {
         ..Default::default()
     };
     eframe::run_native(
-        &format!("mint {}", env!("CARGO_PKG_VERSION")),
+        &format!("mint {}", mint_lib::built_info::GIT_VERSION.unwrap()),
         options,
         Box::new(|cc| Ok(Box::new(App::new(cc, dirs, args)?))),
     )

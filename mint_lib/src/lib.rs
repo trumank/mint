@@ -12,6 +12,14 @@ use fs_err as fs;
 use tracing::*;
 use tracing_subscriber::fmt::format::FmtSpan;
 
+pub mod built_info {
+    include!(concat!(env!("OUT_DIR"), "/built.rs"));
+
+    pub fn version() -> &'static str {
+        GIT_VERSION.unwrap()
+    }
+}
+
 #[derive(Debug)]
 pub enum DRGInstallationType {
     Steam,
@@ -202,6 +210,7 @@ pub fn setup_logging<P: AsRef<Path>>(
 
     debug!("tracing subscriber setup");
     info!("writing logs to {:?}", log_path.as_ref().display());
+    info!("version: {}", built_info::version());
 
     Ok(guard)
 }
