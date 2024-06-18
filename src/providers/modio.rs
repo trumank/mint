@@ -2,6 +2,7 @@ use std::collections::{BTreeSet, HashSet};
 use std::sync::OnceLock;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use futures::TryStreamExt;
 use itertools::Itertools;
 #[cfg(test)]
 use mockall::{automock, predicate::*};
@@ -158,6 +159,7 @@ pub struct ModioFileResponse {
     version: Option<String>,
     changelog: Option<String>,
     filesize: u64,
+    download: ModioFileResponseDownload,
 }
 impl From<modio::files::File> for ModioFileResponse {
     fn from(value: modio::files::File) -> Self {
@@ -167,6 +169,18 @@ impl From<modio::files::File> for ModioFileResponse {
             version: value.version,
             changelog: value.changelog,
             filesize: value.filesize,
+            download: value.download.into(),
+        }
+    }
+}
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ModioFileResponseDownload {
+    binary_url: String,
+}
+impl From<modio::files::Download> for ModioFileResponseDownload {
+    fn from(value: modio::files::Download) -> Self {
+        Self {
+            binary_url: value.binary_url.to_string(),
         }
     }
 }
@@ -316,9 +330,11 @@ pub trait DrgModio: Sync + Send {
         mod_ids: Vec<u32>,
         last_update: u64,
     ) -> Result<HashSet<u32>, DrgModioError>;
-    fn download<A: 'static>(&self, action: A) -> modio::download::Downloader
-    where
-        modio::download::DownloadAction: From<A>;
+    async fn download(
+        &self,
+        mod_id: u32,
+        file_id: u32,
+    ) -> futures::stream::BoxStream<'static, Result<bytes::Bytes, DrgModioError>>;
 }
 
 struct ModioAlt {
@@ -334,10 +350,10 @@ impl ModioAlt {
             .send()
             .await
             // TODO clean up this nonsense
-            .map_err(|e| Into::<anyhow::Error>::into(e))
+            .map_err(Into::<anyhow::Error>::into)
             .context(GenericReqwestMiddlewareSnafu)?
             .error_for_status()
-            .map_err(|e| Into::<anyhow::Error>::into(e))
+            .map_err(Into::<anyhow::Error>::into)
             .context(GenericReqwestMiddlewareSnafu)?
             .json::<I>()
             .await
@@ -349,12 +365,13 @@ impl ModioAlt {
         query: &str,
     ) -> Result<Vec<I>, DrgModioError> {
         #[derive(Deserialize)]
-        pub struct ResultPage<Data> {
-            pub data: Vec<Data>,
-            pub result_count: i64,
-            pub result_offset: i64,
-            pub result_limit: i64,
-            pub result_total: i64,
+        #[allow(unused)]
+        struct ResultPage<Data> {
+            data: Vec<Data>,
+            result_count: i64,
+            result_offset: i64,
+            result_limit: i64,
+            result_total: i64,
         }
 
         let mut offset = 0;
@@ -403,14 +420,14 @@ impl DrgModio for ModioAlt {
     async fn check(&self) -> Result<(), DrgModioError> {
         #[derive(Deserialize)]
         struct Empty {}
-        self.get::<Empty>(&format!("mods?id=0")).await.map(|_| ())
+        self.get::<Empty>("mods?id=0").await.map(|_| ())
     }
 
     async fn fetch_mod(&self, url: String, mod_id: u32) -> Result<ModioMod, DrgModioError> {
         let res_files = self
             .fetch_list::<ModioFileResponse>(&format!("mods/{mod_id}/files"), "id-not=0")
             .await
-            .map_err(|e| Into::<anyhow::Error>::into(e))
+            .map_err(Into::<anyhow::Error>::into)
             .with_context(|_| FetchModFilesFailedSnafu {
                 url: url.to_string(),
                 mod_id,
@@ -422,7 +439,7 @@ impl DrgModio for ModioAlt {
         let res: ModioModResponse = self
             .get(&format!("mods/{mod_id}"))
             .await
-            .map_err(|e| Into::<anyhow::Error>::into(e))
+            .map_err(Into::<anyhow::Error>::into)
             .with_context(|_| FetchModFailedSnafu { url, mod_id })?;
         Ok(ModioMod::new(res, res_files))
     }
@@ -436,7 +453,7 @@ impl DrgModio for ModioAlt {
         let res: ModioFileResponse = self
             .get(&format!("mods/{mod_id}/files/{modfile_id}"))
             .await
-            .map_err(|e| Into::<anyhow::Error>::into(e))
+            .map_err(Into::<anyhow::Error>::into)
             .with_context(|_| FetchModFileFailedSnafu {
                 url,
                 mod_id,
@@ -457,7 +474,7 @@ impl DrgModio for ModioAlt {
         let res: Vec<ModDependency> = self
             .fetch_list(&format!("mods/{mod_id}/dependencies"), "")
             .await
-            .map_err(|e| Into::<anyhow::Error>::into(e))
+            .map_err(Into::<anyhow::Error>::into)
             .with_context(|_| FetchDependenciesFailedSnafu { url, mod_id })?;
         Ok(res.into_iter().map(|d| d.mod_id).collect())
     }
@@ -507,14 +524,38 @@ impl DrgModio for ModioAlt {
         Ok(res.iter().map(|e| e.mod_id).collect::<HashSet<_>>())
     }
 
-    fn download<A>(&self, action: A) -> modio::download::Downloader
-    where
-        modio::download::DownloadAction: From<A>,
-    {
-        self.modio.download(action)
+    async fn download(
+        &self,
+        mod_id: u32,
+        file_id: u32,
+    ) -> futures::stream::BoxStream<'static, Result<bytes::Bytes, DrgModioError>> {
+        use futures::StreamExt;
+
+        let res = self
+            .get::<ModioFileResponse>(&format!("mods/{mod_id}/files/{file_id}"))
+            .await
+            .unwrap();
+
+        self.client
+            .get(res.download.binary_url)
+            .header("Authorization", format!("Bearer {}", self.oauth))
+            .send()
+            .await
+            // TODO clean up this nonsense
+            //.map_err(Into::<anyhow::Error>::into)
+            //.context(GenericReqwestMiddlewareSnafu)
+            .unwrap()
+            .error_for_status()
+            //.map_err(Into::<anyhow::Error>::into)
+            //.context(GenericReqwestMiddlewareSnafu)
+            .unwrap()
+            .bytes_stream()
+            .context(GenericReqwestSnafu)
+            .boxed()
     }
 }
 
+#[cfg(test)]
 mod test2 {
     use super::*;
 
@@ -727,7 +768,7 @@ impl DrgModio for modio::Modio {
             .search(Id::ne(0))
             .collect()
             .await
-            .map_err(|e| Into::<anyhow::Error>::into(e))
+            .map_err(Into::<anyhow::Error>::into)
             .with_context(|_| FetchModFilesFailedSnafu {
                 mod_id: id,
                 url: url.clone(),
@@ -740,7 +781,7 @@ impl DrgModio for modio::Modio {
             .mod_(id)
             .get()
             .await
-            .map_err(|e| Into::<anyhow::Error>::into(e))
+            .map_err(Into::<anyhow::Error>::into)
             .context(FetchModFailedSnafu { mod_id: id, url })?;
 
         Ok(ModioMod::new(r#mod.into(), files))
@@ -758,7 +799,7 @@ impl DrgModio for modio::Modio {
             .file(modfile_id)
             .get()
             .await
-            .map_err(|e| Into::<anyhow::Error>::into(e))
+            .map_err(Into::<anyhow::Error>::into)
             .with_context(|_| FetchModFileFailedSnafu {
                 url,
                 mod_id,
@@ -778,7 +819,7 @@ impl DrgModio for modio::Modio {
             .dependencies()
             .list()
             .await
-            .map_err(|e| Into::<anyhow::Error>::into(e))
+            .map_err(Into::<anyhow::Error>::into)
             .with_context(|_| FetchDependenciesFailedSnafu { url, mod_id })?
             .into_iter()
             .map(|d| d.mod_id)
@@ -857,11 +898,23 @@ impl DrgModio for modio::Modio {
         Ok(events.iter().map(|e| e.mod_id).collect::<HashSet<_>>())
     }
 
-    fn download<A>(&self, action: A) -> modio::download::Downloader
-    where
-        modio::download::DownloadAction: From<A>,
-    {
-        self.download(action)
+    async fn download(
+        &self,
+        mod_id: u32,
+        file_id: u32,
+    ) -> futures::stream::BoxStream<'static, Result<bytes::Bytes, DrgModioError>> {
+        let download = modio::download::DownloadAction::File {
+            game_id: MODIO_DRG_ID,
+            mod_id,
+            file_id,
+        };
+
+        use futures::StreamExt;
+
+        self.download(download)
+            .stream()
+            .context(GenericModioSnafu)
+            .boxed()
     }
 }
 
@@ -1144,19 +1197,13 @@ impl<M: DrgModio + Send + Sync> ModProvider for ModioProvider<M> {
                         .await?;
 
                     let size = file.filesize;
-                    let download = modio::download::DownloadAction::File {
-                        game_id: MODIO_DRG_ID,
-                        mod_id,
-                        file_id: file.id,
-                    };
 
                     info!("downloading mod {url:?}...");
 
-                    use futures::stream::TryStreamExt;
                     use tokio::io::AsyncWriteExt;
 
                     let mut cursor = std::io::Cursor::new(vec![]);
-                    let mut stream = Box::pin(self.modio.download(download).stream());
+                    let mut stream = self.modio.download(mod_id, file.id).await;
                     while let Some(bytes) = stream
                         .try_next()
                         .await

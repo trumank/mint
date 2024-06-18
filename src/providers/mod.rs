@@ -81,7 +81,7 @@ pub enum ProviderError {
     #[snafu(transparent)]
     DrgModioError { source: DrgModioError },
     #[snafu(display("mod.io-related error encountered while working on mod {mod_id}: {source}"))]
-    ModCtxtModioError { source: ::modio::Error, mod_id: u32 },
+    ModCtxtModioError { source: DrgModioError, mod_id: u32 },
     #[snafu(display("I/O error encountered while working on mod {mod_id}: {source}"))]
     ModCtxtIoError { source: std::io::Error, mod_id: u32 },
     #[snafu(transparent)]
