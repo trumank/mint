@@ -108,12 +108,12 @@ pub struct ModioMod {
 }
 
 impl ModioMod {
-    fn new(mod_: modio::mods::Mod, files: Vec<modio::files::File>) -> Self {
+    fn new(mod_: ModioModResponse, modfiles: Vec<ModioFile>) -> Self {
         Self {
             name_id: mod_.name_id,
             name: mod_.name,
             latest_modfile: mod_.modfile.map(|f| f.id),
-            modfiles: files.into_iter().map(ModioFile::new).collect(),
+            modfiles,
             tags: mod_.tags.into_iter().map(|t| t.name).collect(),
         }
     }
@@ -123,7 +123,19 @@ impl ModioMod {
 pub struct ModioModResponse {
     id: u32,
     name_id: String,
+    name: String,
     profile_url: String,
+    modfile: Option<ModioFileResponse>,
+    tags: Vec<ModioModResponseTag>,
+}
+#[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ModioModResponseTag {
+    name: String,
+}
+impl From<modio::mods::Tag> for ModioModResponseTag {
+    fn from(value: modio::mods::Tag) -> Self {
+        Self { name: value.name }
+    }
 }
 
 impl From<modio::mods::Mod> for ModioModResponse {
@@ -131,7 +143,30 @@ impl From<modio::mods::Mod> for ModioModResponse {
         Self {
             id: value.id,
             name_id: value.name_id,
+            name: value.name,
             profile_url: value.profile_url.to_string(),
+            modfile: value.modfile.map(Into::into),
+            tags: value.tags.into_iter().map(Into::into).collect(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ModioFileResponse {
+    id: u32,
+    date_added: u64,
+    version: Option<String>,
+    changelog: Option<String>,
+    filesize: u64,
+}
+impl From<modio::files::File> for ModioFileResponse {
+    fn from(value: modio::files::File) -> Self {
+        Self {
+            id: value.id,
+            date_added: value.date_added,
+            version: value.version,
+            changelog: value.changelog,
+            filesize: value.filesize,
         }
     }
 }
@@ -143,14 +178,19 @@ pub struct ModioFile {
     version: Option<String>,
     changelog: Option<String>,
 }
-impl ModioFile {
-    fn new(file: modio::files::File) -> Self {
+impl From<ModioFileResponse> for ModioFile {
+    fn from(value: ModioFileResponse) -> Self {
         Self {
-            id: file.id,
-            date_added: file.date_added,
-            version: file.version,
-            changelog: file.changelog,
+            id: value.id,
+            date_added: value.date_added,
+            version: value.version,
+            changelog: value.changelog,
         }
+    }
+}
+impl From<modio::files::File> for ModioFile {
+    fn from(value: modio::files::File) -> Self {
+        Self::from(ModioFileResponse::from(value))
     }
 }
 
@@ -197,14 +237,14 @@ pub enum DrgModioError {
     #[snafu(display("mod.io error: {source}"))]
     GenericModioError { source: modio::Error },
     #[snafu(display("reqwest middlware error: {source}"))]
-    GenericReqwestMiddlewareError { source: reqwest_middleware::Error },
+    GenericReqwestMiddlewareError { source: anyhow::Error },
     #[snafu(display("reqwest error: {source}"))]
     GenericReqwestError { source: reqwest::Error },
     #[snafu(display("failed to perform basic mod.io probe: {source}"))]
     CheckFailed { source: modio::Error },
     #[snafu(display("failed to fetch mod files for <{url}> (mod_id = {mod_id}): {source}"))]
     FetchModFilesFailed {
-        source: modio::Error,
+        source: anyhow::Error,
         url: String,
         mod_id: u32,
     },
@@ -212,14 +252,14 @@ pub enum DrgModioError {
         "failed to fetch mod file {modfile_id} for <{url}> (mod_id = {mod_id}): {source}"
     ))]
     FetchModFileFailed {
-        source: modio::Error,
+        source: anyhow::Error,
         url: String,
         mod_id: u32,
         modfile_id: u32,
     },
     #[snafu(display("failed to fetch mod <{url}> (mod_id = {mod_id}): {source}"))]
     FetchModFailed {
-        source: modio::Error,
+        source: anyhow::Error,
         url: String,
         mod_id: u32,
     },
@@ -227,7 +267,7 @@ pub enum DrgModioError {
         "failed to fetch dependencies for mod <{url}> (mod_id = {mod_id}): {source}"
     ))]
     FetchDependenciesFailed {
-        source: modio::Error,
+        source: anyhow::Error,
         url: String,
         mod_id: u32,
     },
@@ -255,13 +295,12 @@ pub trait DrgModio: Sync + Send {
         Self: Sized;
     async fn check(&self) -> Result<(), DrgModioError>;
     async fn fetch_mod(&self, url: String, id: u32) -> Result<ModioMod, DrgModioError>;
-    async fn fetch_files(&self, url: String, mod_id: u32) -> Result<ModioMod, DrgModioError>;
     async fn fetch_file(
         &self,
         url: String,
         mod_id: u32,
         modfile_id: u32,
-    ) -> Result<modio::files::File, DrgModioError>;
+    ) -> Result<ModioFileResponse, DrgModioError>;
     async fn fetch_dependencies(&self, url: String, mod_id: u32)
         -> Result<Vec<u32>, DrgModioError>;
     async fn fetch_mods_by_name(
@@ -282,21 +321,28 @@ pub trait DrgModio: Sync + Send {
         modio::download::DownloadAction: From<A>;
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct ResModioMod {
-    name_id: String,
-    //name: String,
-    //latest_modfile: Option<u32>,
-    //modfiles: Vec<ModioFile>,
-    //tags: HashSet<String>,
-}
-
 struct ModioAlt {
     modio: modio::Modio,
     client: reqwest_middleware::ClientWithMiddleware,
     oauth: String,
 }
 impl ModioAlt {
+    async fn get<I: DeserializeOwned>(&self, endpoint: &str) -> Result<I, DrgModioError> {
+        self.client
+            .get(&format!("https://api.mod.io/v1/games/2475/{endpoint}"))
+            .header("Authorization", format!("Bearer {}", self.oauth))
+            .send()
+            .await
+            // TODO clean up this nonsense
+            .map_err(|e| Into::<anyhow::Error>::into(e))
+            .context(GenericReqwestMiddlewareSnafu)?
+            .error_for_status()
+            .map_err(|e| Into::<anyhow::Error>::into(e))
+            .context(GenericReqwestMiddlewareSnafu)?
+            .json::<I>()
+            .await
+            .context(GenericReqwestSnafu)
+    }
     async fn fetch_list<I: DeserializeOwned>(
         &self,
         endpoint: &str,
@@ -315,18 +361,8 @@ impl ModioAlt {
         let mut results = vec![];
 
         loop {
-            let url =
-                format!("https://api.mod.io/v1/games/2475/{endpoint}?_offset={offset}&{query}");
-            let page = self
-                .client
-                .get(url)
-                .header("Authorization", format!("Bearer {}", self.oauth))
-                .send()
-                .await
-                .context(GenericReqwestMiddlewareSnafu)?
-                .json::<ResultPage<I>>()
-                .await
-                .context(GenericReqwestSnafu)?;
+            let url = format!("{endpoint}?_offset={offset}&{query}");
+            let page: ResultPage<I> = self.get(&url).await?;
             results.extend(page.data);
             println!("req {offset} {} {}", results.len(), page.result_offset);
             if results.len() == page.result_total as usize {
@@ -365,71 +401,30 @@ impl DrgModio for ModioAlt {
     }
 
     async fn check(&self) -> Result<(), DrgModioError> {
-        use modio::filter::Eq;
-        use modio::mods::filters::Id;
-
-        self.modio
-            .game(MODIO_DRG_ID)
-            .mods()
-            .search(Id::eq(0))
-            .collect()
-            .await
-            .context(CheckFailedSnafu)?;
-        Ok(())
+        #[derive(Deserialize)]
+        struct Empty {}
+        self.get::<Empty>(&format!("mods?id=0")).await.map(|_| ())
     }
 
-    async fn fetch_mod(&self, url: String, id: u32) -> Result<ModioMod, DrgModioError> {
-        use modio::filter::NotEq;
-        use modio::mods::filters::Id;
-
-        let files = self
-            .modio
-            .game(MODIO_DRG_ID)
-            .mod_(id)
-            .files()
-            .search(Id::ne(0))
-            .collect()
+    async fn fetch_mod(&self, url: String, mod_id: u32) -> Result<ModioMod, DrgModioError> {
+        let res_files = self
+            .fetch_list::<ModioFileResponse>(&format!("mods/{mod_id}/files"), "id-not=0")
             .await
+            .map_err(|e| Into::<anyhow::Error>::into(e))
             .with_context(|_| FetchModFilesFailedSnafu {
-                mod_id: id,
-                url: url.clone(),
-            })?;
-        let r#mod = self
-            .modio
-            .game(MODIO_DRG_ID)
-            .mod_(id)
-            .get()
-            .await
-            .context(FetchModFailedSnafu { mod_id: id, url })?;
-
-        Ok(ModioMod::new(r#mod, files))
-    }
-
-    async fn fetch_files(&self, url: String, mod_id: u32) -> Result<ModioMod, DrgModioError> {
-        use modio::filter::NotEq;
-        use modio::mods::filters::Id;
-
-        let files = self
-            .modio
-            .game(MODIO_DRG_ID)
-            .mod_(mod_id)
-            .files()
-            .search(Id::ne(0))
-            .collect()
-            .await
-            .with_context(|_| FetchModFilesFailedSnafu {
+                url: url.to_string(),
                 mod_id,
-                url: url.clone(),
-            })?;
-        let r#mod = self
-            .modio
-            .game(MODIO_DRG_ID)
-            .mod_(mod_id)
-            .get()
-            .await
-            .context(FetchModFailedSnafu { mod_id, url })?;
+            })?
+            .into_iter()
+            .map(Into::into)
+            .collect();
 
-        Ok(ModioMod::new(r#mod, files))
+        let res: ModioModResponse = self
+            .get(&format!("mods/{mod_id}"))
+            .await
+            .map_err(|e| Into::<anyhow::Error>::into(e))
+            .with_context(|_| FetchModFailedSnafu { url, mod_id })?;
+        Ok(ModioMod::new(res, res_files))
     }
 
     async fn fetch_file(
@@ -437,20 +432,17 @@ impl DrgModio for ModioAlt {
         url: String,
         mod_id: u32,
         modfile_id: u32,
-    ) -> Result<modio::files::File, DrgModioError> {
-        let file = self
-            .modio
-            .game(MODIO_DRG_ID)
-            .mod_(mod_id)
-            .file(modfile_id)
-            .get()
+    ) -> Result<ModioFileResponse, DrgModioError> {
+        let res: ModioFileResponse = self
+            .get(&format!("mods/{mod_id}/files/{modfile_id}"))
             .await
+            .map_err(|e| Into::<anyhow::Error>::into(e))
             .with_context(|_| FetchModFileFailedSnafu {
                 url,
                 mod_id,
                 modfile_id,
             })?;
-        Ok(file)
+        Ok(res)
     }
 
     async fn fetch_dependencies(
@@ -458,20 +450,23 @@ impl DrgModio for ModioAlt {
         url: String,
         mod_id: u32,
     ) -> Result<Vec<u32>, DrgModioError> {
-        let res: Vec<ModioModResponse> = self
+        #[derive(Deserialize)]
+        struct ModDependency {
+            mod_id: u32,
+        }
+        let res: Vec<ModDependency> = self
             .fetch_list(&format!("mods/{mod_id}/dependencies"), "")
             .await
+            .map_err(|e| Into::<anyhow::Error>::into(e))
             .with_context(|_| FetchDependenciesFailedSnafu { url, mod_id })?;
+        Ok(res.into_iter().map(|d| d.mod_id).collect())
     }
 
     async fn fetch_mods_by_name(
         &self,
         name_id: &str,
     ) -> Result<Vec<ModioModResponse>, DrgModioError> {
-        let params = vec![
-            format!("name_id={name_id}"),
-            "visible-in=0,1".to_string()
-        ];
+        let params = vec![format!("name_id={name_id}"), "visible-in=0,1".to_string()];
         let res: Vec<ModioModResponse> = self
             .fetch_list("mods", &params.into_iter().join("&"))
             .await?;
@@ -483,9 +478,7 @@ impl DrgModio for ModioAlt {
         filter_ids: Vec<u32>,
     ) -> Result<Vec<ModioModResponse>, DrgModioError> {
         let mod_list_str = filter_ids.into_iter().map(|id| id.to_string()).join(",");
-        let params = vec![
-            format!("id-in={mod_list_str}"),
-        ];
+        let params = vec![format!("id-in={mod_list_str}")];
         let res: Vec<ModioModResponse> = self
             .fetch_list("mods", &params.into_iter().join("&"))
             .await?;
@@ -536,13 +529,81 @@ mod test2 {
         T::with_parameters(&HashMap::from([("oauth".to_string(), "<insert oauth>".to_string())]))
                 .unwrap()
     }
+    fn client_bad<T: DrgModio>() -> T {
+        T::with_parameters(&HashMap::from([("oauth".to_string(), "bad".to_string())])).unwrap()
+    }
+
+    #[tokio::test]
+    async fn test_modio_alt_check() {
+        setup_tracing();
+
+        async fn get<T: DrgModio>() -> Option<()> {
+            client::<T>().check().await.ok()
+        }
+
+        let a = get::<modio::Modio>().await;
+        let b = get::<ModioAlt>().await;
+        dbg!(&a);
+        assert_eq!(a, b);
+    }
+
+    #[tokio::test]
+    async fn test_modio_alt_check_bad() {
+        setup_tracing();
+
+        async fn get<T: DrgModio>() -> Option<()> {
+            client_bad::<T>().check().await.ok()
+        }
+
+        let a = get::<modio::Modio>().await;
+        let b = get::<ModioAlt>().await;
+        dbg!(&a);
+        assert_eq!(a, b);
+    }
+
+    #[tokio::test]
+    async fn test_modio_alt_fetch_mod() {
+        setup_tracing();
+
+        async fn get<T: DrgModio>() -> ModioMod {
+            client::<T>()
+                .fetch_mod("asdf".into(), 1897251)
+                .await
+                .unwrap()
+        }
+
+        let a = get::<modio::Modio>().await;
+        let b = get::<ModioAlt>().await;
+        dbg!(&a);
+        assert_eq!(a, b);
+    }
+
+    #[tokio::test]
+    async fn test_modio_alt_fetch_file() {
+        setup_tracing();
+
+        async fn get<T: DrgModio>() -> ModioFileResponse {
+            client::<T>()
+                .fetch_file("asdf".into(), 1897251, 4916540)
+                .await
+                .unwrap()
+        }
+
+        let a = get::<modio::Modio>().await;
+        let b = get::<ModioAlt>().await;
+        dbg!(&a);
+        assert_eq!(a, b);
+    }
 
     #[tokio::test]
     async fn test_modio_alt_dependencies() {
         setup_tracing();
 
         async fn get<T: DrgModio>() -> Vec<u32> {
-            client::<T>().fetch_dependencies("asdfa".to_string(), 1897251).await.unwrap()
+            client::<T>()
+                .fetch_dependencies("asdfa".to_string(), 1897251)
+                .await
+                .unwrap()
         }
 
         let a = get::<modio::Modio>().await;
@@ -556,7 +617,10 @@ mod test2 {
         setup_tracing();
 
         async fn get<T: DrgModio>() -> Vec<ModioModResponse> {
-            client::<T>().fetch_mods_by_name("sandbox-utilities").await.unwrap()
+            client::<T>()
+                .fetch_mods_by_name("sandbox-utilities")
+                .await
+                .unwrap()
         }
 
         let a = get::<modio::Modio>().await;
@@ -663,43 +727,23 @@ impl DrgModio for modio::Modio {
             .search(Id::ne(0))
             .collect()
             .await
+            .map_err(|e| Into::<anyhow::Error>::into(e))
             .with_context(|_| FetchModFilesFailedSnafu {
                 mod_id: id,
                 url: url.clone(),
-            })?;
+            })?
+            .into_iter()
+            .map(Into::into)
+            .collect();
         let r#mod = self
             .game(MODIO_DRG_ID)
             .mod_(id)
             .get()
             .await
+            .map_err(|e| Into::<anyhow::Error>::into(e))
             .context(FetchModFailedSnafu { mod_id: id, url })?;
 
-        Ok(ModioMod::new(r#mod, files))
-    }
-
-    async fn fetch_files(&self, url: String, mod_id: u32) -> Result<ModioMod, DrgModioError> {
-        use modio::filter::NotEq;
-        use modio::mods::filters::Id;
-
-        let files = self
-            .game(MODIO_DRG_ID)
-            .mod_(mod_id)
-            .files()
-            .search(Id::ne(0))
-            .collect()
-            .await
-            .with_context(|_| FetchModFilesFailedSnafu {
-                mod_id,
-                url: url.clone(),
-            })?;
-        let r#mod = self
-            .game(MODIO_DRG_ID)
-            .mod_(mod_id)
-            .get()
-            .await
-            .context(FetchModFailedSnafu { mod_id, url })?;
-
-        Ok(ModioMod::new(r#mod, files))
+        Ok(ModioMod::new(r#mod.into(), files))
     }
 
     async fn fetch_file(
@@ -707,19 +751,20 @@ impl DrgModio for modio::Modio {
         url: String,
         mod_id: u32,
         modfile_id: u32,
-    ) -> Result<modio::files::File, DrgModioError> {
+    ) -> Result<ModioFileResponse, DrgModioError> {
         let file = self
             .game(MODIO_DRG_ID)
             .mod_(mod_id)
             .file(modfile_id)
             .get()
             .await
+            .map_err(|e| Into::<anyhow::Error>::into(e))
             .with_context(|_| FetchModFileFailedSnafu {
                 url,
                 mod_id,
                 modfile_id,
             })?;
-        Ok(file)
+        Ok(file.into())
     }
 
     async fn fetch_dependencies(
@@ -733,6 +778,7 @@ impl DrgModio for modio::Modio {
             .dependencies()
             .list()
             .await
+            .map_err(|e| Into::<anyhow::Error>::into(e))
             .with_context(|_| FetchDependenciesFailedSnafu { url, mod_id })?
             .into_iter()
             .map(|d| d.mod_id)
@@ -923,10 +969,7 @@ impl<M: DrgModio + Send + Sync> ModProvider for ModioProvider<M> {
                     for m in mods {
                         let id = m.id;
                         // TODO avoid fetching mod a second time
-                        let m = self
-                            .modio
-                            .fetch_files(m.profile_url.to_string(), id)
-                            .await?;
+                        let m = self.modio.fetch_mod(m.profile_url.to_string(), id).await?;
                         write_cache(&cache, |c| {
                             c.mod_id_map.insert(m.name_id.to_owned(), id);
                             c.mods.insert(id, m);
@@ -1101,7 +1144,11 @@ impl<M: DrgModio + Send + Sync> ModProvider for ModioProvider<M> {
                         .await?;
 
                     let size = file.filesize;
-                    let download: modio::download::DownloadAction = file.into();
+                    let download = modio::download::DownloadAction::File {
+                        game_id: MODIO_DRG_ID,
+                        mod_id,
+                        file_id: file.id,
+                    };
 
                     info!("downloading mod {url:?}...");
 
