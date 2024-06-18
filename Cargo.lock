@@ -2802,6 +2802,7 @@ dependencies = [
  "thiserror",
  "tokio",
  "tracing",
+ "tracing-subscriber",
  "typetag",
  "uasset_utils",
  "unreal_asset",
