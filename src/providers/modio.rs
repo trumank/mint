@@ -117,14 +117,20 @@ impl ModioMod {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Default, Debug, Clone, Serialize, Deserialize)]
 pub struct ModioModResponse {
     id: u32,
+    name_id: String,
+    profile_url: String,
 }
 
 impl From<modio::mods::Mod> for ModioModResponse {
     fn from(value: modio::mods::Mod) -> Self {
-        Self { id: value.id }
+        Self {
+            id: value.id,
+            name_id: value.name_id,
+            profile_url: value.profile_url.to_string(),
+        }
     }
 }
 
@@ -259,7 +265,7 @@ pub trait DrgModio: Sync + Send {
     async fn fetch_mods_by_ids(
         &self,
         filter_ids: Vec<u32>,
-    ) -> Result<Vec<modio::mods::Mod>, DrgModioError>;
+    ) -> Result<Vec<ModioModResponse>, DrgModioError>;
     async fn fetch_mod_updates_since(
         &self,
         mod_ids: Vec<u32>,
@@ -411,7 +417,7 @@ impl DrgModio for modio::Modio {
     async fn fetch_mods_by_ids(
         &self,
         filter_ids: Vec<u32>,
-    ) -> Result<Vec<modio::mods::Mod>, DrgModioError> {
+    ) -> Result<Vec<ModioModResponse>, DrgModioError> {
         use modio::filter::In;
         use modio::mods::filters::Id;
 
@@ -423,7 +429,10 @@ impl DrgModio for modio::Modio {
             .search(filter)
             .collect()
             .await
-            .context(GenericModioSnafu)?)
+            .context(GenericModioSnafu)?
+            .into_iter()
+            .map(|m| m.into())
+            .collect())
     }
 
     async fn fetch_mod_updates_since(
@@ -1106,7 +1115,12 @@ mod test {
             .returning(move |name| {
                 mod_names
                     .get(name)
-                    .map(|id| vec![ModioModResponse { id: **id }])
+                    .map(|id| {
+                        vec![ModioModResponse {
+                            id: **id,
+                            ..Default::default()
+                        }]
+                    })
                     .ok_or(DrgModioError::GenericError { msg: "not found" })
             });
         mock.expect_fetch_mod().times(1).returning(move |_, id| {
