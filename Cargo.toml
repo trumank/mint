@@ -62,13 +62,12 @@ image = { version = "0.24.7", default-features = false, features = ["png"] }
 indexmap = { version = "2.1.0", features = ["serde"] }
 inventory = "0.3.14"
 mint_lib = { path = "mint_lib" }
-modio = { git = "https://github.com/trumank/modio-rs.git", branch = "dev", default-features = false, features = ["rustls-tls"] }
 obake = { version = "1.0.5", features = ["serde"] }
 opener = "0.6.1"
 path-slash = "0.2.1"
 rayon = "1.8.0"
 regex = "1.10.2"
-reqwest.workspace = true
+reqwest = { workspace = true, features = ["stream"] }
 reqwest-middleware = "0.2.4"
 rfd = "0.12.1"
 rust-ini = "0.20.0"
