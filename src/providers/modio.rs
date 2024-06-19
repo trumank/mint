@@ -340,7 +340,6 @@ impl ModioAlt {
             let url = format!("{endpoint}?_offset={offset}&{query}");
             let page: ResultPage<I> = self.get(&url).await?;
             results.extend(page.data);
-            println!("req {offset} {} {}", results.len(), page.result_offset);
             if results.len() == page.result_total as usize {
                 break;
             }
