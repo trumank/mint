@@ -3,6 +3,7 @@
 mod server_list;
 
 use std::{
+    collections::HashMap,
     ffi::c_void,
     path::{Path, PathBuf},
     ptr::NonNull,
@@ -17,7 +18,7 @@ use windows::Win32::System::Memory::{VirtualProtect, PAGE_EXECUTE_READWRITE};
 
 use crate::{
     globals,
-    ue::{self, FLinearColor, UObject},
+    ue::{self, kismet::FFrame, FLinearColor, UFunction, UObject},
     LOG_GUARD,
 };
 
@@ -28,7 +29,6 @@ retour::static_detour! {
     static DoesSaveGameExist: unsafe extern "system" fn(*const ue::FString, i32) -> bool;
     static UObjectTemperatureComponentTimerCallback: unsafe extern "system" fn(*mut c_void);
     static WinMain: unsafe extern "system" fn(*mut (), *mut (), *mut (), i32, *const ()) -> i32;
-
 }
 
 #[repr(C)]
@@ -281,6 +281,59 @@ fn does_save_game_exist_detour(slot_name: *const ue::FString, user_index: i32) -
         }
     }
 }
+struct NativesArray([Option<ExecFn>; 0x100]);
+
+static mut GNATIVES_OLD: NativesArray = NativesArray([None; 0x100]);
+static mut NAME_CACHE: Option<HashMap<usize, String>> = None;
+
+unsafe fn debug(expr: usize, ctx: *mut UObject, frame: *mut FFrame, ret: *mut c_void) {
+    if NAME_CACHE.is_none() {
+        NAME_CACHE = Some(Default::default());
+    }
+
+    let (path, index) = {
+        let stack = &*frame;
+        let func = &*(stack.node as *const UFunction);
+
+        let index = (stack.code as isize)
+            .wrapping_sub(func.ustruct.script.as_ptr() as isize)
+            .wrapping_sub(1);
+
+        let path: &str = NAME_CACHE
+            .as_mut()
+            .unwrap_unchecked()
+            .entry(stack.node as usize)
+            .or_insert_with(|| {
+                func.ustruct
+                    .ufield
+                    .uobject
+                    .uobject_base_utility
+                    .uobject_base
+                    .get_path_name(None)
+            });
+        (path, index)
+    };
+
+    if path.contains("PLS_Base") {
+        tracing::info!("kismet index={index:>5} path={path}");
+    }
+    ((GNATIVES_OLD.0)[expr].unwrap())(ctx, frame, ret);
+}
+
+unsafe extern "system" fn hook_exec<const N: usize>(
+    ctx: *mut UObject,
+    frame: *mut FFrame,
+    ret: *mut c_void,
+) {
+    debug(N, ctx, frame, ret);
+}
+
+unsafe fn hook_gnatives(gnatives: &mut NativesArray) {
+    seq_macro::seq!(N in 0..256 {
+        (GNATIVES_OLD.0)[N] = gnatives.0[N];
+        gnatives.0[N] = Some(hook_exec::<N>);
+    });
+}
 
 fn detour_main(
     h_instance: *mut (),
@@ -290,6 +343,11 @@ fn detour_main(
     cmd_line: *const (),
 ) -> i32 {
     let ret = unsafe {
+        if let Ok(debug) = &globals().resolution.debug {
+            tracing::info!("hooking GNatives");
+            hook_gnatives((debug.gnatives.0 as *mut NativesArray).as_mut().unwrap());
+        }
+
         WinMain.call(
             h_instance,
             h_prev_instance,
@@ -344,6 +402,7 @@ unsafe extern "system" fn exec_print_string(
     let _color: FLinearColor = stack.arg();
     let _duration: f32 = stack.arg();
 
+    tracing::info!("PrintString({string})");
     println!("PrintString({string})");
 
     stack.code = stack.code.add(1);

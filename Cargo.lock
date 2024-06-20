@@ -2235,6 +2235,7 @@ dependencies = [
  "postcard",
  "repak",
  "retour",
+ "seq-macro",
  "serde",
  "serde_json",
  "tokio",
