@@ -314,7 +314,7 @@ unsafe fn debug(expr: usize, ctx: *mut UObject, frame: *mut FFrame, ret: *mut c_
         (path, index)
     };
 
-    if path.contains("PLS_Base") {
+    if path.contains("PLS_Base") || path.contains("ReceivePLS") {
         tracing::info!("kismet index={index:>5} path={path}");
     }
     ((GNATIVES_OLD.0)[expr].unwrap())(ctx, frame, ret);
