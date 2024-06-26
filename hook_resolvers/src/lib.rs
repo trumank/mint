@@ -4,6 +4,7 @@ use patternsleuth::resolvers::unreal::fname::{FNameCtorWchar, FNameToString};
 use patternsleuth::resolvers::unreal::game_loop::Main;
 use patternsleuth::resolvers::unreal::gmalloc::GMalloc;
 use patternsleuth::resolvers::unreal::kismet::{FFrameStep, FFrameStepExplicitProperty};
+use patternsleuth::resolvers::unreal::pak::FPakPlatformFileInitialize;
 use patternsleuth::resolvers::unreal::save_game::{
     UGameplayStaticsDoesSaveGameExist, UGameplayStaticsLoadGameFromMemory,
     UGameplayStaticsLoadGameFromSlot, UGameplayStaticsSaveGameToMemory,
@@ -210,6 +211,7 @@ impl_try_collector! {
         pub ufunction_bind: UFunctionBind,
         pub fframe_step: FFrameStep,
         pub fframe_step_explicit_property: FFrameStepExplicitProperty,
+        pub fpak_platform_file_initialize: FPakPlatformFileInitialize,
     }
 }
 
