@@ -2228,6 +2228,7 @@ version = "0.2.10"
 dependencies = [
  "anyhow",
  "bitflags 2.4.1",
+ "byteorder",
  "fs-err",
  "hook_resolvers",
  "mint_lib",

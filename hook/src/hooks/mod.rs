@@ -1,5 +1,6 @@
 #![allow(clippy::missing_transmute_annotations)]
 
+mod pak;
 mod server_list;
 
 use std::{
@@ -7,14 +8,13 @@ use std::{
     io::{Read, Seek},
     path::{Path, PathBuf},
     ptr::NonNull,
-    sync::Arc,
+    sync::{Arc, Mutex, OnceLock},
 };
 
 use anyhow::{Context, Result};
 use fs_err as fs;
 use hook_resolvers::GasFixResolution;
 use mint_lib::DRGInstallationType;
-use sptr::OpaqueFnPtr;
 use windows::Win32::System::Memory::{VirtualProtect, PAGE_EXECUTE_READWRITE};
 
 use crate::{
@@ -91,6 +91,12 @@ pub unsafe fn initialize() -> Result<()> {
     )?;
     FPakPlatformFileInitialize.enable()?;
 
+    net_pak()
+        .lock()
+        .as_mut()
+        .unwrap()
+        .init()
+        .expect("failed to init net pak");
     hook_virt()?;
 
     HookUFunctionBind.initialize(
@@ -280,123 +286,52 @@ const VTABLE_NAMES: &[(*const (), &str)] = &[
     (hook_virt_n::<54> as *const (), "SetCreatePublicFiles"),
 ];
 
+static NET_PAK: OnceLock<Mutex<pak::FStreamingNetworkPlatformFile>> = OnceLock::new();
+fn net_pak() -> &'static std::sync::Mutex<pak::FStreamingNetworkPlatformFile> {
+    NET_PAK.get_or_init(|| {
+        Mutex::new(
+            pak::FStreamingNetworkPlatformFile::new()
+                .expect("failed to create FStreamingNetworkPlatformFile"),
+        )
+    })
+}
+
 static mut VTABLE_ORIG: FPakVTable = FPakVTable([None; 55]);
 
-#[repr(C)]
-struct IFileHandle {
-    vtable: *const IFileHandleVTable,
-    file: std::fs::File,
-}
-impl IFileHandle {
-    fn new(path: &str) -> Self {
-        Self {
-            vtable: &IFILE_HANDLE_VTABLE,
-            file: std::fs::File::open(dbg!(std::path::Path::new("../../Content/Paks/mods_P/")
-                .join(
-                    std::path::Path::new(path)
-                        .strip_prefix("../../../")
-                        .unwrap(),
-                ),))
-            .expect("file open failed"),
-        }
-    }
-    unsafe extern "system" fn __vec_del_dtor(this: *mut IFileHandle, _unknown: u32) {
-        drop(Box::from_raw(this))
-    }
-    unsafe extern "system" fn tell(this: &mut IFileHandle) -> i64 {
-        this.file.stream_position().expect("seek failed") as i64
-    }
-    unsafe extern "system" fn seek(this: &mut IFileHandle, new_position: i64) -> bool {
-        this.file
-            .seek(std::io::SeekFrom::Start(new_position as u64))
-            .is_ok()
-    }
-    unsafe extern "system" fn seek_from_end(
-        this: &mut IFileHandle,
-        new_position_relative_to_end: i64,
-    ) -> bool {
-        this.file
-            .seek(std::io::SeekFrom::End(new_position_relative_to_end))
-            .is_ok()
-    }
-    unsafe extern "system" fn read(
-        this: &mut IFileHandle,
-        destination: *mut u8,
-        bytes_to_read: i64,
-    ) -> bool {
-        this.file
-            .read_exact(std::slice::from_raw_parts_mut(
-                destination,
-                bytes_to_read as usize,
-            ))
-            .is_ok()
-    }
-    unsafe extern "system" fn write(
-        this: &mut IFileHandle,
-        source: *const u8,
-        bytes_to_write: i64,
-    ) -> bool {
-        unimplemented!("cannot write")
-    }
-    unsafe extern "system" fn flush(this: &mut IFileHandle, b_full_flush: bool) -> bool {
-        unimplemented!("cannot flush")
-    }
-    unsafe extern "system" fn truncate(this: &mut IFileHandle, new_size: i64) -> bool {
-        unimplemented!("cannot truncate")
-    }
-    unsafe extern "system" fn size(this: &mut IFileHandle) -> i64 {
-        let Ok(cur) = this.file.seek(std::io::SeekFrom::Current(0)) else {
-            return -1;
-        };
-        let Ok(size) = this.file.seek(std::io::SeekFrom::End(0)) else {
-            return -1;
-        };
-        let Ok(_) = this.file.seek(std::io::SeekFrom::Start(cur)) else {
-            return -1;
-        };
-        size as i64
-    }
-}
-
-#[repr(C)]
-struct IFileHandleVTable {
-    __vec_del_dtor: unsafe extern "system" fn(*mut IFileHandle, u32),
-    tell: unsafe extern "system" fn(&mut IFileHandle) -> i64,
-    seek: unsafe extern "system" fn(&mut IFileHandle, i64) -> bool,
-    seek_from_end: unsafe extern "system" fn(&mut IFileHandle, i64) -> bool,
-    read: unsafe extern "system" fn(&mut IFileHandle, *mut u8, i64) -> bool,
-    write: unsafe extern "system" fn(&mut IFileHandle, *const u8, i64) -> bool,
-    flush: unsafe extern "system" fn(&mut IFileHandle, bool) -> bool,
-    truncate: unsafe extern "system" fn(&mut IFileHandle, i64) -> bool,
-    size: unsafe extern "system" fn(&mut IFileHandle) -> i64,
-}
-const IFILE_HANDLE_VTABLE: IFileHandleVTable = IFileHandleVTable {
-    __vec_del_dtor: IFileHandle::__vec_del_dtor,
-    tell: IFileHandle::tell,
-    seek: IFileHandle::seek,
-    seek_from_end: IFileHandle::seek_from_end,
-    read: IFileHandle::read,
-    write: IFileHandle::write,
-    flush: IFileHandle::flush,
-    truncate: IFileHandle::truncate,
-    size: IFileHandle::size,
-};
+type CursorFileHandle = pak::IFileHandle<std::io::Cursor<Vec<u8>>>;
 
 type FnHookOpenRead = unsafe extern "system" fn(
     this: *mut FPakPlatformFile,
     file_name: *const u16,
     b_allow_write: bool,
-) -> *mut IFileHandle;
+) -> *mut CursorFileHandle;
 unsafe extern "system" fn hook_open_read(
     this: *mut FPakPlatformFile,
     file_name: *const u16,
     b_allow_write: bool,
-) -> *mut IFileHandle {
+) -> *mut CursorFileHandle {
     let name = widestring::U16CStr::from_ptr_str(file_name)
         .to_string()
         .unwrap();
-    if name == "../../../FSD/Content/_AssemblyStorm/SandboxUtilities/SandboxUtilities.uexp" {
-        return Box::into_raw(Box::new(IFileHandle::new(&name)));
+    if name.starts_with("../../../FSD/Content/_AssemblyStorm/SandboxUtilities/") {
+        tracing::info!("Fetching file from editor {name}");
+
+        let data = net_pak()
+            .lock()
+            .as_mut()
+            .unwrap()
+            .get_file(&name)
+            .expect("failed to get file {name}");
+
+        //let data = std::fs::read(dbg!(std::path::Path::new("../../Content/Paks/mods_P/")
+        //    .join(
+        //        std::path::Path::new(&name)
+        //            .strip_prefix("../../../")
+        //            .unwrap(),
+        //    )))
+        //.expect("file open failed");
+        //return Box::into_raw(Box::new(CursorFileHandle::new(&name)));
+        return Box::into_raw(Box::new(CursorFileHandle::new(std::io::Cursor::new(data))));
     }
     //todo!("READ");
     let ret = std::mem::transmute::<_, FnHookOpenRead>(VTABLE_ORIG.0[24].unwrap())(
