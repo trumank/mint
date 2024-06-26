@@ -31,7 +31,7 @@ fn calc_crc(data: &[u8]) -> u32 {
         crc = (crc >> 8) ^ CRC_TABLE[((crc & 0xFF) ^ *b as u32) as usize];
     }
 
-    return (!crc).swap_bytes();
+    (!crc).swap_bytes()
 }
 
 pub trait Readable<R> {
@@ -99,7 +99,7 @@ fn write_payload<W: Write>(writer: &mut W, payload: &[u8]) -> Result<()> {
 }
 
 fn read_message<R: Read>(reader: &mut R) -> Result<Message> {
-    Ok(Message::read(&mut Cursor::new(read_payload(reader)?))?)
+    Message::read(&mut Cursor::new(read_payload(reader)?))
 }
 fn write_message<W: Write>(writer: &mut W, message: &Message) -> Result<()> {
     let mut payload = Cursor::new(vec![]);
@@ -132,7 +132,7 @@ enum Message {
     ToAbsolutePathForRead,
     ToAbsolutePathForWrite,
     ReportLocalFiles,
-    GetFileList(MessageGetFileList),
+    GetFileList(Box<MessageGetFileList>),
     Heartbeat,
     RecompileShaders,
 }
@@ -143,7 +143,7 @@ impl<R: Read> Readable<R> for Message {
             10 => Message::IterateDirectoryRecursively(MessageIterateDirectoryRecursively::read(
                 reader,
             )?),
-            22 => Message::GetFileList(MessageGetFileList::read(reader)?),
+            22 => Message::GetFileList(Box::new(MessageGetFileList::read(reader)?)),
             _ => todo!("missing packet type {}", t & 0xff),
         })
     }
@@ -314,7 +314,7 @@ impl FStreamingNetworkPlatformFile {
         })
     }
     pub fn init(&mut self) -> Result<()> {
-        let msg = Message::GetFileList(MessageGetFileList {
+        let msg = Message::GetFileList(Box::new(MessageGetFileList {
             platforms: vec!["LinuxNoEditor".to_owned()],
             game_name: "../../../FSD/FSD.uproject".to_owned(),
             engine_rel_path: "../../../Engine/".to_owned(),
@@ -332,7 +332,7 @@ impl FStreamingNetworkPlatformFile {
             version_info: "".to_owned(),
             host_address: "192.168.168.200".to_owned(),
             custom_platform_data: 0,
-        });
+        }));
         write_message(&mut self.output, &msg)?;
         let msg = read_message(&mut self.input)?;
 
@@ -433,17 +433,17 @@ impl<S: Read + Write + Seek> IFileHandle<S> {
             ))
             .is_ok()
     }
-    unsafe extern "system" fn write(&mut self, source: *const u8, bytes_to_write: i64) -> bool {
+    unsafe extern "system" fn write(&mut self, _source: *const u8, _bytes_to_write: i64) -> bool {
         unimplemented!("cannot write")
     }
-    unsafe extern "system" fn flush(&mut self, b_full_flush: bool) -> bool {
+    unsafe extern "system" fn flush(&mut self, _b_full_flush: bool) -> bool {
         unimplemented!("cannot flush")
     }
-    unsafe extern "system" fn truncate(&mut self, new_size: i64) -> bool {
+    unsafe extern "system" fn truncate(&mut self, _new_size: i64) -> bool {
         unimplemented!("cannot truncate")
     }
     unsafe extern "system" fn size(&mut self) -> i64 {
-        let Ok(cur) = self.inner.seek(std::io::SeekFrom::Current(0)) else {
+        let Ok(cur) = self.inner.stream_position() else {
             return -1;
         };
         let Ok(size) = self.inner.seek(std::io::SeekFrom::End(0)) else {

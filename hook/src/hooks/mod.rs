@@ -333,13 +333,11 @@ unsafe extern "system" fn hook_open_read(
         //return Box::into_raw(Box::new(CursorFileHandle::new(&name)));
         return Box::into_raw(Box::new(CursorFileHandle::new(std::io::Cursor::new(data))));
     }
-    //todo!("READ");
-    let ret = std::mem::transmute::<_, FnHookOpenRead>(VTABLE_ORIG.0[24].unwrap())(
+    std::mem::transmute::<_, FnHookOpenRead>(VTABLE_ORIG.0[24].unwrap())(
         this,
         file_name,
         b_allow_write,
-    );
-    ret
+    )
 }
 
 unsafe extern "system" fn hook_virt_n<const N: usize>(
