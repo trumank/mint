@@ -2182,6 +2182,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "glob"
+version = "0.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d2fabcfbdc87f4758337ca535fb41a6d701b65693ce38287d856d1674551ec9b"
+
+[[package]]
 name = "glow"
 version = "0.13.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2449,7 +2455,9 @@ version = "0.2.10"
 dependencies = [
  "anyhow",
  "bitflags 2.6.0",
+ "byteorder",
  "fs-err",
+ "glob",
  "hook_resolvers",
  "mint_lib",
  "patternsleuth",
@@ -2457,6 +2465,7 @@ dependencies = [
  "proxy_dll",
  "repak",
  "retour",
+ "seq-macro",
  "serde",
  "serde_json",
  "tokio",
@@ -4262,7 +4271,7 @@ dependencies = [
  "once_cell",
  "socket2 0.5.5",
  "tracing",
- "windows-sys 0.52.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]

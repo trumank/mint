@@ -1,7 +1,10 @@
 mod hooks;
 mod ue;
 
-use std::{io::BufReader, path::Path};
+use std::{
+    io::BufReader,
+    path::{Path, PathBuf},
+};
 
 use anyhow::{Context, Result};
 use fs_err as fs;
@@ -25,6 +28,7 @@ thread_local! {
 pub struct Globals {
     resolution: hook_resolvers::HookResolution,
     meta: Meta,
+    bin_dir: Option<PathBuf>,
 }
 
 impl Globals {
@@ -125,7 +129,11 @@ unsafe fn patch() -> Result<()> {
     let resolution = image.resolve(hook_resolvers::HookResolution::resolver())?;
     info!("PS scan: {:#x?}", resolution);
 
-    GLOBALS = Some(Globals { resolution, meta });
+    GLOBALS = Some(Globals {
+        resolution,
+        meta,
+        bin_dir: bin_dir.map(|d| d.to_path_buf()),
+    });
     LOG_GUARD.with_borrow_mut(|g| *g = guard);
 
     hooks::initialize()?;

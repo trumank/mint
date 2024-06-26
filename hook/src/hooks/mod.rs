@@ -1,5 +1,6 @@
 #![allow(clippy::missing_transmute_annotations)]
 
+mod pak;
 mod server_list;
 
 use std::{
@@ -28,7 +29,6 @@ retour::static_detour! {
     static DoesSaveGameExist: unsafe extern "system" fn(*const ue::FString, i32) -> bool;
     static UObjectTemperatureComponentTimerCallback: unsafe extern "system" fn(*mut c_void);
     static WinMain: unsafe extern "system" fn(*mut (), *mut (), *mut (), i32, *const ()) -> i32;
-
 }
 
 #[repr(C)]
@@ -62,6 +62,8 @@ pub unsafe fn initialize() -> Result<()> {
         detour_main,
     )?;
     WinMain.enable()?;
+
+    pak::init()?;
 
     HookUFunctionBind.initialize(
         std::mem::transmute(globals().resolution.core.as_ref().unwrap().ufunction_bind.0),
