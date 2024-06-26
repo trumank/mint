@@ -4,6 +4,7 @@ mod server_list;
 
 use std::{
     ffi::c_void,
+    io::{Read, Seek},
     path::{Path, PathBuf},
     ptr::NonNull,
     sync::Arc,
@@ -13,6 +14,7 @@ use anyhow::{Context, Result};
 use fs_err as fs;
 use hook_resolvers::GasFixResolution;
 use mint_lib::DRGInstallationType;
+use sptr::OpaqueFnPtr;
 use windows::Win32::System::Memory::{VirtualProtect, PAGE_EXECUTE_READWRITE};
 
 use crate::{
@@ -29,6 +31,7 @@ retour::static_detour! {
     static UObjectTemperatureComponentTimerCallback: unsafe extern "system" fn(*mut c_void);
     static WinMain: unsafe extern "system" fn(*mut (), *mut (), *mut (), i32, *const ()) -> i32;
 
+    static FPakPlatformFileInitialize: unsafe extern "system" fn(*mut (), *mut (), *const ()) -> bool;
 }
 
 #[repr(C)]
@@ -62,6 +65,33 @@ pub unsafe fn initialize() -> Result<()> {
         detour_main,
     )?;
     WinMain.enable()?;
+
+    FPakPlatformFileInitialize.initialize(
+        std::mem::transmute(0x1431ce320usize),
+        |this, inner, cmd_line| {
+            tracing::info!("FPakPlatformFile::Initialize");
+            let ret = FPakPlatformFileInitialize.call(this, inner, cmd_line);
+
+            let mount: &&DelegateMount = std::mem::transmute(0x1462e2c20usize);
+            let unmount: &&DelegateMount = std::mem::transmute(0x1462e2c30usize);
+
+            let pak = &*mount.pak;
+            tracing::info!("pak = {pak:#?}");
+
+            for pak in pak.pak_files.as_slice().iter() {
+                tracing::info!(
+                    "mounted pak order={} path={}",
+                    pak.read_order,
+                    (*pak.pak_file).pak_filename
+                );
+            }
+
+            ret
+        },
+    )?;
+    FPakPlatformFileInitialize.enable()?;
+
+    hook_virt()?;
 
     HookUFunctionBind.initialize(
         std::mem::transmute(globals().resolution.core.as_ref().unwrap().ufunction_bind.0),
@@ -141,6 +171,272 @@ pub unsafe fn initialize() -> Result<()> {
             }
         }
     }
+    Ok(())
+}
+
+#[derive(Debug)]
+#[repr(C)]
+struct FPakFile {
+    vtable: *const (),
+    idk: u64,
+    idk2: *const (),
+    pak_filename: ue::FString,
+}
+
+#[derive(Debug)]
+#[repr(C)]
+struct FPakListEntry {
+    read_order: u32,
+    pak_file: *const FPakFile,
+}
+
+#[derive(Debug)]
+#[repr(C)]
+struct FPakPlatformFile {
+    vtable: *const (),
+    lower_level: *const (),
+    pak_files: ue::TArray<FPakListEntry>, // TODO ...
+}
+
+#[derive(Debug)]
+#[repr(C)]
+struct DelegateMount {
+    idk1: u64,
+    idk2: u64,
+    idk3: u64,
+    pak: *const FPakPlatformFile,
+    call: unsafe extern "system" fn(*mut FPakPlatformFile, &ue::FString, u32) -> bool,
+}
+#[derive(Debug)]
+#[repr(C)]
+struct DelegateUnmount {
+    idk1: u64,
+    idk2: u64,
+    idk3: u64,
+    pak: *const FPakPlatformFile,
+    call: unsafe extern "system" fn(*mut FPakPlatformFile, &ue::FString, u32) -> bool,
+}
+
+type FnVirt = unsafe extern "system" fn(a: *mut (), b: *mut (), c: *mut (), d: *mut ()) -> *mut ();
+
+struct FPakVTable([Option<FnVirt>; 55]);
+
+#[rustfmt::skip]
+const VTABLE_NAMES: &[(*const (), &str)] = &[
+    (hook_virt_n::< 0> as *const (), "__vecDelDtor"),
+    (hook_virt_n::< 1> as *const (), "SetSandboxEnabled"),
+    (hook_virt_n::< 2> as *const (), "IsSandboxEnabled"),
+    (hook_virt_n::< 3> as *const (), "ShouldBeUsed"),
+    (hook_virt_n::< 4> as *const (), "Initialize"),
+    (hook_virt_n::< 5> as *const (), "InitializeAfterSetActive"),
+    (hook_virt_n::< 6> as *const (), "MakeUniquePakFilesForTheseFiles"),
+    (hook_virt_n::< 7> as *const (), "InitializeNewAsyncIO"),
+    (hook_virt_n::< 8> as *const (), "AddLocalDirectories"),
+    (hook_virt_n::< 9> as *const (), "BypassSecurity"),
+    (hook_virt_n::<10> as *const (), "Tick"),
+    (hook_virt_n::<11> as *const (), "GetLowerLevel"),
+    (hook_virt_n::<12> as *const (), "SetLowerLevel"),
+    (hook_virt_n::<13> as *const (), "GetName"),
+    (hook_virt_n::<14> as *const (), "FileExists"),
+    (hook_virt_n::<15> as *const (), "FileSize"),
+    (hook_virt_n::<16> as *const (), "DeleteFile"),
+    (hook_virt_n::<17> as *const (), "IsReadOnly"),
+    (hook_virt_n::<18> as *const (), "MoveFile"),
+    (hook_virt_n::<19> as *const (), "SetReadOnly"),
+    (hook_virt_n::<20> as *const (), "GetTimeStamp"),
+    (hook_virt_n::<21> as *const (), "SetTimeStamp"),
+    (hook_virt_n::<22> as *const (), "GetAccessTimeStamp"),
+    (hook_virt_n::<23> as *const (), "GetFilenameOnDisk"),
+    (hook_open_read as *const (), "OpenRead"),
+    (hook_open_read as *const (), "OpenReadNoBuffering"),
+    (hook_virt_n::<26> as *const (), "OpenWrite"),
+    (hook_virt_n::<27> as *const (), "DirectoryExists"),
+    (hook_virt_n::<28> as *const (), "CreateDirectory"),
+    (hook_virt_n::<29> as *const (), "DeleteDirectory"),
+    (hook_virt_n::<30> as *const (), "GetStatData"),
+    (hook_virt_n::<31> as *const (), "IterateDirectoryA"),
+    (hook_virt_n::<32> as *const (), "IterateDirectoryB"),
+    (hook_virt_n::<33> as *const (), "IterateDirectoryStatA"),
+    (hook_virt_n::<34> as *const (), "IterateDirectoryStatB"),
+    (hook_virt_n::<35> as *const (), "OpenAsyncRead"),
+    (hook_virt_n::<36> as *const (), "SetAsyncMinimumPriority"),
+    (hook_virt_n::<37> as *const (), "OpenMapped"),
+    (hook_virt_n::<38> as *const (), "GetTimeStampPair"),
+    (hook_virt_n::<39> as *const (), "GetTimeStampLocal"),
+    (hook_virt_n::<40> as *const (), "IterateDirectoryRecursivelyA"),
+    (hook_virt_n::<41> as *const (), "IterateDirectoryRecursivelyB"),
+    (hook_virt_n::<42> as *const (), "IterateDirectoryStatRecursivelyA"),
+    (hook_virt_n::<43> as *const (), "IterateDirectoryStatRecursivelyB"),
+    (hook_virt_n::<44> as *const (), "FindFiles"),
+    (hook_virt_n::<45> as *const (), "FindFilesRecursively"),
+    (hook_virt_n::<46> as *const (), "DeleteDirectoryRecursively"),
+    (hook_virt_n::<47> as *const (), "CreateDirectoryTree"),
+    (hook_virt_n::<48> as *const (), "CopyFile"),
+    (hook_virt_n::<49> as *const (), "CopyDirectoryTree"),
+    (hook_virt_n::<50> as *const (), "ConvertToAbsolutePathForExternalAppForRead"),
+    (hook_virt_n::<51> as *const (), "ConvertToAbsolutePathForExternalAppForWrite"),
+    (hook_virt_n::<52> as *const (), "SendMessageToServer"),
+    (hook_virt_n::<53> as *const (), "DoesCreatePublicFiles"),
+    (hook_virt_n::<54> as *const (), "SetCreatePublicFiles"),
+];
+
+static mut VTABLE_ORIG: FPakVTable = FPakVTable([None; 55]);
+
+#[repr(C)]
+struct IFileHandle {
+    vtable: *const IFileHandleVTable,
+    file: std::fs::File,
+}
+impl IFileHandle {
+    fn new(path: &str) -> Self {
+        Self {
+            vtable: &IFILE_HANDLE_VTABLE,
+            file: std::fs::File::open(dbg!(std::path::Path::new("../../Content/Paks/mods_P/")
+                .join(
+                    std::path::Path::new(path)
+                        .strip_prefix("../../../")
+                        .unwrap(),
+                ),))
+            .expect("file open failed"),
+        }
+    }
+    unsafe extern "system" fn __vec_del_dtor(this: *mut IFileHandle, _unknown: u32) {
+        drop(Box::from_raw(this))
+    }
+    unsafe extern "system" fn tell(this: &mut IFileHandle) -> i64 {
+        this.file.stream_position().expect("seek failed") as i64
+    }
+    unsafe extern "system" fn seek(this: &mut IFileHandle, new_position: i64) -> bool {
+        this.file
+            .seek(std::io::SeekFrom::Start(new_position as u64))
+            .is_ok()
+    }
+    unsafe extern "system" fn seek_from_end(
+        this: &mut IFileHandle,
+        new_position_relative_to_end: i64,
+    ) -> bool {
+        this.file
+            .seek(std::io::SeekFrom::End(new_position_relative_to_end))
+            .is_ok()
+    }
+    unsafe extern "system" fn read(
+        this: &mut IFileHandle,
+        destination: *mut u8,
+        bytes_to_read: i64,
+    ) -> bool {
+        this.file
+            .read_exact(std::slice::from_raw_parts_mut(
+                destination,
+                bytes_to_read as usize,
+            ))
+            .is_ok()
+    }
+    unsafe extern "system" fn write(
+        this: &mut IFileHandle,
+        source: *const u8,
+        bytes_to_write: i64,
+    ) -> bool {
+        unimplemented!("cannot write")
+    }
+    unsafe extern "system" fn flush(this: &mut IFileHandle, b_full_flush: bool) -> bool {
+        unimplemented!("cannot flush")
+    }
+    unsafe extern "system" fn truncate(this: &mut IFileHandle, new_size: i64) -> bool {
+        unimplemented!("cannot truncate")
+    }
+    unsafe extern "system" fn size(this: &mut IFileHandle) -> i64 {
+        let Ok(cur) = this.file.seek(std::io::SeekFrom::Current(0)) else {
+            return -1;
+        };
+        let Ok(size) = this.file.seek(std::io::SeekFrom::End(0)) else {
+            return -1;
+        };
+        let Ok(_) = this.file.seek(std::io::SeekFrom::Start(cur)) else {
+            return -1;
+        };
+        size as i64
+    }
+}
+
+#[repr(C)]
+struct IFileHandleVTable {
+    __vec_del_dtor: unsafe extern "system" fn(*mut IFileHandle, u32),
+    tell: unsafe extern "system" fn(&mut IFileHandle) -> i64,
+    seek: unsafe extern "system" fn(&mut IFileHandle, i64) -> bool,
+    seek_from_end: unsafe extern "system" fn(&mut IFileHandle, i64) -> bool,
+    read: unsafe extern "system" fn(&mut IFileHandle, *mut u8, i64) -> bool,
+    write: unsafe extern "system" fn(&mut IFileHandle, *const u8, i64) -> bool,
+    flush: unsafe extern "system" fn(&mut IFileHandle, bool) -> bool,
+    truncate: unsafe extern "system" fn(&mut IFileHandle, i64) -> bool,
+    size: unsafe extern "system" fn(&mut IFileHandle) -> i64,
+}
+const IFILE_HANDLE_VTABLE: IFileHandleVTable = IFileHandleVTable {
+    __vec_del_dtor: IFileHandle::__vec_del_dtor,
+    tell: IFileHandle::tell,
+    seek: IFileHandle::seek,
+    seek_from_end: IFileHandle::seek_from_end,
+    read: IFileHandle::read,
+    write: IFileHandle::write,
+    flush: IFileHandle::flush,
+    truncate: IFileHandle::truncate,
+    size: IFileHandle::size,
+};
+
+type FnHookOpenRead = unsafe extern "system" fn(
+    this: *mut FPakPlatformFile,
+    file_name: *const u16,
+    b_allow_write: bool,
+) -> *mut IFileHandle;
+unsafe extern "system" fn hook_open_read(
+    this: *mut FPakPlatformFile,
+    file_name: *const u16,
+    b_allow_write: bool,
+) -> *mut IFileHandle {
+    let name = widestring::U16CStr::from_ptr_str(file_name)
+        .to_string()
+        .unwrap();
+    if name == "../../../FSD/Content/_AssemblyStorm/SandboxUtilities/SandboxUtilities.uexp" {
+        return Box::into_raw(Box::new(IFileHandle::new(&name)));
+    }
+    //todo!("READ");
+    let ret = std::mem::transmute::<_, FnHookOpenRead>(VTABLE_ORIG.0[24].unwrap())(
+        this,
+        file_name,
+        b_allow_write,
+    );
+    ret
+}
+
+unsafe extern "system" fn hook_virt_n<const N: usize>(
+    a: *mut (),
+    b: *mut (),
+    c: *mut (),
+    d: *mut (),
+) -> *mut () {
+    //tracing::info!("FPakPlatformFile({N}={})", VTABLE_NAMES[N].1);
+    (VTABLE_ORIG.0[N].unwrap())(a, b, c, d)
+}
+
+unsafe fn hook_virt() -> Result<()> {
+    let addr = 0x1454a4580 as *mut FPakVTable;
+    let size = std::mem::size_of::<FPakVTable>();
+
+    let mut old = Default::default();
+    VirtualProtect(
+        addr as *const c_void,
+        size,
+        PAGE_EXECUTE_READWRITE,
+        &mut old,
+    )?;
+
+    let vtable = &mut *addr;
+    for (i, (virt, _name)) in VTABLE_NAMES.iter().enumerate() {
+        (VTABLE_ORIG.0)[i] = vtable.0[i];
+        vtable.0[i] = Some(std::mem::transmute(*virt));
+    }
+
+    VirtualProtect(addr as *const c_void, size, old, &mut old)?;
+
     Ok(())
 }
 

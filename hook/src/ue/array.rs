@@ -2,12 +2,16 @@ use std::ffi::c_void;
 
 use crate::globals;
 
-#[derive(Debug)]
 #[repr(C)]
 pub struct TArray<T> {
     data: *mut T,
     num: i32,
     max: i32,
+}
+impl<T: std::fmt::Debug> std::fmt::Debug for TArray<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.as_slice().fmt(f)
+    }
 }
 impl<T> TArray<T> {
     pub fn new() -> Self {
