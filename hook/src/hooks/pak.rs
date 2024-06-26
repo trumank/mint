@@ -1,8 +1,13 @@
 use anyhow::{bail, Result};
 use byteorder::{ReadBytesExt, WriteBytesExt, LE};
+use windows::Win32::System::Memory::{VirtualProtect, PAGE_EXECUTE_READWRITE};
 
+use std::ffi::c_void;
 use std::io::{BufReader, BufWriter, Cursor, Read, Seek, Write};
 use std::net::TcpStream;
+use std::sync::{Mutex, OnceLock};
+
+use crate::ue::{FString, TArray};
 
 #[rustfmt::skip]
 pub const CRC_TABLE: [u32; 256] = [
@@ -26,21 +31,10 @@ pub const CRC_TABLE: [u32; 256] = [
 
 fn calc_crc(data: &[u8]) -> u32 {
     let mut crc: u32 = !0;
-
     for b in data {
         crc = (crc >> 8) ^ CRC_TABLE[((crc & 0xFF) ^ *b as u32) as usize];
     }
-
     (!crc).swap_bytes()
-}
-
-pub trait Readable<R> {
-    fn read(reader: &mut R) -> Result<Self>
-    where
-        Self: Sized;
-}
-pub trait Writable<W> {
-    fn write(&self, writer: &mut W) -> Result<()>;
 }
 
 fn read_array<R, T, E>(
@@ -80,9 +74,11 @@ fn write_string<W: Write>(writer: &mut W, string: &str) -> Result<()> {
     Ok(())
 }
 
+const MAGIC: u32 = 0x9e2b83c1;
+
 fn read_payload<R: Read>(reader: &mut R) -> Result<Vec<u8>> {
     let magic = reader.read_u32::<LE>()?;
-    assert_eq!(magic, 0x9e2b83c1, "bad magic");
+    assert_eq!(magic, MAGIC, "bad magic");
     let mut buf = vec![0; reader.read_u32::<LE>()? as usize];
     let crc = reader.read_u32::<LE>()?;
     reader.read_exact(&mut buf)?;
@@ -90,7 +86,7 @@ fn read_payload<R: Read>(reader: &mut R) -> Result<Vec<u8>> {
     Ok(buf.to_vec())
 }
 fn write_payload<W: Write>(writer: &mut W, payload: &[u8]) -> Result<()> {
-    writer.write_u32::<LE>(0x9e2b83c1)?;
+    writer.write_u32::<LE>(MAGIC)?;
     writer.write_u32::<LE>(payload.len() as u32)?;
     writer.write_u32::<LE>(calc_crc(payload))?;
     writer.write_all(payload)?;
@@ -136,8 +132,8 @@ enum Message {
     Heartbeat,
     RecompileShaders,
 }
-impl<R: Read> Readable<R> for Message {
-    fn read(reader: &mut R) -> Result<Self> {
+impl Message {
+    fn read<R: Read>(reader: &mut R) -> Result<Self> {
         let t = reader.read_u32::<LE>()?;
         Ok(match t & 0xff {
             10 => Message::IterateDirectoryRecursively(MessageIterateDirectoryRecursively::read(
@@ -148,8 +144,8 @@ impl<R: Read> Readable<R> for Message {
         })
     }
 }
-impl<W: Write> Writable<W> for Message {
-    fn write(&self, writer: &mut W) -> Result<()> {
+impl Message {
+    fn write<W: Write>(&self, writer: &mut W) -> Result<()> {
         match self {
             Message::OpenRead(m) => {
                 writer.write_u32::<LE>(4)?;
@@ -173,8 +169,8 @@ impl<W: Write> Writable<W> for Message {
 struct MessageOpenRead {
     filename: String,
 }
-impl<W: Write> Writable<W> for MessageOpenRead {
-    fn write(&self, writer: &mut W) -> Result<()> {
+impl MessageOpenRead {
+    fn write<W: Write>(&self, writer: &mut W) -> Result<()> {
         write_string(writer, &self.filename)?;
         Ok(())
     }
@@ -182,49 +178,31 @@ impl<W: Write> Writable<W> for MessageOpenRead {
 
 #[derive(Debug)]
 struct MessageIterateDirectoryRecursively {
-    files: Vec<String>,
+    files: Vec<FileEntry>,
 }
-impl<R: Read> Readable<R> for MessageIterateDirectoryRecursively {
-    fn read(reader: &mut R) -> Result<Self> {
-        println!("package file ue4 version {}", reader.read_u32::<LE>()?);
-        //println!( "package file licensesee ue4 version {}", reader.read_u32::<LE>()?);
-        println!("local engine dir {}", read_string(reader)?);
-        println!("local project dir {}", read_string(reader)?);
-        println!(
-            "local engine platform extensions dir {}",
-            read_string(reader)?
-        );
-        println!(
-            "local project platform extensions dir {}",
-            read_string(reader)?
-        );
-        //let mut files = vec![];
-        let files = read_array(reader.read_u32::<LE>()?, reader, |r| -> Result<String> {
-            let path = read_string(r)?;
-            let timestamp = r.read_u64::<LE>()?;
-            //println!("{:20}: {}", timestamp, path);
-            Ok(path)
-        })?;
-        /*
-        println!(
-            "content folders {:#?}",
-            read_array(reader.read_u32::<LE>()?, reader, read_string)?
-        );
-        read_array(reader.read_u32::<LE>()?, reader, |r| -> Result<()> {
-            let path = read_string(r)?;
-            let timestamp = r.read_u64::<LE>()?;
-            println!("FixedTimes2 {:20}: {}", timestamp, path);
-            Ok(())
-        })?;
-        read_array(reader.read_u32::<LE>()?, reader, |r| -> Result<()> {
-            let path = read_string(r)?;
-            let timestamp = r.read_u64::<LE>()?;
-            println!("PrecookedList {:20}: {}", timestamp, path);
-            Ok(())
-        })?;
-        */
-        Ok(Self { files })
+impl MessageIterateDirectoryRecursively {
+    fn read<R: Read>(reader: &mut R) -> Result<Self> {
+        let _package_file_version = reader.read_u32::<LE>()?;
+        let _local_engine_dir = read_string(reader)?;
+        let _local_project_dir = read_string(reader)?;
+        let _local_engine_platform_extensions = read_string(reader)?;
+        let _local_project_platform_extensions = read_string(reader)?;
+
+        Ok(Self {
+            files: read_array(reader.read_u32::<LE>()?, reader, |r| -> Result<FileEntry> {
+                Ok(FileEntry {
+                    path: read_string(r)?,
+                    timestamp: r.read_u64::<LE>()?,
+                })
+            })?,
+        })
     }
+}
+
+#[derive(Debug)]
+pub struct FileEntry {
+    pub path: String,
+    pub timestamp: u64,
 }
 
 #[derive(Debug)]
@@ -243,8 +221,8 @@ struct MessageGetFileList {
     host_address: String,
     custom_platform_data: u32, // TODO Map<String, String>
 }
-impl<R: Read> Readable<R> for MessageGetFileList {
-    fn read(reader: &mut R) -> Result<Self> {
+impl MessageGetFileList {
+    fn read<R: Read>(reader: &mut R) -> Result<Self> {
         Ok(Self {
             platforms: read_array(reader.read_u32::<LE>()?, reader, read_string)?,
             game_name: read_string(reader)?,
@@ -262,8 +240,8 @@ impl<R: Read> Readable<R> for MessageGetFileList {
         })
     }
 }
-impl<W: Write> Writable<W> for MessageGetFileList {
-    fn write(&self, writer: &mut W) -> Result<()> {
+impl MessageGetFileList {
+    fn write<W: Write>(&self, writer: &mut W) -> Result<()> {
         writer.write_u32::<LE>(self.platforms.len() as u32)?;
         write_array(writer, &self.platforms, |w, i| write_string(w, i))?;
         write_string(writer, &self.game_name)?;
@@ -288,8 +266,8 @@ struct MessageRead {
     handle_id: u64,
     bytes_to_read: u64,
 }
-impl<W: Write> Writable<W> for MessageRead {
-    fn write(&self, writer: &mut W) -> Result<()> {
+impl MessageRead {
+    fn write<W: Write>(&self, writer: &mut W) -> Result<()> {
         writer.write_u64::<LE>(self.handle_id)?;
         writer.write_u64::<LE>(self.bytes_to_read)?;
         Ok(())
@@ -299,7 +277,7 @@ impl<W: Write> Writable<W> for MessageRead {
 pub struct FStreamingNetworkPlatformFile {
     input: BufReader<TcpStream>,
     output: BufWriter<TcpStream>,
-    file_list: Vec<String>,
+    pub file_list: Vec<FileEntry>,
 }
 impl FStreamingNetworkPlatformFile {
     pub fn new() -> Result<Self> {
@@ -530,4 +508,235 @@ mod test {
     //    }
     //    //println!("{:#?}", m.files);
     //}
+}
+
+#[derive(Debug)]
+#[repr(C)]
+struct FPakFile {
+    vtable: *const (),
+    idk: u64,
+    idk2: *const (),
+    pak_filename: FString,
+}
+
+#[derive(Debug)]
+#[repr(C)]
+struct FPakListEntry {
+    read_order: u32,
+    pak_file: *const FPakFile,
+}
+
+#[derive(Debug)]
+#[repr(C)]
+struct FPakPlatformFile {
+    vtable: *const (),
+    lower_level: *const (),
+    pak_files: TArray<FPakListEntry>, // TODO ...
+}
+
+#[derive(Debug)]
+#[repr(C)]
+struct DelegateMount {
+    idk1: u64,
+    idk2: u64,
+    idk3: u64,
+    pak: *const FPakPlatformFile,
+    call: unsafe extern "system" fn(*mut FPakPlatformFile, &FString, u32) -> bool,
+}
+#[derive(Debug)]
+#[repr(C)]
+struct DelegateUnmount {
+    idk1: u64,
+    idk2: u64,
+    idk3: u64,
+    pak: *const FPakPlatformFile,
+    call: unsafe extern "system" fn(*mut FPakPlatformFile, &FString, u32) -> bool,
+}
+
+type FnVirt = unsafe extern "system" fn(a: *mut (), b: *mut (), c: *mut (), d: *mut ()) -> *mut ();
+
+struct FPakVTable([Option<FnVirt>; 55]);
+
+#[rustfmt::skip]
+const VTABLE_NAMES: &[(*const (), &str)] = &[
+    (hook_virt_n::< 0> as *const (), "__vecDelDtor"),
+    (hook_virt_n::< 1> as *const (), "SetSandboxEnabled"),
+    (hook_virt_n::< 2> as *const (), "IsSandboxEnabled"),
+    (hook_virt_n::< 3> as *const (), "ShouldBeUsed"),
+    (hook_virt_n::< 4> as *const (), "Initialize"),
+    (hook_virt_n::< 5> as *const (), "InitializeAfterSetActive"),
+    (hook_virt_n::< 6> as *const (), "MakeUniquePakFilesForTheseFiles"),
+    (hook_virt_n::< 7> as *const (), "InitializeNewAsyncIO"),
+    (hook_virt_n::< 8> as *const (), "AddLocalDirectories"),
+    (hook_virt_n::< 9> as *const (), "BypassSecurity"),
+    (hook_virt_n::<10> as *const (), "Tick"),
+    (hook_virt_n::<11> as *const (), "GetLowerLevel"),
+    (hook_virt_n::<12> as *const (), "SetLowerLevel"),
+    (hook_virt_n::<13> as *const (), "GetName"),
+    (hook_virt_n::<14> as *const (), "FileExists"),
+    (hook_virt_n::<15> as *const (), "FileSize"),
+    (hook_virt_n::<16> as *const (), "DeleteFile"),
+    (hook_virt_n::<17> as *const (), "IsReadOnly"),
+    (hook_virt_n::<18> as *const (), "MoveFile"),
+    (hook_virt_n::<19> as *const (), "SetReadOnly"),
+    (hook_virt_n::<20> as *const (), "GetTimeStamp"),
+    (hook_virt_n::<21> as *const (), "SetTimeStamp"),
+    (hook_virt_n::<22> as *const (), "GetAccessTimeStamp"),
+    (hook_virt_n::<23> as *const (), "GetFilenameOnDisk"),
+    (hook_open_read as *const (), "OpenRead"),
+    (hook_open_read as *const (), "OpenReadNoBuffering"),
+    (hook_virt_n::<26> as *const (), "OpenWrite"),
+    (hook_virt_n::<27> as *const (), "DirectoryExists"),
+    (hook_virt_n::<28> as *const (), "CreateDirectory"),
+    (hook_virt_n::<29> as *const (), "DeleteDirectory"),
+    (hook_virt_n::<30> as *const (), "GetStatData"),
+    (hook_virt_n::<31> as *const (), "IterateDirectoryA"),
+    (hook_virt_n::<32> as *const (), "IterateDirectoryB"),
+    (hook_virt_n::<33> as *const (), "IterateDirectoryStatA"),
+    (hook_virt_n::<34> as *const (), "IterateDirectoryStatB"),
+    (hook_virt_n::<35> as *const (), "OpenAsyncRead"),
+    (hook_virt_n::<36> as *const (), "SetAsyncMinimumPriority"),
+    (hook_virt_n::<37> as *const (), "OpenMapped"),
+    (hook_virt_n::<38> as *const (), "GetTimeStampPair"),
+    (hook_virt_n::<39> as *const (), "GetTimeStampLocal"),
+    (hook_virt_n::<40> as *const (), "IterateDirectoryRecursivelyA"),
+    (hook_virt_n::<41> as *const (), "IterateDirectoryRecursivelyB"),
+    (hook_virt_n::<42> as *const (), "IterateDirectoryStatRecursivelyA"),
+    (hook_virt_n::<43> as *const (), "IterateDirectoryStatRecursivelyB"),
+    (hook_virt_n::<44> as *const (), "FindFiles"),
+    (hook_virt_n::<45> as *const (), "FindFilesRecursively"),
+    (hook_virt_n::<46> as *const (), "DeleteDirectoryRecursively"),
+    (hook_virt_n::<47> as *const (), "CreateDirectoryTree"),
+    (hook_virt_n::<48> as *const (), "CopyFile"),
+    (hook_virt_n::<49> as *const (), "CopyDirectoryTree"),
+    (hook_virt_n::<50> as *const (), "ConvertToAbsolutePathForExternalAppForRead"),
+    (hook_virt_n::<51> as *const (), "ConvertToAbsolutePathForExternalAppForWrite"),
+    (hook_virt_n::<52> as *const (), "SendMessageToServer"),
+    (hook_virt_n::<53> as *const (), "DoesCreatePublicFiles"),
+    (hook_virt_n::<54> as *const (), "SetCreatePublicFiles"),
+];
+
+static NET_PAK: OnceLock<Mutex<FStreamingNetworkPlatformFile>> = OnceLock::new();
+fn net_pak() -> &'static Mutex<FStreamingNetworkPlatformFile> {
+    NET_PAK.get_or_init(|| {
+        Mutex::new(
+            FStreamingNetworkPlatformFile::new()
+                .expect("failed to create FStreamingNetworkPlatformFile"),
+        )
+    })
+}
+
+static mut VTABLE_ORIG: FPakVTable = FPakVTable([None; 55]);
+
+type CursorFileHandle = IFileHandle<std::io::Cursor<Vec<u8>>>;
+
+type FnHookOpenRead = unsafe extern "system" fn(
+    this: *mut FPakPlatformFile,
+    file_name: *const u16,
+    b_allow_write: bool,
+) -> *mut CursorFileHandle;
+unsafe extern "system" fn hook_open_read(
+    this: *mut FPakPlatformFile,
+    file_name: *const u16,
+    b_allow_write: bool,
+) -> *mut CursorFileHandle {
+    let name = widestring::U16CStr::from_ptr_str(file_name)
+        .to_string()
+        .unwrap();
+    if name.starts_with("../../../FSD/Content/_AssemblyStorm/SandboxUtilities/") {
+        tracing::info!("Fetching file from editor {name}");
+
+        let data = net_pak()
+            .lock()
+            .as_mut()
+            .unwrap()
+            .get_file(&name)
+            .expect("failed to get file {name}");
+
+        //let data = std::fs::read(dbg!(std::path::Path::new("../../Content/Paks/mods_P/")
+        //    .join(
+        //        std::path::Path::new(&name)
+        //            .strip_prefix("../../../")
+        //            .unwrap(),
+        //    )))
+        //.expect("file open failed");
+        //return Box::into_raw(Box::new(CursorFileHandle::new(&name)));
+        return Box::into_raw(Box::new(CursorFileHandle::new(std::io::Cursor::new(data))));
+    }
+    std::mem::transmute::<_, FnHookOpenRead>(VTABLE_ORIG.0[24].unwrap())(
+        this,
+        file_name,
+        b_allow_write,
+    )
+}
+
+unsafe extern "system" fn hook_virt_n<const N: usize>(
+    a: *mut (),
+    b: *mut (),
+    c: *mut (),
+    d: *mut (),
+) -> *mut () {
+    //tracing::info!("FPakPlatformFile({N}={})", VTABLE_NAMES[N].1);
+    (VTABLE_ORIG.0[N].unwrap())(a, b, c, d)
+}
+
+unsafe fn hook_virt() -> Result<()> {
+    let addr = 0x1454a4580 as *mut FPakVTable;
+    let size = std::mem::size_of::<FPakVTable>();
+
+    let mut old = Default::default();
+    VirtualProtect(
+        addr as *const c_void,
+        size,
+        PAGE_EXECUTE_READWRITE,
+        &mut old,
+    )?;
+
+    let vtable = &mut *addr;
+    for (i, (virt, _name)) in VTABLE_NAMES.iter().enumerate() {
+        (VTABLE_ORIG.0)[i] = vtable.0[i];
+        vtable.0[i] = Some(std::mem::transmute(*virt));
+    }
+
+    VirtualProtect(addr as *const c_void, size, old, &mut old)?;
+
+    Ok(())
+}
+
+retour::static_detour! {
+    static FPakPlatformFileInitialize: unsafe extern "system" fn(*mut (), *mut (), *const ()) -> bool;
+}
+
+pub unsafe fn init() -> Result<()> {
+    FPakPlatformFileInitialize.initialize(
+        std::mem::transmute(0x1431ce320usize),
+        |this, inner, cmd_line| {
+            tracing::info!("FPakPlatformFile::Initialize");
+            let ret = FPakPlatformFileInitialize.call(this, inner, cmd_line);
+
+            let mount: &&DelegateMount = std::mem::transmute(0x1462e2c20usize);
+            let unmount: &&DelegateMount = std::mem::transmute(0x1462e2c30usize);
+
+            let pak = &*mount.pak;
+            tracing::info!("pak = {pak:#?}");
+
+            for pak in pak.pak_files.as_slice().iter() {
+                tracing::info!(
+                    "mounted pak order={} path={}",
+                    pak.read_order,
+                    (*pak.pak_file).pak_filename
+                );
+            }
+
+            ret
+        },
+    )?;
+    FPakPlatformFileInitialize.enable()?;
+
+    let mut lock = net_pak().lock();
+    let pak = lock.as_mut().unwrap();
+    pak.init().expect("failed to init net pak");
+    hook_virt()?;
+
+    Ok(())
 }
