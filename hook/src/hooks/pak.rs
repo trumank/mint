@@ -1,12 +1,11 @@
 use anyhow::{bail, Result};
 use byteorder::{ReadBytesExt, WriteBytesExt, LE};
-use windows::Win32::System::Memory::{VirtualProtect, PAGE_EXECUTE_READWRITE};
 
-use std::ffi::c_void;
 use std::io::{BufReader, BufWriter, Cursor, Read, Seek, Write};
 use std::net::TcpStream;
 use std::sync::{Mutex, OnceLock};
 
+use crate::globals;
 use crate::ue::{FString, TArray};
 
 #[rustfmt::skip]
@@ -584,28 +583,9 @@ struct FPakListEntry {
 #[derive(Debug)]
 #[repr(C)]
 struct FPakPlatformFile {
-    vtable: *const (),
+    vtable: *const FPakVTable,
     lower_level: *const (),
     pak_files: TArray<FPakListEntry>, // TODO ...
-}
-
-#[derive(Debug)]
-#[repr(C)]
-struct DelegateMount {
-    idk1: u64,
-    idk2: u64,
-    idk3: u64,
-    pak: *const FPakPlatformFile,
-    call: unsafe extern "system" fn(*mut FPakPlatformFile, &FString, u32) -> bool,
-}
-#[derive(Debug)]
-#[repr(C)]
-struct DelegateUnmount {
-    idk1: u64,
-    idk2: u64,
-    idk3: u64,
-    pak: *const FPakPlatformFile,
-    call: unsafe extern "system" fn(*mut FPakPlatformFile, &FString, u32) -> bool,
 }
 
 type FnVirt = unsafe extern "system" fn(a: *mut (), b: *mut (), c: *mut (), d: *mut ()) -> *mut ();
@@ -681,7 +661,8 @@ fn net_pak() -> &'static Mutex<FStreamingNetworkPlatformFile> {
     })
 }
 
-static mut VTABLE_ORIG: FPakVTable = FPakVTable([None; 55]);
+static mut VTABLE_ORIG: *const FPakVTable = std::ptr::null();
+static mut VTABLE_HOOKED: FPakVTable = FPakVTable([None; 55]);
 
 type CursorFileHandle = IFileHandle<std::io::Cursor<Vec<u8>>>;
 
@@ -704,7 +685,7 @@ unsafe extern "system" fn hook_file_exists(
             .expect("failed to get file info {name}");
         return info.file_exists;
     }
-    std::mem::transmute::<_, FnFileExists>(VTABLE_ORIG.0[14].unwrap())(this, file_name)
+    std::mem::transmute::<_, FnFileExists>((*VTABLE_ORIG).0[14].unwrap())(this, file_name)
 }
 
 type FnFileSize =
@@ -727,7 +708,7 @@ unsafe extern "system" fn hook_file_size(
             .expect("failed to get file info {name}");
         return info.size;
     }
-    std::mem::transmute::<_, FnFileSize>(VTABLE_ORIG.0[15].unwrap())(this, file_name)
+    std::mem::transmute::<_, FnFileSize>((*VTABLE_ORIG).0[15].unwrap())(this, file_name)
 }
 
 type FnHookOpenRead = unsafe extern "system" fn(
@@ -763,7 +744,7 @@ unsafe extern "system" fn hook_open_read(
         //return Box::into_raw(Box::new(CursorFileHandle::new(&name)));
         return Box::into_raw(Box::new(CursorFileHandle::new(std::io::Cursor::new(data))));
     }
-    std::mem::transmute::<_, FnHookOpenRead>(VTABLE_ORIG.0[24].unwrap())(
+    std::mem::transmute::<_, FnHookOpenRead>((*VTABLE_ORIG).0[24].unwrap())(
         this,
         file_name,
         b_allow_write,
@@ -780,7 +761,7 @@ unsafe extern "system" fn hook_open_async_read(
         .to_string()
         .unwrap();
     //tracing::info!("OpenAsyncRead({name})");
-    std::mem::transmute::<_, FnHookOpenAsyncRead>(VTABLE_ORIG.0[35].unwrap())(this, file_name)
+    std::mem::transmute::<_, FnHookOpenAsyncRead>((*VTABLE_ORIG).0[35].unwrap())(this, file_name)
 }
 
 unsafe extern "system" fn hook_virt_n<const N: usize>(
@@ -790,57 +771,37 @@ unsafe extern "system" fn hook_virt_n<const N: usize>(
     d: *mut (),
 ) -> *mut () {
     //tracing::info!("FPakPlatformFile({N}={})", VTABLE_NAMES[N].1);
-    (VTABLE_ORIG.0[N].unwrap())(a, b, c, d)
+    ((*VTABLE_ORIG).0[N].unwrap())(a, b, c, d)
 }
 
-unsafe fn hook_virt() -> Result<()> {
-    let addr = 0x1454a4580 as *mut FPakVTable;
-    let size = std::mem::size_of::<FPakVTable>();
-
-    let mut old = Default::default();
-    VirtualProtect(
-        addr as *const c_void,
-        size,
-        PAGE_EXECUTE_READWRITE,
-        &mut old,
-    )?;
-
-    let vtable = &mut *addr;
+unsafe fn hook_vtable(pak: &mut FPakPlatformFile) {
     for (i, (virt, _name)) in VTABLE_NAMES.iter().enumerate() {
-        (VTABLE_ORIG.0)[i] = vtable.0[i];
-        vtable.0[i] = Some(std::mem::transmute(*virt));
+        (VTABLE_HOOKED.0)[i] = Some(std::mem::transmute(*virt));
     }
 
-    VirtualProtect(addr as *const c_void, size, old, &mut old)?;
-
-    Ok(())
+    VTABLE_ORIG = pak.vtable;
+    pak.vtable = std::ptr::addr_of!(VTABLE_HOOKED);
 }
 
 retour::static_detour! {
-    static FPakPlatformFileInitialize: unsafe extern "system" fn(*mut (), *mut (), *const ()) -> bool;
+    static FPakPlatformFileInitialize: unsafe extern "system" fn(*mut FPakPlatformFile, *mut (), *const ()) -> bool;
 }
 
 pub unsafe fn init() -> Result<()> {
     FPakPlatformFileInitialize.initialize(
-        std::mem::transmute(0x1431ce320usize),
+        std::mem::transmute(
+            globals()
+                .resolution
+                .core
+                .as_ref()
+                .unwrap()
+                .fpak_platform_file_initialize
+                .0,
+        ),
         |this, inner, cmd_line| {
             tracing::info!("FPakPlatformFile::Initialize");
             let ret = FPakPlatformFileInitialize.call(this, inner, cmd_line);
-
-            let mount: &&DelegateMount = std::mem::transmute(0x1462e2c20usize);
-            let unmount: &&DelegateMount = std::mem::transmute(0x1462e2c30usize);
-
-            let pak = &*mount.pak;
-            tracing::info!("pak = {pak:#?}");
-
-            for pak in pak.pak_files.as_slice().iter() {
-                tracing::info!(
-                    "mounted pak order={} path={}",
-                    pak.read_order,
-                    (*pak.pak_file).pak_filename
-                );
-            }
-
+            hook_vtable(&mut *this);
             ret
         },
     )?;
@@ -849,7 +810,6 @@ pub unsafe fn init() -> Result<()> {
     let mut lock = net_pak().lock();
     let pak = lock.as_mut().unwrap();
     pak.init().expect("failed to init net pak");
-    hook_virt()?;
 
     Ok(())
 }
