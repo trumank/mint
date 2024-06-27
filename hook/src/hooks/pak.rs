@@ -119,7 +119,7 @@ enum Message {
     IterateDirectoryRecursively(MessageIterateDirectoryRecursively),
     DeleteDirectoryRecursively,
     CopyFile,
-    GetFileInfo,
+    GetFileInfo(MessageFileInfo),
     Read(MessageRead),
     Write,
     Close,
@@ -149,6 +149,10 @@ impl Message {
         match self {
             Message::OpenRead(m) => {
                 writer.write_u32::<LE>(4)?;
+                m.write(writer)?;
+            }
+            Message::GetFileInfo(m) => {
+                writer.write_u32::<LE>(13)?;
                 m.write(writer)?;
             }
             Message::Read(m) => {
@@ -262,6 +266,17 @@ impl MessageGetFileList {
 }
 
 #[derive(Debug)]
+struct MessageFileInfo {
+    file_name: String,
+}
+impl MessageFileInfo {
+    fn write<W: Write>(&self, writer: &mut W) -> Result<()> {
+        write_string(writer, &self.file_name)?;
+        Ok(())
+    }
+}
+
+#[derive(Debug)]
 struct MessageRead {
     handle_id: u64,
     bytes_to_read: u64,
@@ -272,6 +287,15 @@ impl MessageRead {
         writer.write_u64::<LE>(self.bytes_to_read)?;
         Ok(())
     }
+}
+
+#[derive(Debug)]
+struct FileInfo {
+    file_exists: bool,
+    read_only: bool,
+    size: i64,
+    timestamp: u64,
+    access_timestamp: u64,
 }
 
 pub struct FStreamingNetworkPlatformFile {
@@ -322,6 +346,22 @@ impl FStreamingNetworkPlatformFile {
 
         Ok(())
     }
+    pub fn get_file_info(&mut self, path: &str) -> Result<FileInfo> {
+        write_message(
+            &mut self.output,
+            &Message::GetFileInfo(MessageFileInfo {
+                file_name: path.to_string(),
+            }),
+        )?;
+        let mut reply = Cursor::new(read_payload(&mut self.input)?);
+        Ok(FileInfo {
+            file_exists: reply.read_u32::<LE>()? != 0,
+            read_only: reply.read_u32::<LE>()? != 0,
+            size: reply.read_i64::<LE>()?,
+            timestamp: reply.read_u64::<LE>()?,
+            access_timestamp: reply.read_u64::<LE>()?,
+        })
+    }
     pub fn get_file(&mut self, path: &str) -> Result<Vec<u8>> {
         write_message(
             &mut self.output,
@@ -334,9 +374,9 @@ impl FStreamingNetworkPlatformFile {
         let timestamp = reply.read_u64::<LE>()?;
         let file_size = reply.read_u64::<LE>()?;
 
-        //println!("file handle {}", handle_id);
-        //println!("timestamp {}", timestamp);
-        //println!("file size {}", file_size);
+        //tracing::info!("file handle {}", handle_id);
+        //tracing::info!("timestamp {}", timestamp);
+        //tracing::info!("file size {}", file_size);
 
         write_message(
             &mut self.output,
@@ -458,11 +498,26 @@ mod test {
         let mut pak = FStreamingNetworkPlatformFile::new()?;
         pak.init()?;
 
-        for _ in 0..1000 {
-            let bytes = pak.get_file(
-                "../../../FSD/Content/_AssemblyStorm/MissionSelector/MissionSelector.uasset",
-            )?;
+        let list = [
+            "../../../FSD/Content/_AssemblyStorm/TestMod/Pause/InitSpacerig.uexp",
+            "../../../FSD/Content/_AssemblyStorm/TestMod/Pause/InitSpacerig.uasset",
+            "../../../FSD/Content/_AssemblyStorm/TestMod/Pause/MOD_Pause.uasset",
+            "../../../FSD/Content/_AssemblyStorm/TestMod/Pause/MOD_Pause.uexp",
+        ];
+
+        let out = std::path::Path::new("dumped-assets");
+        std::fs::create_dir(out).ok();
+        for f in list {
+            let path = std::path::Path::new(&f);
+            let bytes = pak.get_file(f)?;
+            dbg!(pak.get_file_info(f)?);
             dbg!(bytes.len());
+            std::fs::write(out.join(path.file_name().unwrap()), bytes)?;
+            //std::fs::OpenOptions::new()
+            //    .create(true)
+            //    .truncate(true)
+            //    .open(out.join(path.file_name().unwrap()))?
+            //    .write_all(&bytes)?;
         }
 
         Ok(())
@@ -573,8 +628,8 @@ const VTABLE_NAMES: &[(*const (), &str)] = &[
     (hook_virt_n::<11> as *const (), "GetLowerLevel"),
     (hook_virt_n::<12> as *const (), "SetLowerLevel"),
     (hook_virt_n::<13> as *const (), "GetName"),
-    (hook_virt_n::<14> as *const (), "FileExists"),
-    (hook_virt_n::<15> as *const (), "FileSize"),
+    (hook_file_exists as *const (), "FileExists"),
+    (hook_file_size as *const (), "FileSize"),
     (hook_virt_n::<16> as *const (), "DeleteFile"),
     (hook_virt_n::<17> as *const (), "IsReadOnly"),
     (hook_virt_n::<18> as *const (), "MoveFile"),
@@ -594,7 +649,7 @@ const VTABLE_NAMES: &[(*const (), &str)] = &[
     (hook_virt_n::<32> as *const (), "IterateDirectoryB"),
     (hook_virt_n::<33> as *const (), "IterateDirectoryStatA"),
     (hook_virt_n::<34> as *const (), "IterateDirectoryStatB"),
-    (hook_virt_n::<35> as *const (), "OpenAsyncRead"),
+    (hook_open_async_read as *const (), "OpenAsyncRead"),
     (hook_virt_n::<36> as *const (), "SetAsyncMinimumPriority"),
     (hook_virt_n::<37> as *const (), "OpenMapped"),
     (hook_virt_n::<38> as *const (), "GetTimeStampPair"),
@@ -630,6 +685,43 @@ static mut VTABLE_ORIG: FPakVTable = FPakVTable([None; 55]);
 
 type CursorFileHandle = IFileHandle<std::io::Cursor<Vec<u8>>>;
 
+type FnFileExists =
+    unsafe extern "system" fn(this: *mut FPakPlatformFile, file_name: *const u16) -> bool;
+unsafe extern "system" fn hook_file_exists(
+    this: *mut FPakPlatformFile,
+    file_name: *const u16,
+) -> bool {
+    let name = widestring::U16CStr::from_ptr_str(file_name)
+        .to_string()
+        .unwrap();
+    //tracing::info!("FileExists({name})");
+    //if name.starts_with("../../../FSD/Content/_AssemblyStorm/TestMod/") {
+    std::mem::transmute::<_, FnFileExists>(VTABLE_ORIG.0[14].unwrap())(this, file_name)
+}
+
+type FnFileSize =
+    unsafe extern "system" fn(this: *mut FPakPlatformFile, file_name: *const u16) -> i64;
+unsafe extern "system" fn hook_file_size(
+    this: *mut FPakPlatformFile,
+    file_name: *const u16,
+) -> i64 {
+    let name = widestring::U16CStr::from_ptr_str(file_name)
+        .to_string()
+        .unwrap();
+    //tracing::info!("FileSize({name})");
+    if name.starts_with("../../../FSD/Content/_AssemblyStorm/TestMod/") {
+        // TODO file size
+        let info = net_pak()
+            .lock()
+            .as_mut()
+            .unwrap()
+            .get_file_info(&name)
+            .expect("failed to get file info {name}");
+        return info.size;
+    }
+    std::mem::transmute::<_, FnFileSize>(VTABLE_ORIG.0[15].unwrap())(this, file_name)
+}
+
 type FnHookOpenRead = unsafe extern "system" fn(
     this: *mut FPakPlatformFile,
     file_name: *const u16,
@@ -643,7 +735,7 @@ unsafe extern "system" fn hook_open_read(
     let name = widestring::U16CStr::from_ptr_str(file_name)
         .to_string()
         .unwrap();
-    if name.starts_with("../../../FSD/Content/_AssemblyStorm/SandboxUtilities/") {
+    if name.starts_with("../../../FSD/Content/_AssemblyStorm/TestMod/") {
         tracing::info!("Fetching file from editor {name}");
 
         let data = net_pak()
@@ -668,6 +760,19 @@ unsafe extern "system" fn hook_open_read(
         file_name,
         b_allow_write,
     )
+}
+
+type FnHookOpenAsyncRead =
+    unsafe extern "system" fn(this: *mut FPakPlatformFile, file_name: *const u16) -> *mut ();
+unsafe extern "system" fn hook_open_async_read(
+    this: *mut FPakPlatformFile,
+    file_name: *const u16,
+) -> *mut () {
+    let name = widestring::U16CStr::from_ptr_str(file_name)
+        .to_string()
+        .unwrap();
+    //tracing::info!("OpenAsyncRead({name})");
+    std::mem::transmute::<_, FnHookOpenAsyncRead>(VTABLE_ORIG.0[35].unwrap())(this, file_name)
 }
 
 unsafe extern "system" fn hook_virt_n<const N: usize>(
