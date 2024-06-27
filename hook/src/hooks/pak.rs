@@ -695,7 +695,15 @@ unsafe extern "system" fn hook_file_exists(
         .to_string()
         .unwrap();
     //tracing::info!("FileExists({name})");
-    //if name.starts_with("../../../FSD/Content/_AssemblyStorm/TestMod/") {
+    if name.starts_with("../../../FSD/Content/_AssemblyStorm/TestMod/") {
+        let info = net_pak()
+            .lock()
+            .as_mut()
+            .unwrap()
+            .get_file_info(&name)
+            .expect("failed to get file info {name}");
+        return info.file_exists;
+    }
     std::mem::transmute::<_, FnFileExists>(VTABLE_ORIG.0[14].unwrap())(this, file_name)
 }
 
