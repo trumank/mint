@@ -34,6 +34,5 @@ widestring = "1.0.2"
 tokio = { workspace = true, features = ["full"] }
 tracing-appender = "0.2.3"
 seq-macro = "0.3.5"
-sptr = { version = "0.3.2", features = ["opaque_fn"] }
 byteorder = "1.5.0"
 glob = "0.3.1"
