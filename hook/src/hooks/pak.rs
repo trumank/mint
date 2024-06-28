@@ -289,12 +289,12 @@ impl MessageRead {
 }
 
 #[derive(Debug)]
-struct FileInfo {
-    file_exists: bool,
-    read_only: bool,
-    size: i64,
-    timestamp: u64,
-    access_timestamp: u64,
+pub struct FileInfo {
+    pub file_exists: bool,
+    pub read_only: bool,
+    pub size: i64,
+    pub timestamp: u64,
+    pub access_timestamp: u64,
 }
 
 pub struct FStreamingNetworkPlatformFile {
@@ -331,7 +331,7 @@ impl FStreamingNetworkPlatformFile {
             ],
             connection_flags: 1,
             version_info: "".to_owned(),
-            host_address: "192.168.168.200".to_owned(),
+            host_address: "".to_owned(),
             custom_platform_data: 0,
         }));
         write_message(&mut self.output, &msg)?;
