@@ -1,8 +1,9 @@
-use anyhow::{bail, Result};
+use anyhow::{bail, Context, Result};
 use byteorder::{ReadBytesExt, WriteBytesExt, LE};
 
 use std::io::{BufReader, BufWriter, Cursor, Read, Seek, Write};
 use std::net::TcpStream;
+use std::path::Path;
 use std::sync::{Mutex, OnceLock};
 
 use crate::globals;
@@ -297,14 +298,49 @@ pub struct FileInfo {
     pub access_timestamp: u64,
 }
 
+fn default_host() -> String {
+    "127.0.0.1:41899".to_string()
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct NetworkPakConfig {
+    #[serde(default = "default_host")]
+    host: String,
+    platform: String,
+    globs: Vec<String>,
+}
+impl NetworkPakConfig {
+    fn new() -> Result<Self> {
+        Ok(serde_json::from_slice(&std::fs::read(
+            globals()
+                .bin_dir
+                .as_ref()
+                .context("binaries directory unknown")?
+                .join("cook-server.json"),
+        )?)?)
+    }
+}
+
 pub struct FStreamingNetworkPlatformFile {
     input: BufReader<TcpStream>,
     output: BufWriter<TcpStream>,
     pub file_list: Vec<FileEntry>,
+    config: NetworkPakConfig,
+    globs: Vec<glob::Pattern>,
 }
 impl FStreamingNetworkPlatformFile {
     pub fn new() -> Result<Self> {
-        let conn = TcpStream::connect("127.0.0.1:41899")?;
+        let config = NetworkPakConfig::new().unwrap_or_else(|e| {
+            tracing::warn!("Failed to load cook-server.json: {e}");
+            NetworkPakConfig {
+                host: default_host(),
+                platform: "WindowsNoEditor".into(),
+                globs: vec![],
+            }
+        });
+        tracing::info!("Using cook server config: {config:#?}");
+
+        let conn = TcpStream::connect(&config.host)?;
         let input = BufReader::new(conn.try_clone()?);
         let output = BufWriter::new(conn);
 
@@ -312,11 +348,17 @@ impl FStreamingNetworkPlatformFile {
             input,
             output,
             file_list: vec![],
+            globs: config
+                .globs
+                .iter()
+                .flat_map(|g| glob::Pattern::new(g))
+                .collect(),
+            config,
         })
     }
     pub fn init(&mut self) -> Result<()> {
         let msg = Message::GetFileList(Box::new(MessageGetFileList {
-            platforms: vec!["LinuxNoEditor".to_owned()],
+            platforms: vec![self.config.platform.to_string()],
             game_name: "../../../FSD/FSD.uproject".to_owned(),
             engine_rel_path: "../../../Engine/".to_owned(),
             game_rel_path: "../../../FSD/".to_owned(),
@@ -324,11 +366,7 @@ impl FStreamingNetworkPlatformFile {
             project_platforms_extensions_dir: "../../../FSD/Platforms/".to_owned(),
             engine_rel_plugin_path: "../../../Engine/Plugins/".to_owned(),
             game_rel_plugin_path: "../../../FSD/Plugins/".to_owned(),
-            directories: vec![
-                //"../../../Engine/".to_owned(),
-                //"../../../FSD/".to_owned()
-                "../../../FSD/Content/".to_owned(),
-            ],
+            directories: vec!["../../../FSD/Content/".to_owned()],
             connection_flags: 1,
             version_info: "".to_owned(),
             host_address: "".to_owned(),
@@ -392,6 +430,9 @@ impl FStreamingNetworkPlatformFile {
         let rest = reply.into_inner();
 
         Ok(rest[8..rest.len()].to_vec())
+    }
+    fn matches(&self, path: &str) -> bool {
+        self.globs.iter().any(|g| g.matches(path))
     }
 }
 
@@ -675,15 +716,19 @@ unsafe extern "system" fn hook_file_exists(
     let name = widestring::U16CStr::from_ptr_str(file_name)
         .to_string()
         .unwrap();
-    //tracing::info!("FileExists({name})");
-    if name.starts_with("../../../FSD/Content/_AssemblyStorm/TestMod/") {
-        let info = net_pak()
-            .lock()
-            .as_mut()
-            .unwrap()
+
+    let mut lock = net_pak().lock();
+    let pak = lock.as_mut().unwrap();
+
+    if name
+        .strip_prefix("../../../")
+        .map(|p| pak.matches(p))
+        .unwrap_or_default()
+    {
+        return pak
             .get_file_info(&name)
-            .expect("failed to get file info {name}");
-        return info.file_exists;
+            .expect("failed to get file info {name}")
+            .file_exists;
     }
     std::mem::transmute::<_, FnFileExists>((*VTABLE_ORIG).0[14].unwrap())(this, file_name)
 }
@@ -697,16 +742,19 @@ unsafe extern "system" fn hook_file_size(
     let name = widestring::U16CStr::from_ptr_str(file_name)
         .to_string()
         .unwrap();
-    //tracing::info!("FileSize({name})");
-    if name.starts_with("../../../FSD/Content/_AssemblyStorm/TestMod/") {
-        // TODO file size
-        let info = net_pak()
-            .lock()
-            .as_mut()
-            .unwrap()
+
+    let mut lock = net_pak().lock();
+    let pak = lock.as_mut().unwrap();
+
+    if name
+        .strip_prefix("../../../")
+        .map(|p| pak.matches(p))
+        .unwrap_or_default()
+    {
+        return pak
             .get_file_info(&name)
-            .expect("failed to get file info {name}");
-        return info.size;
+            .expect("failed to get file info {name}")
+            .size;
     }
     std::mem::transmute::<_, FnFileSize>((*VTABLE_ORIG).0[15].unwrap())(this, file_name)
 }
@@ -724,24 +772,17 @@ unsafe extern "system" fn hook_open_read(
     let name = widestring::U16CStr::from_ptr_str(file_name)
         .to_string()
         .unwrap();
-    if name.starts_with("../../../FSD/Content/_AssemblyStorm/TestMod/") {
+
+    let mut lock = net_pak().lock();
+    let pak = lock.as_mut().unwrap();
+
+    if name
+        .strip_prefix("../../../")
+        .map(|p| pak.matches(p))
+        .unwrap_or_default()
+    {
         tracing::info!("Fetching file from editor {name}");
-
-        let data = net_pak()
-            .lock()
-            .as_mut()
-            .unwrap()
-            .get_file(&name)
-            .expect("failed to get file {name}");
-
-        //let data = std::fs::read(dbg!(std::path::Path::new("../../Content/Paks/mods_P/")
-        //    .join(
-        //        std::path::Path::new(&name)
-        //            .strip_prefix("../../../")
-        //            .unwrap(),
-        //    )))
-        //.expect("file open failed");
-        //return Box::into_raw(Box::new(CursorFileHandle::new(&name)));
+        let data = pak.get_file(&name).expect("failed to get file {name}");
         return Box::into_raw(Box::new(CursorFileHandle::new(std::io::Cursor::new(data))));
     }
     std::mem::transmute::<_, FnHookOpenRead>((*VTABLE_ORIG).0[24].unwrap())(
