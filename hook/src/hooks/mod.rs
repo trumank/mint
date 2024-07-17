@@ -78,7 +78,7 @@ pub unsafe fn initialize() -> Result<()> {
                 if let Some(hook) = hooks.get(path.as_str()) {
                     function
                         .function_flags
-                        .insert(ue::EFunctionFlags::FUNC_Native | ue::EFunctionFlags::FUNC_Final);
+                        .insert(ue::EFunctionFlags::FUNC_Native);
                     function.func = *hook;
                 }
             }
