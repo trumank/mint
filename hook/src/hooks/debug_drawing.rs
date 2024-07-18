@@ -66,10 +66,6 @@ pub fn kismet_hooks() -> &'static [(&'static str, ExecFn)] {
             "/Game/_mint/BPL_CSG.BPL_CSG_C:Get Procedural Mesh Triangles",
             exec_get_mesh_triangles as ExecFn,
         ),
-        (
-            "/Script/Engine.KismetSystemLibrary:PrintString",
-            exec_print_string as ExecFn,
-        ),
     ]
 }
 #[repr(C)]
@@ -1095,11 +1091,11 @@ unsafe extern "system" fn exec_path_to(
 ) {
     let stack = stack.as_mut().unwrap();
 
-    let dest: FVector = arg(stack);
-    let size: nav::DeepPathFinderSize = arg(stack);
-    let type_: nav::DeepPathFinderType = arg(stack);
-    let pref: nav::DeepPathFinderPreference = arg(stack);
-    let follow_player: bool = arg(stack);
+    let dest: FVector = stack.arg();
+    let size: nav::DeepPathFinderSize = stack.arg();
+    let type_: nav::DeepPathFinderType = stack.arg();
+    let pref: nav::DeepPathFinderPreference = stack.arg();
+    let follow_player: bool = stack.arg();
 
     if let Some(world) = get_world(context.nn()) {
         nav::path_to(world, follow_player.then_some(dest), size, type_, pref);
@@ -1117,10 +1113,10 @@ unsafe extern "system" fn exec_spawn_points(
 ) {
     let stack = stack.as_mut().unwrap();
 
-    let dest: FVector = arg(stack);
-    let radius: f32 = arg(stack);
-    let size: nav::DeepPathFinderSize = arg(stack);
-    let type_: nav::DeepPathFinderType = arg(stack);
+    let dest: FVector = stack.arg();
+    let radius: f32 = stack.arg();
+    let size: nav::DeepPathFinderSize = stack.arg();
+    let type_: nav::DeepPathFinderType = stack.arg();
 
     if let Some(world) = get_world(context.nn()) {
         nav::spawn_points(world, &dest, radius, size, type_);
@@ -1129,25 +1125,6 @@ unsafe extern "system" fn exec_spawn_points(
     if !stack.code.is_null() {
         stack.code = stack.code.add(1);
     }
-}
-
-unsafe extern "system" fn exec_print_string(
-    _context: *mut ue::UObject,
-    stack: *mut ue::kismet::FFrame,
-    _result: *mut c_void,
-) {
-    let stack = stack.as_mut().unwrap();
-
-    let _ctx: Option<NonNull<UObject>> = arg(stack);
-    let string: ue::FString = arg(stack);
-    let _print_to_screen: bool = arg(stack);
-    let _print_to_log: bool = arg(stack);
-    let _color: FLinearColor = arg(stack);
-    let _duration: f32 = arg(stack);
-
-    println!("PrintString({string})");
-
-    stack.code = stack.code.add(1);
 }
 
 #[derive(Debug, Clone)]
@@ -1225,8 +1202,8 @@ unsafe extern "system" fn exec_get_mesh_triangles(
 ) {
     let stack = stack.as_mut().unwrap();
 
-    let mesh: Option<NonNull<UDeepProceduralMeshComponent>> = arg(stack);
-    let _world_context: Option<NonNull<UObject>> = arg(stack);
+    let mesh: Option<NonNull<UDeepProceduralMeshComponent>> = stack.arg();
+    let _world_context: Option<NonNull<UObject>> = stack.arg();
 
     #[derive(Debug, Clone, Copy)]
     #[repr(C)]
@@ -1245,11 +1222,9 @@ unsafe extern "system" fn exec_get_mesh_triangles(
         }
     }
 
-    stack.most_recent_property_address = std::ptr::null();
-    ue::kismet::arg(stack, &mut TArray::<Tri<u32>>::default());
-    let ret = (stack.most_recent_property_address as *mut TArray<Tri<u32>>)
-        .as_mut()
-        .unwrap();
+    drop(stack.arg::<TArray<Tri<u32>>>());
+    let ret: &mut TArray<Tri<u32>> = &mut *(stack.most_recent_property_address as *mut _);
+    *ret = TArray::new();
 
     ret.clear();
 
