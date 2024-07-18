@@ -1,6 +1,7 @@
 #![allow(clippy::missing_transmute_annotations)]
 
 mod debug_drawing;
+mod nav;
 mod server_list;
 
 use std::{
@@ -51,6 +52,7 @@ pub unsafe fn initialize() -> Result<()> {
     .iter()
     .chain(server_list::kismet_hooks().iter())
     .chain(debug_drawing::kismet_hooks().iter())
+    .chain(nav::kismet_hooks().iter())
     .cloned()
     .collect::<std::collections::HashMap<_, ExecFn>>();
 

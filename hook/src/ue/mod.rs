@@ -5,6 +5,7 @@ mod map;
 mod name;
 mod object;
 mod string;
+mod world;
 
 pub use array::*;
 pub use malloc::*;
@@ -12,6 +13,7 @@ pub use map::*;
 pub use name::*;
 pub use object::*;
 pub use string::*;
+pub use world::*;
 
 use std::ffi::c_void;
 
