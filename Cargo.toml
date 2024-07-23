@@ -14,21 +14,21 @@ version = "0.2.10"
 edition = "2021"
 
 [workspace.dependencies]
-anyhow = { version = "1.0.79", features = ["backtrace"] }
+anyhow = { version = "1.0.92", features = ["backtrace"] }
 patternsleuth = { git = "https://github.com/trumank/patternsleuth" }
-steamlocate = "2.0.0-beta.2"
+steamlocate = "2.0.0-beta.4"
 repak = { git = "https://github.com/trumank/repak" }
-serde = { version = "1.0.195", features = ["derive"] }
-serde_json = "1.0.111"
-itertools = "0.12.0"
-postcard = { version = "1.0.8", default-features = false, features = ["alloc"] }
-fs-err = "2.11.0"
+serde = { version = "1.0.214", features = ["derive"] }
+serde_json = "1.0.132"
+itertools = "0.13.0"
+postcard = { version = "1.0.10", default-features = false, features = ["alloc"] }
+fs-err = "3.0.0"
 tracing = { version = "0.1.40", features = ["attributes"] }
 tracing-appender = "0.2.3"
 tracing-subscriber = { version = "0.3.18", features = ["fmt", "env-filter", "std", "registry"] }
-tokio = "1.35.1"
-reqwest = { version = "0.11.23", default-features = false, features = ["blocking", "rustls", "json"] }
-snafu = "0.8.0"
+tokio = "1.41.0"
+reqwest = { version = "0.11.27", default-features = false, features = ["blocking", "rustls", "json"] }
+snafu = "0.8.5"
 
 [package]
 name = "mint"
@@ -43,59 +43,59 @@ default = ["hook", "oodle_platform_dependent"]
 hook = ["dep:hook"]
 oodle = ["repak/oodle_implicit_dynamic"]
 oodle_platform_dependent = ["workspace_hack/oodle_platform_dependent"]
-debug = ["egui/deadlock_detection", "egui/extra_debug_asserts", "egui/extra_asserts"]
+debug = ["egui/deadlock_detection"]
 
 [dependencies]
 workspace_hack = { path = "workspace_hack" }
 ansi_term = "0.12.1"
 anyhow.workspace = true
-async-trait = "0.1.77"
-clap = { version = "4.4.14", features = ["derive"] }
+async-trait = "0.1.83"
+clap = { version = "4.5.20", features = ["derive"] }
 dialoguer = "0.11.0"
 directories = "5.0.1"
-eframe = "0.25.0"
-egui = "0.25.0"
-egui_commonmark = "0.11.0"
-futures = "0.3.30"
+eframe = "0.29.1"
+egui = "0.29.1"
+egui_commonmark = "0.18.0"
+futures = "0.3.31"
 hex = "0.4.3"
-image = { version = "0.24.7", default-features = false, features = ["png"] }
-indexmap = { version = "2.1.0", features = ["serde"] }
-inventory = "0.3.14"
+image = { version = "0.25.4", default-features = false, features = ["png"] }
+indexmap = { version = "2.6.0", features = ["serde"] }
+inventory = "0.3.15"
 mint_lib = { path = "mint_lib" }
 modio = { git = "https://github.com/trumank/modio-rs.git", branch = "dev", default-features = false, features = ["rustls-tls"] }
 obake = { version = "1.0.5", features = ["serde"] }
-opener = "0.6.1"
+opener = "0.7.2"
 path-slash = "0.2.1"
-rayon = "1.8.0"
-regex = "1.10.2"
+rayon = "1.10.0"
+regex = "1.11.1"
 reqwest.workspace = true
-reqwest-middleware = "0.2.4"
-rfd = "0.12.1"
-rust-ini = "0.20.0"
-self_update = { version = "0.39.0", default-features = false, features = ["archive-zip", "rustls"] }
-semver = "1.0.21"
+reqwest-middleware = "0.2.5"
+rfd = "0.15.0"
+rust-ini = "0.21.1"
+self_update = { version = "0.41.0", default-features = false, features = ["archive-zip", "rustls"] }
+semver = "1.0.23"
 serde.workspace = true
 serde_json.workspace = true
 sha2 = "0.10.8"
 steamlocate.workspace = true
 task-local-extensions = "0.1.4"
-tempfile = "3.9.0"
-thiserror = "1.0.56"
+tempfile = "3.13.0"
+thiserror = "1.0.66"
 tokio = { workspace = true, features = ["full"] }
 tracing.workspace = true
-typetag = "0.2.16"
+typetag = "0.2.18"
 uasset_utils = { git = "https://github.com/trumank/uasset_utils" }
 unreal_asset = { git = "https://github.com/trumank/unrealmodding", branch = "patches" }
-url = "2.5.0"
-zip = { version = "0.6.6", default-features = false, features = ["aes-crypto", "deflate", "time"] }
+url = "2.5.2"
+zip = { version = "2.2.0", default-features = false, features = ["aes-crypto", "deflate", "time"] }
 repak.workspace = true
-include_dir = "0.7.3"
+include_dir = "0.7.4"
 postcard.workspace = true
 fs-err.workspace = true
 snafu.workspace = true
 strum = { version = "0.26", features = ["derive"] }
 itertools.workspace = true
-egui_dnd = "0.6.0"
+egui_dnd = "0.10.0"
 
 [target.'cfg(target_env = "msvc")'.dependencies]
 hook = { path = "hook", artifact = "cdylib", optional = true, target = "x86_64-pc-windows-msvc"}
@@ -127,4 +127,4 @@ targets = ["x86_64-unknown-linux-gnu", "x86_64-pc-windows-msvc"]
 unix-archive = ".zip"
 
 [dev-dependencies]
-mockall = "0.12.1"
+mockall = "0.13.0"

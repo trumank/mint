@@ -173,7 +173,7 @@ pub(crate) fn lint_get_all_files_from_data(
                 .by_index(i)
                 .map_err(|_| LintError::ZipArchiveError)?;
 
-            if let Some(p) = file.enclosed_name().map(Path::to_path_buf) {
+            if let Some(p) = file.enclosed_name().as_deref().map(Path::to_path_buf) {
                 if file.is_file() {
                     if p.extension().filter(|e| e == &"pak").is_some() {
                         let mut buf = vec![];

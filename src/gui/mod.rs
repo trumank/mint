@@ -16,7 +16,7 @@ use std::{
     path::PathBuf,
 };
 
-use eframe::egui::{Button, CollapsingHeader, RichText, Visuals};
+use eframe::egui::{Button, CollapsingHeader, RichText};
 use eframe::epaint::{Pos2, Vec2};
 use eframe::{
     egui::{FontSelection, Layout, TextFormat, Ui},
@@ -64,7 +64,7 @@ pub fn gui(dirs: Dirs, args: Option<Vec<String>>) -> Result<(), MintError> {
     eframe::run_native(
         &format!("mint {}", env!("CARGO_PKG_VERSION")),
         options,
-        Box::new(|cc| Box::new(App::new(cc, dirs, args).unwrap())),
+        Box::new(|cc| Ok(Box::new(App::new(cc, dirs, args)?))),
     )
     .with_generic(|e| format!("{e}"))?;
     Ok(())
@@ -87,10 +87,18 @@ pub enum GuiTheme {
 }
 
 impl GuiTheme {
-    fn visuals(self) -> Visuals {
-        match self {
-            GuiTheme::Light => Visuals::light(),
-            GuiTheme::Dark => Visuals::dark(),
+    fn from_egui_theme(theme: egui::ThemePreference) -> Option<Self> {
+        match theme {
+            egui::ThemePreference::Dark => Some(GuiTheme::Dark),
+            egui::ThemePreference::Light => Some(GuiTheme::Light),
+            egui::ThemePreference::System => None,
+        }
+    }
+    fn into_egui_theme(theme: Option<Self>) -> egui::ThemePreference {
+        match theme {
+            Some(GuiTheme::Dark) => egui::ThemePreference::Dark,
+            Some(GuiTheme::Light) => egui::ThemePreference::Light,
+            None => egui::ThemePreference::System,
         }
     }
 }
@@ -121,7 +129,6 @@ impl SortBy {
 const MODIO_LOGO_PNG: &[u8] = include_bytes!("../../assets/modio-cog-blue.png");
 
 pub struct App {
-    default_visuals: Visuals,
     args: Option<Vec<String>>,
     tx: Sender<message::Message>,
     rx: Receiver<message::Message>,
@@ -206,7 +213,7 @@ enum LastActionStatus {
 
 impl App {
     fn new(
-        cc: &eframe::CreationContext,
+        _cc: &eframe::CreationContext,
         dirs: Dirs,
         args: Option<Vec<String>>,
     ) -> Result<Self, MintError> {
@@ -214,11 +221,6 @@ impl App {
         let state = State::init(dirs)?;
 
         Ok(Self {
-            default_visuals: cc
-                .integration_info
-                .system_theme
-                .map(|t| t.egui_visuals())
-                .unwrap_or_default(),
             args,
             tx,
             rx,
@@ -475,7 +477,7 @@ impl App {
                 }
 
                 if let Some(info) = &info {
-                    egui::ComboBox::from_id_source(row_index)
+                    egui::ComboBox::from_id_salt(row_index)
                         .selected_text(
                             self.state
                                 .store
@@ -533,7 +535,7 @@ impl App {
                                     }
                                 })
                                 .speed(0.05)
-                                .clamp_range(RangeInclusive::new(-999, 999)),
+                                .range(RangeInclusive::new(-999, 999)),
                         )
                         .on_hover_text_at_pointer(
                             "Load Priority\nIn case of asset conflict, mods with higher priority take precedent.\nCan have duplicate values.",
@@ -815,7 +817,7 @@ impl App {
         {
             let now = SystemTime::now();
             let wait_time = Duration::from_secs(10);
-            egui::Area::new("available-update-overlay")
+            egui::Area::new("available-update-overlay".into())
                 .movable(false)
                 .fixed_pos(Pos2::ZERO)
                 .order(egui::Order::Background)
@@ -863,9 +865,11 @@ impl App {
                     .anchor(Align2::CENTER_CENTER, Vec2::ZERO)
                     .resizable(false)
                     .show(ctx, |ui| {
-                        CommonMarkViewer::new("available-update")
-                            .max_image_width(Some(512))
-                            .show(ui, &mut self.cache, &update.body);
+                        CommonMarkViewer::new().max_image_width(Some(512)).show(
+                            ui,
+                            &mut self.cache,
+                            &update.body,
+                        );
                         ui.with_layout(egui::Layout::right_to_left(Align::TOP), |ui| {
                             if ui
                                 .add(egui::Button::new("Install update"))
@@ -1066,11 +1070,13 @@ impl App {
                         ui.horizontal(|ui| {
                             ui.horizontal(|ui| {
                                 let config = &mut self.state.config;
-                                let changed = ui.selectable_value(&mut config.gui_theme, Some(GuiTheme::Light), "☀ Light").changed() ||
-                                    ui.selectable_value(&mut config.gui_theme, Some(GuiTheme::Dark), "🌙 Dark").changed() ||
-                                    ui.selectable_value(&mut config.gui_theme, None, "System").changed();
-                                if changed {
-                                    ctx.set_visuals(config.gui_theme.map(GuiTheme::visuals).unwrap_or_else(|| self.default_visuals.clone()));
+
+                                let old_theme = GuiTheme::into_egui_theme(config.gui_theme);
+                                let mut theme = old_theme;
+                                theme.radio_buttons(ui);
+                                if theme != old_theme {
+                                    ui.memory_mut(|m| m.options.theme_preference = theme);
+                                    config.gui_theme = GuiTheme::from_egui_theme(theme);
                                     config.save().unwrap();
                                 }
                             });
@@ -1705,13 +1711,8 @@ impl eframe::App for App {
         if !self.has_run_init {
             self.has_run_init = true;
 
-            ctx.set_visuals(
-                self.state
-                    .config
-                    .gui_theme
-                    .map(GuiTheme::visuals)
-                    .unwrap_or_else(|| self.default_visuals.clone()),
-            );
+            let theme = GuiTheme::into_egui_theme(self.state.config.gui_theme);
+            ctx.memory_mut(|m| m.options.theme_preference = theme);
 
             message::CheckUpdates::send(self, ctx);
         }
@@ -1917,11 +1918,10 @@ impl eframe::App for App {
             });
         });
         egui::CentralPanel::default().show(ctx, |ui| {
-            ui.set_enabled(
-                self.integrate_rid.is_none()
-                    && self.update_rid.is_none()
-                    && self.lint_rid.is_none(),
-            );
+            if self.integrate_rid.is_some() || self.update_rid.is_some() || self.lint_rid.is_some()
+            {
+                ui.disable();
+            }
             // profile selection
 
             let buttons = |ui: &mut Ui, mod_data: &mut ModData| {
@@ -2040,8 +2040,11 @@ impl eframe::App for App {
                     text_edit = text_edit.text_color(ui.visuals().error_fg_color);
                 }
                 let res = ui
-                    .child_ui(ui.max_rect(), egui::Layout::bottom_up(Align::RIGHT))
-                    .add(text_edit);
+                    .scope_builder(
+                        egui::UiBuilder::new().layout(egui::Layout::bottom_up(Align::RIGHT)),
+                        |ui| ui.add(text_edit),
+                    )
+                    .inner;
                 if res.changed() {
                     self.scroll_to_match = true;
                 }
@@ -2062,7 +2065,7 @@ impl eframe::App for App {
             self.ui_profile(ui, &profile);
 
             // must access memory outside of input lock to prevent deadlock
-            let is_anything_focused = ctx.memory(|m| m.focus().is_some());
+            let is_anything_focused = ctx.memory(|m| m.focused().is_some());
             ctx.input(|i| {
                 if !i.raw.dropped_files.is_empty()
                     && self.integrate_rid.is_none()
