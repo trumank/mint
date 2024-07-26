@@ -1,4 +1,5 @@
 mod array;
+mod debug_drawing;
 pub mod kismet;
 mod malloc;
 mod map;
@@ -8,6 +9,7 @@ mod string;
 mod world;
 
 pub use array::*;
+pub use debug_drawing::*;
 pub use malloc::*;
 pub use map::*;
 pub use name::*;

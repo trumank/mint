@@ -34,9 +34,9 @@ impl<T> Drop for TArray<T> {
             std::ptr::drop_in_place(std::ptr::slice_from_raw_parts_mut(
                 self.data,
                 self.num as usize,
-            ))
+            ));
+            globals().gmalloc().free(self.data.cast());
         }
-        globals().gmalloc().free(self.data.cast());
     }
 }
 impl<T> Default for TArray<T> {
@@ -50,13 +50,15 @@ impl<T> Default for TArray<T> {
 }
 impl<T> TArray<T> {
     pub fn with_capacity(capacity: usize) -> Self {
-        Self {
-            data: globals().gmalloc().malloc(
-                capacity * std::mem::size_of::<T>(),
-                std::mem::align_of::<T>() as u32,
-            ) as *mut _,
-            num: 0,
-            max: capacity as i32,
+        unsafe {
+            Self {
+                data: globals().gmalloc().malloc(
+                    capacity * std::mem::size_of::<T>(),
+                    std::mem::align_of::<T>() as u32,
+                ) as *mut _,
+                num: 0,
+                max: capacity as i32,
+            }
         }
     }
     pub fn len(&self) -> usize {
@@ -93,11 +95,13 @@ impl<T> TArray<T> {
     pub fn reserve(&mut self, additional: usize) {
         if self.num + additional as i32 >= self.max {
             self.max = u32::next_power_of_two((self.max + additional as i32) as u32) as i32;
-            let new = globals().gmalloc().realloc(
-                self.data as *mut c_void,
-                self.max as usize * std::mem::size_of::<T>(),
-                std::mem::align_of::<T>() as u32,
-            ) as *mut _;
+            let new = unsafe {
+                globals().gmalloc().realloc(
+                    self.data as *mut c_void,
+                    self.max as usize * std::mem::size_of::<T>(),
+                    std::mem::align_of::<T>() as u32,
+                ) as *mut _
+            };
             self.data = new;
         }
     }

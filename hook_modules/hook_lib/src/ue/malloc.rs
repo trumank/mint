@@ -8,13 +8,18 @@ pub struct FMalloc {
 unsafe impl Sync for FMalloc {}
 unsafe impl Send for FMalloc {}
 impl FMalloc {
-    pub fn malloc(&self, count: usize, alignment: u32) -> *mut c_void {
+    pub unsafe fn malloc(&self, count: usize, alignment: u32) -> *mut c_void {
         unsafe { ((*self.vtable).malloc)(self, count, alignment) }
     }
-    pub fn realloc(&self, original: *mut c_void, count: usize, alignment: u32) -> *mut c_void {
+    pub unsafe fn realloc(
+        &self,
+        original: *mut c_void,
+        count: usize,
+        alignment: u32,
+    ) -> *mut c_void {
         unsafe { ((*self.vtable).realloc)(self, original, count, alignment) }
     }
-    pub fn free(&self, original: *mut c_void) {
+    pub unsafe fn free(&self, original: *mut c_void) {
         unsafe { ((*self.vtable).free)(self, original) }
     }
 }

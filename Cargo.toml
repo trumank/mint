@@ -1,9 +1,10 @@
 [workspace]
+nalgebra = "0.33.0"
 members = [
   "mint_lib",
   "hook",
   "hook_resolvers",
-  "workspace_hack",
+  "workspace_hack", "hook_modules/hook_test", "hook_modules/hook_lib",
 ]
 
 [workspace.package]
@@ -15,7 +16,7 @@ edition = "2021"
 
 [workspace.dependencies]
 anyhow = { version = "1.0.92", features = ["backtrace"] }
-patternsleuth = { git = "https://github.com/trumank/patternsleuth" }
+patternsleuth = { git = "https://github.com/trumank/patternsleuth", features = ["image-pe"] }
 steamlocate = "2.0.0-beta.4"
 repak = { git = "https://github.com/trumank/repak" }
 serde = { version = "1.0.214", features = ["derive"] }
@@ -29,6 +30,7 @@ tracing-subscriber = { version = "0.3.18", features = ["fmt", "env-filter", "std
 tokio = "1.41.0"
 reqwest = { version = "0.11.27", default-features = false, features = ["blocking", "rustls", "json"] }
 snafu = "0.8.5"
+nalgebra = "0.33.0"
 
 [package]
 name = "mint"
@@ -112,6 +114,9 @@ strip = true
 [profile.dev]
 opt-level = 3
 lto = "off"
+
+[profile.release2]
+inherits = "release"
 
 # Config for 'cargo dist'
 [workspace.metadata.dist]

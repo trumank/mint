@@ -7,8 +7,8 @@ use serde::Deserialize;
 use std::io::{Read, Seek, Write};
 use std::sync::{Mutex, OnceLock};
 
-use crate::globals;
-use crate::ue::{FString, TArray};
+use hook_lib::globals;
+use hook_lib::ue::{FString, TArray};
 
 use self::file::PlainFileProviderConfig;
 use self::network::EditorNetworkConfig;

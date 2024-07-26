@@ -1,0 +1,14 @@
+[package]
+name = "hook_test"
+repository.workspace = true
+authors.workspace = true
+license.workspace = true
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+hook_lib = { version = "0.2.10", path = "../hook_lib" }
+hot-lib-reloader = "0.7.0"
+
+[lib]
+crate-type = ["rlib", "cdylib"]

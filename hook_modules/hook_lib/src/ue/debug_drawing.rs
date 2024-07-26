@@ -1,57 +1,12 @@
-use std::ffi::c_void;
+use crate::util::NN as _;
+
+use crate::ue::{self, *};
+use element_ptr::element_ptr;
+use na::Point3;
+use nalgebra::{Matrix, Matrix4, Vector3};
 use std::ptr::NonNull;
 
-use element_ptr::element_ptr;
-use na::{Matrix, Matrix4, Point3, Vector3};
 use nalgebra as na;
-
-use crate::hooks::ExecFn;
-use hook_lib::ue::{
-    self, get_world, FBatchedLine, FBatchedPoint, FLinearColor, FRotator, FVector, TArray,
-    ULineBatchComponent, UObject, UWorld,
-};
-use hook_lib::util::NN;
-
-pub fn kismet_hooks() -> &'static [(&'static str, ExecFn)] {
-    &[
-        (
-            "/Script/Engine.KismetSystemLibrary:DrawDebugLine",
-            exec_draw_debug_line as ExecFn,
-        ),
-        (
-            "/Script/Engine.KismetSystemLibrary:DrawDebugPoint",
-            exec_draw_debug_point as ExecFn,
-        ),
-        (
-            "/Script/Engine.KismetSystemLibrary:DrawDebugCircle",
-            exec_draw_debug_circle as ExecFn,
-        ),
-        (
-            "/Script/Engine.KismetSystemLibrary:DrawDebugSphere",
-            exec_draw_debug_sphere as ExecFn,
-        ),
-        (
-            "/Script/Engine.KismetSystemLibrary:DrawDebugCone",
-            exec_draw_debug_cone as ExecFn,
-        ),
-        (
-            "/Script/Engine.KismetSystemLibrary:DrawDebugConeInDegrees",
-            exec_draw_debug_cone_in_degrees as ExecFn,
-        ),
-        (
-            "/Script/Engine.KismetSystemLibrary:DrawDebugCylinder",
-            exec_draw_debug_cylinder as ExecFn,
-        ),
-        (
-            "/Script/Engine.KismetSystemLibrary:DrawDebugCapsule",
-            exec_draw_debug_capsule as ExecFn,
-        ),
-        (
-            "/Script/Engine.KismetSystemLibrary:DrawDebugBox",
-            exec_draw_debug_box as ExecFn,
-        ),
-    ]
-}
 
 pub unsafe fn get_batcher(world: NonNull<UWorld>, duration: f32) -> NonNull<ULineBatchComponent> {
     if duration > 0. {
@@ -254,75 +209,19 @@ unsafe extern "system" fn exec_draw_debug_sphere(
     let stack = stack.as_mut().unwrap();
 
     let world_context: Option<NonNull<ue::UObject>> = stack.arg();
-    let center: FVector = stack.arg();
-    let radius: f32 = stack.arg();
-    let num_segments: u32 = stack.arg();
-    let color: FLinearColor = stack.arg();
-    let duration: f32 = stack.arg();
-    let thickness: f32 = stack.arg();
+    let shape = DebugSphere {
+        center: stack.arg(),
+        radius: stack.arg(),
+        num_segments: stack.arg(),
+        color: stack.arg(),
+        duration: stack.arg(),
+        thickness: stack.arg(),
+    };
 
     if let Some(world) = get_world(world_context) {
-        let batcher = get_batcher(world, duration).as_mut();
-
-        let line_config = FBatchedLine {
-            color,
-            remaining_life_time: duration,
-            thickness,
-            ..Default::default()
-        };
-
-        let segments = num_segments.max(4);
-
-        let angle_inc = 2.0 * std::f32::consts::PI / segments as f32;
-        let mut num_segments_y = segments;
-        let mut latitude = angle_inc;
-        let mut sin_y1 = 0.0;
-        let mut cos_y1 = 1.0;
-        let center: Vector3<f32> = center.into();
-
-        let mut lines = Vec::with_capacity(num_segments_y as usize * segments as usize * 2);
-
-        while num_segments_y > 0 {
-            let sin_y2 = latitude.sin();
-            let cos_y2 = latitude.cos();
-
-            let mut vertex1 = Vector3::new(sin_y1, 0.0, cos_y1) * radius + center;
-            let mut vertex3 = Vector3::new(sin_y2, 0.0, cos_y2) * radius + center;
-            let mut longitude = angle_inc;
-
-            let mut num_segments_x = segments;
-            while num_segments_x > 0 {
-                let sin_x = longitude.sin();
-                let cos_x = longitude.cos();
-
-                let vertex2 =
-                    Vector3::new(cos_x * sin_y1, sin_x * sin_y1, cos_y1) * radius + center;
-                let vertex4 =
-                    Vector3::new(cos_x * sin_y2, sin_x * sin_y2, cos_y2) * radius + center;
-
-                lines.push(FBatchedLine {
-                    start: vertex1.into(),
-                    end: vertex2.into(),
-                    ..line_config
-                });
-                lines.push(FBatchedLine {
-                    start: vertex1.into(),
-                    end: vertex3.into(),
-                    ..line_config
-                });
-
-                vertex1 = vertex2;
-                vertex3 = vertex4;
-                longitude += angle_inc;
-                num_segments_x -= 1;
-            }
-
-            sin_y1 = sin_y2;
-            cos_y1 = cos_y2;
-            latitude += angle_inc;
-            num_segments_y -= 1;
-        }
-
+        let batcher = get_batcher(world, shape.duration).as_mut();
+        let mut lines = vec![];
+        shape.draw(&mut lines);
         draw_lines(batcher, &lines);
     }
 
@@ -831,13 +730,22 @@ unsafe extern "system" fn exec_draw_debug_capsule(
 }
 
 #[derive(Debug, Default, Clone, Copy)]
-struct DebugBox {
-    center: FVector,
-    extent: FVector,
-    color: FLinearColor,
-    rotation: FRotator,
-    duration: f32,
-    thickness: f32,
+pub struct DebugBox {
+    pub center: FVector,
+    pub extent: FVector,
+    pub color: FLinearColor,
+    pub rotation: FRotator,
+    pub duration: f32,
+    pub thickness: f32,
+}
+#[derive(Debug, Default, Clone, Copy)]
+pub struct DebugSphere {
+    pub center: FVector,
+    pub radius: f32,
+    pub num_segments: u32,
+    pub color: FLinearColor,
+    pub duration: f32,
+    pub thickness: f32,
 }
 impl DebugBox {
     fn draw(&self, lines: &mut Vec<FBatchedLine>) {
@@ -915,6 +823,66 @@ impl DebugBox {
         }
     }
 }
+impl DebugSphere {
+    fn draw(&self, lines: &mut Vec<FBatchedLine>) {
+        let line_config = FBatchedLine {
+            color: self.color,
+            remaining_life_time: self.duration,
+            thickness: self.thickness,
+            ..Default::default()
+        };
+
+        let segments = self.num_segments.max(4);
+
+        let angle_inc = 2.0 * std::f32::consts::PI / segments as f32;
+        let mut num_segments_y = segments;
+        let mut latitude = angle_inc;
+        let mut sin_y1 = 0.0;
+        let mut cos_y1 = 1.0;
+        let center: Vector3<f32> = self.center.into();
+
+        while num_segments_y > 0 {
+            let sin_y2 = latitude.sin();
+            let cos_y2 = latitude.cos();
+
+            let mut vertex1 = Vector3::new(sin_y1, 0.0, cos_y1) * self.radius + center;
+            let mut vertex3 = Vector3::new(sin_y2, 0.0, cos_y2) * self.radius + center;
+            let mut longitude = angle_inc;
+
+            let mut num_segments_x = segments;
+            while num_segments_x > 0 {
+                let sin_x = longitude.sin();
+                let cos_x = longitude.cos();
+
+                let vertex2 =
+                    Vector3::new(cos_x * sin_y1, sin_x * sin_y1, cos_y1) * self.radius + center;
+                let vertex4 =
+                    Vector3::new(cos_x * sin_y2, sin_x * sin_y2, cos_y2) * self.radius + center;
+
+                lines.push(FBatchedLine {
+                    start: vertex1.into(),
+                    end: vertex2.into(),
+                    ..line_config
+                });
+                lines.push(FBatchedLine {
+                    start: vertex1.into(),
+                    end: vertex3.into(),
+                    ..line_config
+                });
+
+                vertex1 = vertex2;
+                vertex3 = vertex4;
+                longitude += angle_inc;
+                num_segments_x -= 1;
+            }
+
+            sin_y1 = sin_y2;
+            cos_y1 = cos_y2;
+            latitude += angle_inc;
+            num_segments_y -= 1;
+        }
+    }
+}
 
 unsafe extern "system" fn exec_draw_debug_box(
     _context: *mut ue::UObject,
@@ -943,4 +911,15 @@ unsafe extern "system" fn exec_draw_debug_box(
     if !stack.code.is_null() {
         stack.code = stack.code.add(1);
     }
+}
+
+pub fn draw_debug_box(batcher: &mut ULineBatchComponent, shape: &DebugBox) {
+    let mut lines = vec![];
+    shape.draw(&mut lines);
+    draw_lines(batcher, &lines);
+}
+pub fn draw_debug_sphere(batcher: &mut ULineBatchComponent, shape: &DebugSphere) {
+    let mut lines = vec![];
+    shape.draw(&mut lines);
+    draw_lines(batcher, &lines);
 }

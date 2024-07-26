@@ -1,0 +1,15 @@
+[package]
+name = "hook_lib"
+repository.workspace = true
+authors.workspace = true
+license.workspace = true
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+bitflags = "2.6.0"
+element-ptr = "0.0.2"
+hook_resolvers = { version = "0.2.10", path = "../../hook_resolvers" }
+mint_lib = { version = "0.2.10", path = "../../mint_lib" }
+nalgebra.workspace = true
+widestring = "1.1.0"

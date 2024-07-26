@@ -1,5 +1,15 @@
 #![allow(clippy::missing_transmute_annotations)]
 
+#[hot_lib_reloader::hot_module(
+    dylib = "hook_test",
+    //lib_dir = concat!(env!("CARGO_MANIFEST_DIR"), "/target/x86_64-pc-windows-gnu/release")
+    lib_dir = "/home/truman/projects/drg-modding/tools/mint/target/x86_64-pc-windows-gnu/release2"
+)]
+mod hot_lib {
+    //pub use hook_test::State;
+    hot_functions_from_file!("hook_modules/hook_test/src/lib.rs");
+}
+
 mod debug_drawing;
 mod nav;
 mod pak;
@@ -18,7 +28,8 @@ use hook_resolvers::GasFixResolution;
 use mint_lib::DRGInstallationType;
 use windows::Win32::System::Memory::{VirtualProtect, PAGE_EXECUTE_READWRITE};
 
-use crate::{globals, ue, LOG_GUARD};
+use crate::LOG_GUARD;
+use hook_lib::{globals, ue, USaveGame};
 
 retour::static_detour! {
     static HookUFunctionBind: unsafe extern "system" fn(*mut ue::UFunction);
@@ -27,15 +38,9 @@ retour::static_detour! {
     static DoesSaveGameExist: unsafe extern "system" fn(*const ue::FString, i32) -> bool;
     static UObjectTemperatureComponentTimerCallback: unsafe extern "system" fn(*mut c_void);
     static WinMain: unsafe extern "system" fn(*mut (), *mut (), *mut (), i32, *const ()) -> i32;
+    static FEngineLoopTick: unsafe extern "system" fn(*mut ());
 }
 
-#[repr(C)]
-pub struct USaveGame;
-
-pub type FnSaveGameToMemory =
-    unsafe extern "system" fn(*const USaveGame, *mut ue::TArray<u8>) -> bool;
-pub type FnLoadGameFromMemory =
-    unsafe extern "system" fn(*const ue::TArray<u8>) -> *const USaveGame;
 type ExecFn = unsafe extern "system" fn(*mut ue::UObject, *mut ue::kismet::FFrame, *mut c_void);
 
 pub unsafe fn initialize() -> Result<()> {
@@ -47,6 +52,10 @@ pub unsafe fn initialize() -> Result<()> {
         (
             "/Script/Engine.KismetSystemLibrary:PrintString",
             exec_print_string as ExecFn,
+        ),
+        (
+            "/Game/_AssemblyStorm/TestMod/MintDebugStuff/InitCave.InitCave_C:ReceiveTick",
+            exec_tick as ExecFn,
         ),
     ]
     .iter()
@@ -61,6 +70,27 @@ pub unsafe fn initialize() -> Result<()> {
         detour_main,
     )?;
     WinMain.enable()?;
+
+    //let value = hot_lib::get_number();
+
+    //FEngineLoopTick.initialize(
+    //    std::mem::transmute(
+    //        globals()
+    //            .resolution
+    //            .core
+    //            .as_ref()
+    //            .unwrap()
+    //            .fengine_loop_tick
+    //            .0,
+    //    ),
+    //    |this| {
+    //        FEngineLoopTick.call(this);
+    //        tracing::info!("tick");
+    //        let value = hot_lib::get_number(globals());
+    //        tracing::info!("value = {value}");
+    //    },
+    //)?;
+    //FEngineLoopTick.enable()?;
 
     pak::init()?;
 
@@ -347,4 +377,24 @@ unsafe extern "system" fn exec_print_string(
     println!("PrintString({string})");
 
     stack.code = stack.code.add(1);
+}
+
+unsafe extern "system" fn exec_tick(
+    context: *mut ue::UObject,
+    stack: *mut ue::kismet::FFrame,
+    _result: *mut c_void,
+) {
+    let stack = stack.as_mut().unwrap();
+
+    let _delta_seconds: f32 = stack.arg();
+
+    hot_lib::tick(globals(), context);
+
+    //if let Some(world) = get_world(context.nn()) {
+    //    render(world);
+    //}
+
+    if !stack.code.is_null() {
+        stack.code = stack.code.add(1);
+    }
 }

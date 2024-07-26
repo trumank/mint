@@ -1,16 +1,17 @@
 use element_ptr::element_ptr;
+use hook_lib::globals;
 use std::ffi::c_void;
 use std::ptr::NonNull;
 
-use crate::ue::get_world;
-use crate::ue::FBatchedLine;
-use crate::ue::FBatchedPoint;
-use crate::ue::FLinearColor;
-use crate::ue::FVector;
-use crate::ue::TArray;
-use crate::ue::UObject;
-use crate::ue::UWorld;
-use crate::util::NN as _;
+use hook_lib::ue::get_world;
+use hook_lib::ue::FBatchedLine;
+use hook_lib::ue::FBatchedPoint;
+use hook_lib::ue::FLinearColor;
+use hook_lib::ue::FVector;
+use hook_lib::ue::TArray;
+use hook_lib::ue::UObject;
+use hook_lib::ue::UWorld;
+use hook_lib::util::NN as _;
 
 use super::debug_drawing::draw_box;
 use super::debug_drawing::draw_lines;
@@ -249,7 +250,7 @@ unsafe fn get_path(
     type_: DeepPathFinderType,
     pref: DeepPathFinderPreference,
 ) -> Option<Vec<FVector>> {
-    let Ok(get_path) = crate::globals()
+    let Ok(get_path) = globals()
         .resolution
         .get_path
         .as_ref()
@@ -645,7 +646,7 @@ pub unsafe fn spawn_points(
     size: DeepPathFinderSize,
     type_: DeepPathFinderType,
 ) {
-    let Ok(get_all_spawn_points) = crate::globals()
+    let Ok(get_all_spawn_points) = globals()
         .resolution
         .get_all_spawn_points_in_sphere
         .as_ref()

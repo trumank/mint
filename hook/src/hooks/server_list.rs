@@ -3,9 +3,9 @@ use std::ffi::c_void;
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
-use crate::globals;
 use crate::hooks::ExecFn;
-use crate::ue::{self, FName, FString, TArray, TMap};
+use hook_lib::globals;
+use hook_lib::ue::{self, FName, FString, TArray, TMap};
 
 retour::static_detour! {
     static GetServerName: unsafe extern "system" fn(*const c_void, *const c_void) -> *const ue::FString;
