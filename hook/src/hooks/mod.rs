@@ -1,5 +1,6 @@
 #![allow(clippy::missing_transmute_annotations)]
 
+mod dap;
 mod server_list;
 
 use std::{
@@ -282,55 +283,6 @@ fn does_save_game_exist_detour(slot_name: *const ue::FString, user_index: i32) -
     }
 }
 
-struct NativesArray([Option<ExecFn>; 0x100]);
-
-static mut GNATIVES_OLD: NativesArray = NativesArray([None; 0x100]);
-static mut NAME_CACHE: Option<HashMap<usize, String>> = None;
-
-unsafe fn debug(expr: usize, ctx: *mut UObject, frame: *mut FFrame, ret: *mut c_void) {
-    if NAME_CACHE.is_none() {
-        NAME_CACHE = Some(Default::default());
-    }
-
-    let (index, path) = {
-        let stack = &*frame;
-        let func = &*(stack.node as *const UFunction);
-
-        let index = (stack.code as isize).wrapping_sub(func.ustruct.script.as_ptr() as isize);
-
-        let path = NAME_CACHE
-            .as_mut()
-            .unwrap_unchecked()
-            .entry(stack.node as usize)
-            .or_insert_with(|| {
-                func.ustruct
-                    .ufield
-                    .uobject
-                    .uobject_base_utility
-                    .uobject_base
-                    .get_path_name(None)
-            });
-        (index, path)
-    };
-
-    ((GNATIVES_OLD.0)[expr].unwrap())(ctx, frame, ret);
-}
-
-unsafe extern "system" fn hook_exec<const N: usize>(
-    ctx: *mut UObject,
-    frame: *mut FFrame,
-    ret: *mut c_void,
-) {
-    debug(N, ctx, frame, ret);
-}
-
-unsafe fn hook_gnatives(gnatives: &mut NativesArray) {
-    seq_macro::seq!(N in 0..256 {
-        (GNATIVES_OLD.0)[N] = gnatives.0[N];
-        gnatives.0[N] = Some(hook_exec::<N>);
-    });
-}
-
 fn detour_main(
     h_instance: *mut (),
     h_prev_instance: *mut (),
@@ -339,10 +291,7 @@ fn detour_main(
     cmd_line: *const (),
 ) -> i32 {
     unsafe {
-        if let Ok(debug) = &globals().resolution.debug {
-            tracing::info!("hooking GNatives");
-            hook_gnatives((debug.gnatives.0 as *mut NativesArray).as_mut().unwrap());
-        }
+        dap::init().unwrap();
 
         let ret = WinMain.call(
             h_instance,

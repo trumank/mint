@@ -1255,6 +1255,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "dap"
+version = "0.4.1-alpha1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "35c7fc89d334ab745ba679f94c7314c9b17ecdcd923c111df6206e9fd7729fa9"
+dependencies = [
+ "serde",
+ "serde_json",
+ "thiserror",
+]
+
+[[package]]
 name = "darling"
 version = "0.20.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2449,6 +2460,8 @@ version = "0.2.10"
 dependencies = [
  "anyhow",
  "bitflags 2.6.0",
+ "byteorder",
+ "dap",
  "fs-err",
  "hook_resolvers",
  "mint_lib",
@@ -2460,6 +2473,8 @@ dependencies = [
  "seq-macro",
  "serde",
  "serde_json",
+ "strum 0.26.3",
+ "thiserror",
  "tokio",
  "tracing",
  "tracing-appender",
@@ -3875,7 +3890,7 @@ checksum = "1e91099d4268b0e11973f036e885d652fb0b21fedcf69738c627f94db6a44f42"
 [[package]]
 name = "patternsleuth"
 version = "0.1.0"
-source = "git+https://github.com/trumank/patternsleuth#539aa3f86ebb5d5ab9d80e7c5b2adacaf6604b5e"
+source = "git+https://github.com/trumank/patternsleuth#0dd42ebc378c02984eefcd21ff782ca92a48f941"
 dependencies = [
  "anyhow",
  "futures",
@@ -3896,7 +3911,7 @@ dependencies = [
 [[package]]
 name = "patternsleuth_scanner"
 version = "0.1.0"
-source = "git+https://github.com/trumank/patternsleuth#539aa3f86ebb5d5ab9d80e7c5b2adacaf6604b5e"
+source = "git+https://github.com/trumank/patternsleuth#0dd42ebc378c02984eefcd21ff782ca92a48f941"
 dependencies = [
  "anyhow",
  "memchr",
@@ -4263,7 +4278,7 @@ dependencies = [
  "once_cell",
  "socket2 0.5.5",
  "tracing",
- "windows-sys 0.52.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]

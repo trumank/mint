@@ -6,7 +6,7 @@ use super::*;
 #[repr(C)]
 pub struct FFrame {
     pub base: FOutputDevice,
-    pub node: *const c_void,
+    pub node: *const UFunction,
     pub object: *mut UObject,
     pub code: *const c_void,
     pub locals: *const c_void,
