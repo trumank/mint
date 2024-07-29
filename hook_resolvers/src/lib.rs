@@ -1,9 +1,9 @@
 use patternsleuth::resolvers::futures::future::join_all;
 use patternsleuth::resolvers::unreal::blueprint_library::UFunctionBind;
 use patternsleuth::resolvers::unreal::fname::{FNameCtorWchar, FNameToString};
-use patternsleuth::resolvers::unreal::game_loop::Main;
+use patternsleuth::resolvers::unreal::game_loop::{FEngineLoopTick, Main, UGameEngineTick};
 use patternsleuth::resolvers::unreal::gmalloc::GMalloc;
-use patternsleuth::resolvers::unreal::kismet::{FFrameStep, FFrameStepExplicitProperty};
+use patternsleuth::resolvers::unreal::kismet::{FFrameStep, FFrameStepExplicitProperty, GNatives};
 use patternsleuth::resolvers::unreal::save_game::{
     UGameplayStaticsDoesSaveGameExist, UGameplayStaticsLoadGameFromMemory,
     UGameplayStaticsLoadGameFromSlot, UGameplayStaticsSaveGameToMemory,
@@ -183,6 +183,16 @@ impl_try_collector! {
     }
 }
 
+impl_try_collector! {
+    #[derive(Debug, PartialEq)]
+    #[cfg_attr(feature = "serde-resolvers", derive(Serialize, Deserialize))]
+    pub struct DebugResolution {
+        pub gnatives: GNatives,
+        pub ugame_engine_tick: UGameEngineTick,
+        pub fengine_loop_tick: FEngineLoopTick,
+    }
+}
+
 impl_collector! {
     #[derive(Debug, PartialEq)]
     #[cfg_attr(feature = "serde-resolvers", derive(Serialize, Deserialize))]
@@ -193,5 +203,6 @@ impl_collector! {
         pub save_game: SaveGameResolution,
         pub gas_fix: GasFixResolution,
         pub core: CoreResolution,
+        pub debug: DebugResolution,
     }
 }

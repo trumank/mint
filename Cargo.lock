@@ -2457,6 +2457,7 @@ dependencies = [
  "proxy_dll",
  "repak",
  "retour",
+ "seq-macro",
  "serde",
  "serde_json",
  "tokio",
@@ -3874,7 +3875,7 @@ checksum = "1e91099d4268b0e11973f036e885d652fb0b21fedcf69738c627f94db6a44f42"
 [[package]]
 name = "patternsleuth"
 version = "0.1.0"
-source = "git+https://github.com/trumank/patternsleuth#0dd42ebc378c02984eefcd21ff782ca92a48f941"
+source = "git+https://github.com/trumank/patternsleuth#539aa3f86ebb5d5ab9d80e7c5b2adacaf6604b5e"
 dependencies = [
  "anyhow",
  "futures",
@@ -3895,7 +3896,7 @@ dependencies = [
 [[package]]
 name = "patternsleuth_scanner"
 version = "0.1.0"
-source = "git+https://github.com/trumank/patternsleuth#0dd42ebc378c02984eefcd21ff782ca92a48f941"
+source = "git+https://github.com/trumank/patternsleuth#539aa3f86ebb5d5ab9d80e7c5b2adacaf6604b5e"
 dependencies = [
  "anyhow",
  "memchr",
