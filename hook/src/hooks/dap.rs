@@ -1,9 +1,9 @@
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::ffi::c_void;
 use std::io::{BufReader, BufWriter};
 use std::net::TcpListener;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU32, Ordering};
+use std::sync::{Arc, LazyLock, Mutex, MutexGuard};
 
 use anyhow::{Context as _, Result};
 use byteorder::{ReadBytesExt as _, LE};
@@ -77,7 +77,7 @@ fn handle(input: Box<dyn std::io::Read>, output: Box<dyn std::io::Write + Send>)
                     supports_function_breakpoints: Some(true),
                     supports_conditional_breakpoints: Some(true),
                     supports_hit_conditional_breakpoints: Some(true),
-                    supports_evaluate_for_hovers: Some(true),
+                    supports_evaluate_for_hovers: Some(false), // TODO
                     //exception_breakpoint_filters: Some(true),
                     supports_step_back: Some(true),
                     supports_set_variable: Some(true),
@@ -187,13 +187,13 @@ fn handle(input: Box<dyn std::io::Read>, output: Box<dyn std::io::Write + Send>)
                             if i >= cmd.start_frame.unwrap_or(0)
                                 && frames.len() < cmd.levels.unwrap_or(i64::MAX) as usize
                             {
-                                //let name = ufunc
-                                //    .ustruct
-                                //    .ufield
-                                //    .uobject
-                                //    .uobject_base_utility
-                                //    .uobject_base
-                                //    .get_path_name(None);
+                                let path = ufunc
+                                    .ustruct
+                                    .ufield
+                                    .uobject
+                                    .uobject_base_utility
+                                    .uobject_base
+                                    .get_path_name(None);
 
                                 let name = ufunc
                                     .ustruct
@@ -204,12 +204,35 @@ fn handle(input: Box<dyn std::io::Read>, output: Box<dyn std::io::Write + Send>)
                                     .name_private
                                     .to_string();
 
+                                let mut lock = SOURCES.lock().unwrap();
+
+                                let src = get_source(&mut lock, ufunc);
+
+                                let line = src
+                                    .1
+                                    .index_to_line
+                                    .get(&state.index)
+                                    .map(|l| *l as i64)
+                                    .unwrap_or(1);
+
+                                tracing::info!("{:#?}", src.1.index_to_line);
+                                tracing::info!("index = {} line = {line}", state.index);
+
                                 frames.push(types::StackFrame {
                                     id: frame as i64,
-                                    name,
-                                    source: None,
-                                    line: 0,
-                                    column: 0,
+                                    name: name.clone(),
+                                    source: Some(types::Source {
+                                        name: Some(name),
+                                        path: None, //Some(path),
+                                        source_reference: Some(src.0),
+                                        presentation_hint: None,
+                                        origin: Some("internal module".into()),
+                                        sources: None,
+                                        adapter_data: None,
+                                        checksums: None,
+                                    }),
+                                    line,
+                                    column: 1,
                                     end_line: None,
                                     end_column: None,
                                     can_restart: None,
@@ -240,6 +263,16 @@ fn handle(input: Box<dyn std::io::Read>, output: Box<dyn std::io::Write + Send>)
                     todo!("other threads ({})", cmd.thread_id);
                 }
             }
+            Command::Source(ref cmd) => {
+                let id = cmd.source.as_ref().unwrap().source_reference.unwrap();
+                let sources = SOURCES.lock().unwrap();
+                let content = get_source_from_id(&sources, id).unwrap().content.clone();
+
+                server.respond(req.success(ResponseBody::Source(responses::SourceResponse {
+                    content,
+                    mime_type: None,
+                })))?;
+            }
             Command::Scopes(ref cmd) => {
                 // TODO
                 let frame = unsafe { &*(cmd.frame_id as *const FFrame) };
@@ -266,6 +299,21 @@ fn handle(input: Box<dyn std::io::Read>, output: Box<dyn std::io::Write + Send>)
                         all_threads_continued: None,
                     },
                 )))?;
+            }
+            Command::StepIn(_) => {
+                REQUEST_PAUSE.store(true, Ordering::SeqCst);
+                PAUSE_STATE.lock().unwrap().take();
+                server.respond(req.success(ResponseBody::StepIn))?;
+            }
+            Command::StepOut(_) => {
+                REQUEST_PAUSE.store(true, Ordering::SeqCst);
+                PAUSE_STATE.lock().unwrap().take();
+                server.respond(req.success(ResponseBody::StepOut))?;
+            }
+            Command::StepBack(_) => {
+                REQUEST_PAUSE.store(true, Ordering::SeqCst);
+                PAUSE_STATE.lock().unwrap().take();
+                server.respond(req.success(ResponseBody::StepBack))?;
             }
             Command::Pause(ref cmd) => {
                 if cmd.thread_id == 1 {
@@ -306,10 +354,20 @@ unsafe fn hook_gnatives(gnatives: &mut NativesArray) {
 static mut GNATIVES_OLD: NativesArray = NativesArray([None; 0x100]);
 static mut NAME_CACHE: Option<HashMap<usize, String>> = None;
 
+static ID: AtomicI32 = AtomicI32::new(1);
+
+static SOURCES: LazyLock<Mutex<Sources>> = LazyLock::new(Default::default);
 static PAUSE_STATE: Mutex<Option<PauseState>> = Mutex::new(None);
 static REQUEST_PAUSE: AtomicBool = AtomicBool::new(false);
 static DAP_OUTPUT: Mutex<Option<Arc<Mutex<ServerOutput<Box<dyn std::io::Write + Send>>>>>> =
     Mutex::new(None);
+
+unsafe impl Send for Sources {}
+#[derive(Default)]
+struct Sources {
+    ptr_to_id: HashMap<*const UFunction, i32>,
+    id_to_src: HashMap<i32, Source>,
+}
 
 unsafe impl Send for PauseState {}
 struct PauseState {
@@ -330,7 +388,9 @@ unsafe fn debug(expr: usize, ctx: *mut UObject, frame: *mut FFrame, ret: *mut c_
             let stack = &*frame;
             let func = &*(stack.node as *const UFunction);
 
-            let index = (stack.code as usize).wrapping_sub(func.ustruct.script.as_ptr() as usize);
+            let index = (stack.code as usize)
+                .saturating_sub(func.ustruct.script.as_ptr() as usize)
+                .saturating_sub(1);
 
             let path = NAME_CACHE
                 .as_mut()
@@ -352,6 +412,17 @@ unsafe fn debug(expr: usize, ctx: *mut UObject, frame: *mut FFrame, ret: *mut c_
 
         // after PAUSE_STATE population, if DAP_OUTPUT is ready then send a pause event
         if let Some(output) = DAP_OUTPUT.lock().unwrap().as_ref() {
+            let name = (*(*frame).node)
+                .ustruct
+                .ufield
+                .uobject
+                .uobject_base_utility
+                .uobject_base
+                .name_private
+                .to_string();
+
+            disassemble(&name, (*(*frame).node).ustruct.script.as_slice()).unwrap();
+
             let mut server = output.lock().unwrap();
             server
                 .send_event(Event::Stopped(events::StoppedEventBody {
@@ -364,17 +435,6 @@ unsafe fn debug(expr: usize, ctx: *mut UObject, frame: *mut FFrame, ret: *mut c_
                     hit_breakpoint_ids: None,
                 }))
                 .unwrap();
-
-            let name = (*(*frame).node)
-                .ustruct
-                .ufield
-                .uobject
-                .uobject_base_utility
-                .uobject_base
-                .name_private
-                .to_string();
-
-            disassemble(&name, (*(*frame).node).ustruct.script.as_slice());
         }
 
         // wait until PAUSE_STATE is cleared indicating execution should continue
@@ -387,7 +447,39 @@ unsafe fn debug(expr: usize, ctx: *mut UObject, frame: *mut FFrame, ret: *mut c_
     ((GNATIVES_OLD.0)[expr].unwrap())(ctx, frame, ret);
 }
 
-fn disassemble(name: &str, bytes: &[u8]) {
+fn get_source<'a>(
+    sources: &'a mut MutexGuard<'_, Sources>,
+    func: *const UFunction,
+) -> (i32, &'a Source) {
+    let id = *sources
+        .ptr_to_id
+        .entry(func)
+        .or_insert_with(|| ID.fetch_add(1, Ordering::SeqCst));
+
+    (
+        id,
+        sources.id_to_src.entry(id).or_insert_with(|| {
+            let func = unsafe { &*func };
+
+            let obj = &func
+                .ustruct
+                .ufield
+                .uobject
+                .uobject_base_utility
+                .uobject_base;
+
+            let name = obj.name_private.to_string();
+            //let path = obj.get_path_name(None);
+
+            disassemble(&name, func.ustruct.script.as_slice()).unwrap()
+        }),
+    )
+}
+fn get_source_from_id<'a>(sources: &'a MutexGuard<'_, Sources>, id: i32) -> Option<&'a Source> {
+    sources.id_to_src.get(&id)
+}
+
+fn disassemble(name: &str, bytes: &[u8]) -> Result<Source> {
     tracing::info!("dumping {name} bytes={}", bytes.len());
     std::fs::write(
         format!(
@@ -397,6 +489,27 @@ fn disassemble(name: &str, bytes: &[u8]) {
         bytes,
     )
     .unwrap();
+
+    let mut reader = std::io::Cursor::new(&bytes);
+
+    let mut expr = vec![];
+    let mut builder = SourceBuilder { index: 0 };
+    let mut out = SourceCollector::default();
+
+    while (reader.position() as usize) < bytes.len() {
+        let pos = reader.position() as usize;
+        let e = Expr::read(&mut reader).unwrap();
+        let lines = e.format(&mut builder);
+        //dbg!(&lines);
+        lines.write(&mut out, 0);
+        let end_pos = reader.position() as usize;
+
+        assert_eq!(end_pos - pos, e.size());
+        assert_eq!(builder.index, end_pos);
+
+        expr.push((reader.position(), e));
+    }
+    Ok(out.source)
 }
 
 #[cfg(test)]
@@ -408,146 +521,26 @@ mod test {
         let bytes =
             include_bytes!("../../../bytes/ExecuteUbergraph_Bp_StartMenu_PlayerController.bin");
 
-        let mut reader = std::io::Cursor::new(bytes);
+        let mut reader = std::io::Cursor::new(&bytes);
 
-        loop {
-            let expr = EExprToken::read(&mut reader).unwrap();
-            dbg!(expr);
+        let mut expr = vec![];
+        let mut builder = SourceBuilder { index: 0 };
+        let mut out = SourceCollector::default();
+
+        while (reader.position() as usize) < bytes.len() {
+            let pos = reader.position() as usize;
+            let e = Expr::read(&mut reader).unwrap();
+            let lines = e.format(&mut builder);
+            //dbg!(&lines);
+            lines.write(&mut out, 0);
+            let end_pos = reader.position() as usize;
+
+            assert_eq!(end_pos - pos, e.size());
+            assert_eq!(builder.index, end_pos);
+
+            expr.push((reader.position(), e));
         }
-    }
-}
-
-macro_rules! expr {
-    (
-        $(
-            $(#[$attr:meta])*
-            enum $enum_name:ident {
-                $(
-                    $name:ident = $value:literal
-                ),* $(,)?
-            }
-        )*
-    ) => {
-        $(
-            $(#[$attr])*
-            enum $enum_name {
-                $(
-                    $name = $value,
-                )*
-            }
-
-            impl EExpr {
-                fn token(&self) -> EExprToken {
-                    match self {
-                        $(
-                            EExpr::$name { .. } => EExprToken::$name,
-                        )*
-                    }
-                }
-            }
-        )*
-    };
-}
-
-expr! {
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, strum::FromRepr)]
-    #[repr(u8)]
-    enum EExprToken {
-        ExLocalVariable = 0x00,
-        ExInstanceVariable = 0x01,
-        ExDefaultVariable = 0x02,
-        ExReturn = 0x04,
-        ExJump = 0x06,
-        ExJumpIfNot = 0x07,
-        ExAssert = 0x09,
-        ExNothing = 0x0B,
-        ExLet = 0x0F,
-        ExClassContext = 0x12,
-        ExMetaCast = 0x13,
-        ExLetBool = 0x14,
-        ExEndParmValue = 0x15,
-        ExEndFunctionParms = 0x16,
-        ExSelf = 0x17,
-        ExSkip = 0x18,
-        ExContext = 0x19,
-        ExContextFailSilent = 0x1A,
-        ExVirtualFunction = 0x1B,
-        ExFinalFunction = 0x1C,
-        ExIntConst = 0x1D,
-        ExFloatConst = 0x1E,
-        ExStringConst = 0x1F,
-        ExObjectConst = 0x20,
-        ExNameConst = 0x21,
-        ExRotationConst = 0x22,
-        ExVectorConst = 0x23,
-        ExByteConst = 0x24,
-        ExIntZero = 0x25,
-        ExIntOne = 0x26,
-        ExTrue = 0x27,
-        ExFalse = 0x28,
-        ExTextConst = 0x29,
-        ExNoObject = 0x2A,
-        ExTransformConst = 0x2B,
-        ExIntConstByte = 0x2C,
-        ExNoInterface = 0x2D,
-        ExDynamicCast = 0x2E,
-        ExStructConst = 0x2F,
-        ExEndStructConst = 0x30,
-        ExSetArray = 0x31,
-        ExEndArray = 0x32,
-        ExPropertyConst = 0x33,
-        ExUnicodeStringConst = 0x34,
-        ExInt64Const = 0x35,
-        ExUInt64Const = 0x36,
-        ExDoubleConst = 0x37,
-        ExCast = 0x38,
-        ExSetSet = 0x39,
-        ExEndSet = 0x3A,
-        ExSetMap = 0x3B,
-        ExEndMap = 0x3C,
-        ExSetConst = 0x3D,
-        ExEndSetConst = 0x3E,
-        ExMapConst = 0x3F,
-        ExEndMapConst = 0x40,
-        ExVector3fConst = 0x41,
-        ExStructMemberContext = 0x42,
-        ExLetMulticastDelegate = 0x43,
-        ExLetDelegate = 0x44,
-        ExLocalVirtualFunction = 0x45,
-        ExLocalFinalFunction = 0x46,
-        ExLocalOutVariable = 0x48,
-        ExDeprecatedOp4A = 0x4A,
-        ExInstanceDelegate = 0x4B,
-        ExPushExecutionFlow = 0x4C,
-        ExPopExecutionFlow = 0x4D,
-        ExComputedJump = 0x4E,
-        ExPopExecutionFlowIfNot = 0x4F,
-        ExBreakpoint = 0x50,
-        ExInterfaceContext = 0x51,
-        ExObjToInterfaceCast = 0x52,
-        ExEndOfScript = 0x53,
-        ExCrossInterfaceCast = 0x54,
-        ExInterfaceToObjCast = 0x55,
-        ExWireTracepoint = 0x5A,
-        ExSkipOffsetConst = 0x5B,
-        ExAddMulticastDelegate = 0x5C,
-        ExClearMulticastDelegate = 0x5D,
-        ExTracepoint = 0x5E,
-        ExLetObj = 0x5F,
-        ExLetWeakObjPtr = 0x60,
-        ExBindDelegate = 0x61,
-        ExRemoveMulticastDelegate = 0x62,
-        ExCallMulticastDelegate = 0x63,
-        ExLetValueOnPersistentFrame = 0x64,
-        ExArrayConst = 0x65,
-        ExEndArrayConst = 0x66,
-        ExSoftObjectConst = 0x67,
-        ExCallMath = 0x68,
-        ExSwitchValue = 0x69,
-        ExInstrumentationEvent = 0x6A,
-        ExArrayGetByRef = 0x6B,
-        ExClassSparseDataVariable = 0x6C,
-        ExFieldPathConst = 0x6D,
+        println!("{}", out.source.content);
     }
 }
 
@@ -566,247 +559,735 @@ impl KObject {
     }
 }
 
-#[derive(Debug, Clone)]
-enum EExpr {
-    ExLocalVariable {
-        variable: KProperty,
-    },
-    ExInstanceVariable,
-    ExDefaultVariable,
-    ExReturn,
-    ExJump,
-    ExJumpIfNot,
-    ExAssert,
-    ExNothing,
-    ExLet,
-    ExClassContext,
-    ExMetaCast,
-    ExLetBool,
-    ExEndParmValue,
-    ExEndFunctionParms,
-    ExSelf,
-    ExSkip,
-    ExContext,
-    ExContextFailSilent,
-    ExVirtualFunction,
-    ExFinalFunction,
-    ExIntConst,
-    ExFloatConst,
-    ExStringConst,
-    ExObjectConst,
-    ExNameConst,
-    ExRotationConst,
-    ExVectorConst,
-    ExByteConst,
-    ExIntZero,
-    ExIntOne,
-    ExTrue,
-    ExFalse,
-    ExTextConst,
-    ExNoObject,
-    ExTransformConst,
-    ExIntConstByte,
-    ExNoInterface,
-    ExDynamicCast,
-    ExStructConst,
-    ExEndStructConst,
-    ExSetArray,
-    ExEndArray,
-    ExPropertyConst,
-    ExUnicodeStringConst,
-    ExInt64Const,
-    ExUInt64Const,
-    ExDoubleConst,
-    ExCast,
-    ExSetSet,
-    ExEndSet,
-    ExSetMap,
-    ExEndMap,
-    ExSetConst,
-    ExEndSetConst,
-    ExMapConst,
-    ExEndMapConst,
-    ExVector3fConst,
-    ExStructMemberContext,
-    ExLetMulticastDelegate,
-    ExLetDelegate,
-    ExLocalVirtualFunction,
-    ExLocalFinalFunction,
-    ExLocalOutVariable,
-    ExDeprecatedOp4A,
-    ExInstanceDelegate,
-    ExPushExecutionFlow {
-        offset: u32,
-    },
-    ExPopExecutionFlow,
-    ExComputedJump {
-        offset: Box<EExpr>,
-    },
-    ExPopExecutionFlowIfNot,
-    ExBreakpoint,
-    ExInterfaceContext,
-    ExObjToInterfaceCast,
-    ExEndOfScript,
-    ExCrossInterfaceCast,
-    ExInterfaceToObjCast,
-    ExWireTracepoint,
-    ExSkipOffsetConst,
-    ExAddMulticastDelegate,
-    ExClearMulticastDelegate,
-    ExTracepoint,
-    ExLetObj {
-        variable_expression: Box<EExpr>,
-        assignment_expression: Box<EExpr>,
-    },
-    ExLetWeakObjPtr,
-    ExBindDelegate,
-    ExRemoveMulticastDelegate,
-    ExCallMulticastDelegate,
-    ExLetValueOnPersistentFrame,
-    ExArrayConst,
-    ExEndArrayConst,
-    ExSoftObjectConst,
-    ExCallMath {
-        stack_node: KObject, // UFunction
-        parameters: Vec<EExpr>,
-    },
-    ExSwitchValue,
-    ExInstrumentationEvent,
-    ExArrayGetByRef,
-    ExClassSparseDataVariable,
-    ExFieldPathConst,
-}
-
-impl EExprToken {
-    fn read(r: &mut impl std::io::Read) -> Result<EExpr> {
-        fn read_until(r: &mut impl std::io::Read, end: EExprToken) -> Result<Vec<EExpr>> {
-            let mut expr = vec![];
-            loop {
-                let e = EExprToken::read(r)?;
-                if e.token() == end {
-                    break;
-                }
-                expr.push(e);
-            }
-            Ok(expr)
-        }
-
+impl ExprToken {
+    fn read(r: &mut impl std::io::Read) -> Result<Self> {
         let token = r.read_u8()?;
-        let token = Self::from_repr(token)
-            .with_context(|| format!("unknown EExprToken variant = {token:X}"))?;
-
-        Ok(match token {
-            EExprToken::ExLocalVariable => EExpr::ExLocalVariable {
-                variable: KProperty::read(r)?,
-            },
-            EExprToken::ExInstanceVariable => todo!(),
-            EExprToken::ExDefaultVariable => todo!(),
-            EExprToken::ExReturn => todo!(),
-            EExprToken::ExJump => todo!(),
-            EExprToken::ExJumpIfNot => todo!(),
-            EExprToken::ExAssert => todo!(),
-            EExprToken::ExClassContext => todo!(),
-            EExprToken::ExMetaCast => todo!(),
-
-            EExprToken::ExNothing => EExpr::ExNothing,
-            EExprToken::ExEndOfScript => EExpr::ExEndOfScript,
-            EExprToken::ExEndFunctionParms => EExpr::ExEndFunctionParms,
-            EExprToken::ExEndStructConst => EExpr::ExEndStructConst,
-            EExprToken::ExEndArray => EExpr::ExEndArray,
-            EExprToken::ExEndArrayConst => EExpr::ExEndArrayConst,
-            EExprToken::ExEndSet => EExpr::ExEndSet,
-            EExprToken::ExEndMap => EExpr::ExEndMap,
-            EExprToken::ExEndSetConst => EExpr::ExEndSetConst,
-            EExprToken::ExEndMapConst => EExpr::ExEndMapConst,
-            EExprToken::ExIntZero => EExpr::ExIntZero,
-            EExprToken::ExIntOne => EExpr::ExIntOne,
-            EExprToken::ExTrue => EExpr::ExTrue,
-            EExprToken::ExFalse => EExpr::ExFalse,
-            EExprToken::ExNoObject => EExpr::ExNoObject,
-            EExprToken::ExNoInterface => EExpr::ExNoInterface,
-            EExprToken::ExSelf => EExpr::ExSelf,
-            EExprToken::ExEndParmValue => EExpr::ExEndParmValue,
-            EExprToken::ExPopExecutionFlow => EExpr::ExPopExecutionFlow,
-            EExprToken::ExDeprecatedOp4A => EExpr::ExDeprecatedOp4A,
-
-            EExprToken::ExSkip => todo!(),
-            EExprToken::ExContext => todo!(),
-            EExprToken::ExContextFailSilent => todo!(),
-            EExprToken::ExVirtualFunction => todo!(),
-            EExprToken::ExFinalFunction => todo!(),
-            EExprToken::ExIntConst => todo!(),
-            EExprToken::ExFloatConst => todo!(),
-            EExprToken::ExStringConst => todo!(),
-            EExprToken::ExObjectConst => todo!(),
-            EExprToken::ExNameConst => todo!(),
-            EExprToken::ExRotationConst => todo!(),
-            EExprToken::ExVectorConst => todo!(),
-            EExprToken::ExByteConst => todo!(),
-            EExprToken::ExTextConst => todo!(),
-            EExprToken::ExTransformConst => todo!(),
-            EExprToken::ExIntConstByte => todo!(),
-            EExprToken::ExDynamicCast => todo!(),
-            EExprToken::ExStructConst => todo!(),
-            EExprToken::ExSetArray => todo!(),
-            EExprToken::ExPropertyConst => todo!(),
-            EExprToken::ExUnicodeStringConst => todo!(),
-            EExprToken::ExInt64Const => todo!(),
-            EExprToken::ExUInt64Const => todo!(),
-            EExprToken::ExDoubleConst => todo!(),
-            EExprToken::ExCast => todo!(),
-            EExprToken::ExSetSet => todo!(),
-            EExprToken::ExSetMap => todo!(),
-            EExprToken::ExSetConst => todo!(),
-            EExprToken::ExMapConst => todo!(),
-            EExprToken::ExVector3fConst => todo!(),
-            EExprToken::ExStructMemberContext => todo!(),
-            EExprToken::ExLocalVirtualFunction => todo!(),
-            EExprToken::ExLocalFinalFunction => todo!(),
-            EExprToken::ExLocalOutVariable => todo!(),
-            EExprToken::ExInstanceDelegate => todo!(),
-            EExprToken::ExPushExecutionFlow => EExpr::ExPushExecutionFlow {
-                offset: r.read_u32::<LE>()?,
-            },
-            EExprToken::ExComputedJump => EExpr::ExComputedJump {
-                offset: Box::new(Self::read(r)?),
-            },
-            EExprToken::ExPopExecutionFlowIfNot => todo!(),
-            EExprToken::ExBreakpoint => todo!(),
-            EExprToken::ExInterfaceContext => todo!(),
-            EExprToken::ExObjToInterfaceCast => todo!(),
-            EExprToken::ExCrossInterfaceCast => todo!(),
-            EExprToken::ExInterfaceToObjCast => todo!(),
-            EExprToken::ExWireTracepoint => todo!(),
-            EExprToken::ExSkipOffsetConst => todo!(),
-            EExprToken::ExAddMulticastDelegate => todo!(),
-            EExprToken::ExClearMulticastDelegate => todo!(),
-            EExprToken::ExTracepoint => todo!(),
-
-            EExprToken::ExLet => todo!(),
-            EExprToken::ExLetBool => todo!(),
-            EExprToken::ExLetObj => EExpr::ExLetObj {
-                variable_expression: Box::new(Self::read(r)?),
-                assignment_expression: Box::new(Self::read(r)?),
-            },
-            EExprToken::ExLetMulticastDelegate => todo!(),
-            EExprToken::ExLetDelegate => todo!(),
-            EExprToken::ExLetWeakObjPtr => todo!(),
-
-            EExprToken::ExBindDelegate => todo!(),
-            EExprToken::ExRemoveMulticastDelegate => todo!(),
-            EExprToken::ExCallMulticastDelegate => todo!(),
-            EExprToken::ExLetValueOnPersistentFrame => todo!(),
-            EExprToken::ExArrayConst => todo!(),
-            EExprToken::ExSoftObjectConst => todo!(),
-            EExprToken::ExCallMath => EExpr::ExCallMath {
-                stack_node: KObject::read(r)?,
-                parameters: read_until(r, EExprToken::ExEndFunctionParms)?,
-            },
-            EExprToken::ExSwitchValue => todo!(),
-            EExprToken::ExInstrumentationEvent => todo!(),
-            EExprToken::ExArrayGetByRef => todo!(),
-            EExprToken::ExClassSparseDataVariable => todo!(),
-            EExprToken::ExFieldPathConst => todo!(),
-        })
+        Self::from_repr(token).with_context(|| format!("unknown EExprToken variant = {token:X}"))
     }
 }
+
+macro_rules! expression {
+    (impl $name:ident, $( $member_name:ident: [ $($member_type:tt)* ] ),* ) => {
+        impl ReadExt for $name {
+            fn size(&self) -> usize {
+                0 $( + self.$member_name.size() )*
+            }
+            fn read(r: &mut impl std::io::Read) -> Result<Self> {
+                Ok(Self {
+                    $( $member_name: ReadExt::read(r)?, )*
+                })
+            }
+            fn walk<F>(&mut self, mut f: F) where F: FnMut(&mut Expr) {
+                $( self.$member_name.walk(&mut f); )*
+            }
+            fn format(&self, ctx: &mut SourceBuilder) -> SourceLine {
+                let mut lines = SourceLine {
+                    index: Some(ctx.index - 1),
+                    content: stringify!($name).to_string(),
+                    ..Default::default()
+                };
+                $(
+                    lines.children.push(self.$member_name.format(ctx).prefix(concat!(stringify!($member_name), " = ")));
+                )*
+                lines
+            }
+        }
+
+        expression!(no_impl $name, $( $member_name: [ $($member_type)* ] ),*);
+    };
+    (no_impl $name:ident, $( $member_name:ident: [ $($member_type:tt)* ] ),* ) => {
+        #[derive(Debug)]
+        pub struct $name {
+            $( $member_name: $($member_type)*, )*
+        }
+    };
+}
+
+macro_rules! for_each {
+    ( $( $discriminator:literal $impl:tt $name:ident { $( $member_name:ident : [ $($member_type:tt)* ] )* } )* ) => {
+        #[derive(Debug, strum::FromRepr)]
+        #[repr(u8)]
+        pub enum ExprToken {
+            $( $name = $discriminator, )*
+        }
+        #[derive(Debug)]
+        pub enum Expr {
+            $( $name($name), )*
+        }
+        $( expression!($impl $name, $($member_name : [$($member_type)*]),* );)*
+
+        impl ReadExt for Expr {
+            fn size(&self) -> usize {
+                1 + match self {
+                    $( Expr::$name(ex) => ex.size(), )*
+                }
+            }
+            fn read(r: &mut impl std::io::Read) -> Result<Self> {
+                let token = ExprToken::read(r)?;
+                let expr = match token {
+                    $( ExprToken::$name => Expr::$name($name::read(r)?), )*
+                };
+                Ok(expr)
+            }
+            fn walk<F>(&mut self, mut f: F) where F: FnMut(&mut Expr) {
+                match self {
+                    $( Expr::$name(ex) => ex.walk(&mut f), )*
+                }
+            }
+            fn format(&self, ctx: &mut SourceBuilder) -> SourceLine {
+                ctx.index += 1;
+                let l = match self {
+                    $( Expr::$name(ex) => ex.format(ctx), )*
+                };
+                l
+            }
+        }
+
+        impl Expr {
+            fn token(&self) -> ExprToken {
+                match self {
+                    $(
+                        Expr::$name { .. } => ExprToken::$name,
+                    )*
+                }
+            }
+        }
+    };
+}
+
+#[derive(Debug)]
+struct KismetPropertyPointer(u64);
+impl ReadExt for KismetPropertyPointer {
+    fn size(&self) -> usize {
+        8
+    }
+    fn read(r: &mut impl std::io::Read) -> Result<Self> {
+        Ok(Self(r.read_u64::<LE>()?))
+    }
+    fn format(&self, ctx: &mut SourceBuilder) -> SourceLine {
+        ctx.index += self.size();
+        format!("{self:X?}").into()
+    }
+}
+#[derive(Debug)]
+struct PackageIndex(u64);
+impl ReadExt for PackageIndex {
+    fn size(&self) -> usize {
+        8
+    }
+    fn read(r: &mut impl std::io::Read) -> Result<Self> {
+        Ok(Self(r.read_u64::<LE>()?))
+    }
+    fn format(&self, ctx: &mut SourceBuilder) -> SourceLine {
+        ctx.index += self.size();
+        format!("{self:X?}").into()
+    }
+}
+#[derive(Debug)]
+struct KName(u32, u32, u32);
+impl ReadExt for KName {
+    fn size(&self) -> usize {
+        12
+    }
+    fn read(r: &mut impl std::io::Read) -> Result<Self> {
+        Ok(Self(
+            r.read_u32::<LE>()?,
+            r.read_u32::<LE>()?,
+            r.read_u32::<LE>()?,
+        ))
+    }
+    fn format(&self, ctx: &mut SourceBuilder) -> SourceLine {
+        ctx.index += self.size();
+        format!("{self:X?}").into()
+    }
+}
+
+#[derive(Debug, strum::FromRepr)]
+#[repr(u8)]
+enum ECastToken {
+    ObjectToInterface,
+    ObjectToBool,
+    InterfaceToBool,
+    Max,
+}
+impl ReadExt for ECastToken {
+    fn size(&self) -> usize {
+        1
+    }
+    fn read(r: &mut impl std::io::Read) -> Result<Self> {
+        let token = r.read_u8()?;
+        Ok(Self::from_repr(token)
+            .with_context(|| format!("unknown ECastToken variant = {token:X}"))
+            .unwrap_or(ECastToken::Max)) // TODO fix out of range?
+    }
+    fn format(&self, ctx: &mut SourceBuilder) -> SourceLine {
+        ctx.index += self.size();
+        format!("{self:?}").into()
+    }
+}
+
+#[derive(Debug)]
+struct StatementIndex(u32);
+impl ReadExt for StatementIndex {
+    fn size(&self) -> usize {
+        4
+    }
+    fn read(r: &mut impl std::io::Read) -> Result<Self> {
+        Ok(Self(r.read_u32::<LE>()?))
+    }
+    fn format(&self, ctx: &mut SourceBuilder) -> SourceLine {
+        ctx.index += self.size();
+        self.0.to_string().into()
+    }
+}
+impl ReadExt for i32 {
+    fn size(&self) -> usize {
+        4
+    }
+    fn read(r: &mut impl std::io::Read) -> Result<Self> {
+        Ok(r.read_i32::<LE>()?)
+    }
+    fn format(&self, ctx: &mut SourceBuilder) -> SourceLine {
+        ctx.index += self.size();
+        self.to_string().into()
+    }
+}
+impl ReadExt for u32 {
+    fn size(&self) -> usize {
+        4
+    }
+    fn read(r: &mut impl std::io::Read) -> Result<Self> {
+        Ok(r.read_u32::<LE>()?)
+    }
+    fn format(&self, ctx: &mut SourceBuilder) -> SourceLine {
+        ctx.index += self.size();
+        self.to_string().into()
+    }
+}
+impl ReadExt for u16 {
+    fn size(&self) -> usize {
+        2
+    }
+    fn read(r: &mut impl std::io::Read) -> Result<Self> {
+        Ok(r.read_u16::<LE>()?)
+    }
+    fn format(&self, ctx: &mut SourceBuilder) -> SourceLine {
+        ctx.index += self.size();
+        self.to_string().into()
+    }
+}
+impl ReadExt for u8 {
+    fn size(&self) -> usize {
+        1
+    }
+    fn read(r: &mut impl std::io::Read) -> Result<Self> {
+        Ok(r.read_u8()?)
+    }
+    fn format(&self, ctx: &mut SourceBuilder) -> SourceLine {
+        ctx.index += self.size();
+        self.to_string().into()
+    }
+}
+impl ReadExt for f32 {
+    fn size(&self) -> usize {
+        4
+    }
+    fn read(r: &mut impl std::io::Read) -> Result<Self> {
+        Ok(r.read_f32::<LE>()?)
+    }
+    fn format(&self, ctx: &mut SourceBuilder) -> SourceLine {
+        ctx.index += self.size();
+        self.to_string().into()
+    }
+}
+impl ReadExt for bool {
+    fn size(&self) -> usize {
+        1
+    }
+    fn read(r: &mut impl std::io::Read) -> Result<Self> {
+        Ok(r.read_u8()? != 0)
+    }
+    fn format(&self, ctx: &mut SourceBuilder) -> SourceLine {
+        ctx.index += self.size();
+        self.to_string().into()
+    }
+}
+
+impl<I: ReadExt> ReadExt for Box<I> {
+    fn size(&self) -> usize {
+        I::size(self)
+    }
+    fn read(r: &mut impl std::io::Read) -> Result<Self> {
+        Ok(Box::new(I::read(r)?))
+    }
+    fn format(&self, ctx: &mut SourceBuilder) -> SourceLine {
+        I::format(&self, ctx)
+    }
+}
+
+#[derive(Debug)]
+struct TerminatedExprList<const B: bool, const N: u8>(Vec<Expr>);
+impl<const B: bool, const N: u8> ReadExt for TerminatedExprList<B, N> {
+    fn size(&self) -> usize {
+        let mut size = 0;
+        if B {
+            size += 4;
+        }
+        for expr in &self.0 {
+            size += expr.size();
+        }
+        1 + size
+    }
+    fn read(r: &mut impl std::io::Read) -> Result<Self> {
+        if B {
+            let _num = r.read_u32::<LE>()?;
+        }
+        let mut expr = vec![];
+        loop {
+            let e = Expr::read(r)?;
+            if e.token() as u8 == N {
+                break;
+            }
+            expr.push(e);
+        }
+        Ok(Self(expr))
+    }
+    fn format(&self, ctx: &mut SourceBuilder) -> SourceLine {
+        let mut lines = SourceLine {
+            content: "list".into(),
+            ..Default::default()
+        };
+        if B {
+            ctx.index += 4;
+        }
+        for e in &self.0 {
+            lines.children.push(e.format(ctx));
+        }
+        ctx.index += 1;
+        lines
+    }
+}
+
+type OrderedFloat<F> = F;
+
+trait ReadExt: std::fmt::Debug {
+    fn size(&self) -> usize;
+    fn read(r: &mut impl std::io::Read) -> Result<Self>
+    where
+        Self: Sized;
+    //fn walk(&mut self, f: &dyn Fn(&mut Expr)) {
+    fn walk<F>(&mut self, f: F)
+    where
+        F: FnMut(&mut Expr),
+    {
+    }
+    fn format(&self, ctx: &mut SourceBuilder) -> SourceLine {
+        todo!("format {:?}", self)
+    }
+}
+
+impl ReadExt for ExStringConst {
+    fn size(&self) -> usize {
+        self.value.len() + 1
+    }
+    fn read(r: &mut impl std::io::Read) -> Result<Self> {
+        let mut chars = vec![];
+        loop {
+            let c = r.read_u8()?;
+            if c == 0 {
+                break;
+            }
+            chars.push(c);
+        }
+        Ok(Self {
+            value: String::from_utf8_lossy(&chars).to_string(),
+        })
+    }
+    fn format(&self, ctx: &mut SourceBuilder) -> SourceLine {
+        let lines = SourceLine {
+            index: Some(ctx.index),
+            content: format!("EX_StringConst({:?})", self.value),
+            children: vec![],
+            ..Default::default()
+        };
+        ctx.index += self.size();
+        lines
+    }
+}
+impl ReadExt for ExUnicodeStringConst {
+    fn size(&self) -> usize {
+        (self.value.len() + 1) * 2
+    }
+    fn read(r: &mut impl std::io::Read) -> Result<Self> {
+        let mut chars = vec![];
+        loop {
+            let c = r.read_u16::<LE>()?;
+            if c == 0 {
+                break;
+            }
+            chars.push(c);
+        }
+        Ok(Self {
+            value: String::from_utf16_lossy(&chars).to_string(),
+        })
+    }
+    fn format(&self, ctx: &mut SourceBuilder) -> SourceLine {
+        let lines = SourceLine {
+            index: Some(ctx.index),
+            content: format!("EX_UnicodeStringConst({:?})", self.value),
+            children: vec![],
+            ..Default::default()
+        };
+        ctx.index += self.size();
+        lines
+    }
+}
+
+#[derive(Debug)]
+struct KismetSwitchCase {
+    case_index_value_term: Expr,
+    next_offset: u32,
+    case_term: Expr,
+}
+
+impl ReadExt for ExSwitchValue {
+    fn size(&self) -> usize {
+        let mut size = 0;
+        size += 2;
+        size += 4;
+        size += self.index_term.size();
+        for c in &self.cases {
+            size += c.case_index_value_term.size();
+            size += 4;
+            size += c.case_term.size();
+        }
+        size += self.default_term.size();
+        size
+    }
+    fn read(r: &mut impl std::io::Read) -> Result<Self> {
+        let mut cases = vec![];
+        let num = r.read_u16::<LE>()?;
+        let end_goto_offset = r.read_u32::<LE>()?;
+        let index_term = Box::new(Expr::read(r)?);
+
+        for _ in 0..num {
+            cases.push(KismetSwitchCase {
+                case_index_value_term: Expr::read(r)?,
+                next_offset: u32::read(r)?,
+                case_term: Expr::read(r)?,
+            });
+        }
+
+        let default_term = Box::new(Expr::read(r)?);
+        Ok(Self {
+            end_goto_offset,
+            index_term,
+            default_term,
+            cases,
+        })
+    }
+    fn walk<F>(&mut self, mut f: F)
+    where
+        F: FnMut(&mut Expr),
+    {
+        self.index_term.walk(&mut f);
+        for c in &mut self.cases {
+            c.case_index_value_term.walk(&mut f);
+            c.case_term.walk(&mut f);
+        }
+        self.default_term.walk(&mut f);
+    }
+    fn format(&self, ctx: &mut SourceBuilder) -> SourceLine {
+        let mut lines = SourceLine {
+            index: Some(ctx.index),
+            content: "EX_SwitchValue".into(),
+            ..Default::default()
+        };
+        ctx.index += 2;
+        ctx.index += 4;
+
+        lines
+            .children
+            .push(self.index_term.format(ctx).prefix("index = "));
+
+        for c in &self.cases {
+            let mut case_lines = SourceLine {
+                content: "case".into(),
+                ..Default::default()
+            };
+            case_lines
+                .children
+                .push(c.case_index_value_term.format(ctx).prefix("value = "));
+            ctx.index += 4;
+            case_lines
+                .children
+                .push(c.case_term.format(ctx).prefix("term = "));
+        }
+
+        lines
+            .children
+            .push(self.default_term.format(ctx).prefix("default = "));
+
+        lines
+    }
+}
+
+#[derive(Default, Debug)]
+struct SourceLine {
+    index: Option<usize>,
+    prefix: Option<String>,
+    content: String,
+    children: Vec<SourceLine>,
+}
+struct SourceBuilder {
+    index: usize,
+}
+#[derive(Default)]
+struct SourceCollector {
+    line: usize,
+    source: Source,
+}
+#[derive(Default)]
+struct Source {
+    index_to_line: BTreeMap<usize, usize>,
+    content: String,
+}
+impl SourceLine {
+    fn prefix(self, prefix: impl Into<String>) -> SourceLine {
+        SourceLine {
+            prefix: Some(prefix.into()),
+            ..self
+        }
+    }
+    fn write(&self, out: &mut SourceCollector, indent: usize) {
+        use std::fmt::Write;
+
+        writeln!(
+            out.source.content,
+            "{:>10}{}{}{}",
+            self.index.map(|i| format!("{i}: ")).unwrap_or_default(),
+            "    ".repeat(indent),
+            self.prefix.as_ref().map(|p| p.as_str()).unwrap_or(""),
+            self.content
+        )
+        .unwrap();
+
+        out.line += 1;
+
+        if let Some(index) = self.index {
+            out.source.index_to_line.insert(index, out.line);
+        }
+
+        for c in &self.children {
+            c.write(out, indent + 1);
+        }
+    }
+}
+impl From<String> for SourceLine {
+    fn from(content: String) -> Self {
+        Self {
+            content,
+            ..Default::default()
+        }
+    }
+}
+
+#[derive(Debug)]
+enum FScriptText {
+    Empty,
+    LocalizedText {
+        localized_source: Expr,
+        localized_key: Expr,
+        localized_namespace: Expr,
+    },
+    InvariantText {
+        invariant_literal_string: Expr,
+    },
+    LiteralString {
+        literal_string: Expr,
+    },
+    StringTableEntry {
+        string_table: PackageIndex,
+    },
+}
+impl ReadExt for FScriptText {
+    fn size(&self) -> usize {
+        1 + match self {
+            FScriptText::Empty => 0,
+            FScriptText::LocalizedText {
+                localized_source,
+                localized_key,
+                localized_namespace,
+            } => localized_source.size() + localized_key.size() + localized_namespace.size(),
+            FScriptText::InvariantText {
+                invariant_literal_string,
+            } => invariant_literal_string.size(),
+            FScriptText::LiteralString { literal_string } => literal_string.size(),
+            FScriptText::StringTableEntry { string_table } => string_table.size(),
+        }
+    }
+    fn read(r: &mut impl std::io::Read) -> Result<Self> {
+        // TODO
+        Ok(match r.read_u8()? {
+            0 => Self::Empty,
+            1 => Self::LocalizedText {
+                localized_source: Expr::read(r)?,
+                localized_key: Expr::read(r)?,
+                localized_namespace: Expr::read(r)?,
+            },
+            2 => Self::InvariantText {
+                invariant_literal_string: Expr::read(r)?,
+            },
+            3 => Self::LiteralString {
+                literal_string: Expr::read(r)?,
+            },
+            4 => Self::StringTableEntry {
+                string_table: PackageIndex::read(r)?,
+            },
+            _ => unimplemented!("unkonwn FScriptTextVariant"),
+        })
+    }
+    fn format(&self, ctx: &mut SourceBuilder) -> SourceLine {
+        let mut lines = SourceLine {
+            content: "FScriptText".into(),
+            ..Default::default()
+        };
+        ctx.index += 1;
+        match self {
+            FScriptText::Empty => {}
+            FScriptText::LocalizedText {
+                localized_source,
+                localized_key,
+                localized_namespace,
+            } => {
+                lines
+                    .children
+                    .push(localized_source.format(ctx).prefix("localized_source = "));
+                lines
+                    .children
+                    .push(localized_key.format(ctx).prefix("localized_key = "));
+                lines.children.push(
+                    localized_namespace
+                        .format(ctx)
+                        .prefix("localized_namespace = "),
+                );
+            }
+            FScriptText::InvariantText {
+                invariant_literal_string,
+            } => {
+                lines.children.push(
+                    invariant_literal_string
+                        .format(ctx)
+                        .prefix("invariant_literal_string = "),
+                );
+            }
+            FScriptText::LiteralString { literal_string } => {
+                lines
+                    .children
+                    .push(literal_string.format(ctx).prefix("literal_string = "));
+            }
+            FScriptText::StringTableEntry { string_table } => {
+                lines
+                    .children
+                    .push(string_table.format(ctx).prefix("string_table = "));
+            }
+        }
+        lines
+    }
+}
+
+for_each!(
+    0x00    impl ExLocalVariable { variable: [ KismetPropertyPointer ] }
+    0x01    impl ExInstanceVariable { variable: [ KismetPropertyPointer ] }
+    0x02    impl ExDefaultVariable { variable: [ KismetPropertyPointer ] }
+    0x04    impl ExReturn { return_expression: [ Box<Expr> ] }
+    0x06    impl ExJump { code_offset: [ StatementIndex ] }
+    0x07    impl ExJumpIfNot { code_offset: [ StatementIndex ] boolean_expression: [ Box<Expr> ] }
+    0x09    impl ExAssert { line_number: [ u16 ] debug_mode: [ bool ] assert_expression: [ Box<Expr> ] }
+    0x0B    impl ExNothing {  }
+    0x0F    impl ExLet { value: [ KismetPropertyPointer ] variable: [ Box<Expr> ] expression: [ Box<Expr> ] }
+    0x12    impl ExClassContext { object_expression: [ Box<Expr> ] offset: [ StatementIndex ] r_value_pointer: [ KismetPropertyPointer ] context_expression: [ Box<Expr> ] }
+    0x13    impl ExMetaCast { class_ptr: [ PackageIndex ] target_expression: [ Box<Expr> ] }
+    0x14    impl ExLetBool { variable_expression: [ Box<Expr> ] assignment_expression: [ Box<Expr> ] }
+    0x15    impl ExEndParmValue {  }
+    0x16    impl ExEndFunctionParms {  }
+    0x17    impl ExSelf {  }
+    0x18    impl ExSkip { code_offset: [ StatementIndex ] skip_expression: [ Box<Expr> ] }
+    0x19    impl ExContext { object_expression: [ Box<Expr> ] offset: [ StatementIndex ] r_value_pointer: [ KismetPropertyPointer ] context_expression: [ Box<Expr> ] }
+    0x1A    impl ExContextFailSilent { object_expression: [ Box<Expr> ] offset: [ StatementIndex ] r_value_pointer: [ KismetPropertyPointer ] context_expression: [ Box<Expr> ] }
+    0x1B    impl ExVirtualFunction { virtual_function_name: [ KName ] parameters: [ TerminatedExprList<false, {ExprToken::ExEndFunctionParms as u8}> ] }
+    0x1C    impl ExFinalFunction { stack_node: [ PackageIndex ] parameters: [ TerminatedExprList<false, {ExprToken::ExEndFunctionParms as u8}> ] }
+    0x1D    impl ExIntConst { value: [ i32 ] }
+    0x1E    impl ExFloatConst { value: [ OrderedFloat<f32> ] }
+    0x1F no_impl ExStringConst { value: [ String ] }
+    0x20    impl ExObjectConst { value: [ PackageIndex ] }
+    0x21    impl ExNameConst { value: [ KName ] }
+  //0x22    impl ExRotationConst { rotator: [ Vector<OrderedFloat<f64>> ] }
+  //0x23    impl ExVectorConst { value: [ Vector<OrderedFloat<f64>> ] }
+    0x24    impl ExByteConst { value: [ u8 ] }
+    0x25    impl ExIntZero {  }
+    0x26    impl ExIntOne {  }
+    0x27    impl ExTrue {  }
+    0x28    impl ExFalse {  }
+    0x29    impl ExTextConst { value: [ Box<FScriptText> ] }
+    0x2A    impl ExNoObject {  }
+  //0x2B    impl ExTransformConst { value: [ Transform<OrderedFloat<f64>> ] }
+    0x2C    impl ExIntConstByte {  }
+    0x2D    impl ExNoInterface {  }
+    0x2E    impl ExDynamicCast { class_ptr: [ PackageIndex ] target_expression: [ Box<Expr> ] }
+    0x2F    impl ExStructConst { struct_value: [ PackageIndex ] struct_size: [ i32 ] value: [ TerminatedExprList<false, {ExprToken::ExEndStructConst as u8}> ] }
+    0x30    impl ExEndStructConst {  }
+  //0x31    impl ExSetArray { assigning_property: [ Option<Box<Expr>> ] array_inner_prop: [ Option<PackageIndex> ] elements: [ TerminatedExprList<false, {ExprToken::ExEndArray as u8}> ] }
+    0x32    impl ExEndArray {  }
+    0x33    impl ExPropertyConst { property: [ KismetPropertyPointer ] }
+    0x34 no_impl ExUnicodeStringConst { value: [ String ] }
+    0x35    impl ExInt64Const {  }
+    0x36    impl ExUInt64Const {  }
+    0x38    impl ExPrimitiveCast { conversion_type: [ ECastToken ] target: [ Box<Expr> ] }
+    0x39    impl ExSetSet { set_property: [ Box<Expr> ] elements: [ TerminatedExprList<true, {ExprToken::ExEndSet as u8}> ] }
+    0x3A    impl ExEndSet {  }
+    0x3B    impl ExSetMap { map_property: [ Box<Expr> ] elements: [ TerminatedExprList<true, {ExprToken::ExEndMap as u8}> ] }
+    0x3C    impl ExEndMap {  }
+    0x3D    impl ExSetConst { inner_property: [ KismetPropertyPointer ] elements: [ TerminatedExprList<true, {ExprToken::ExEndFunctionParms as u8}> ] }
+    0x3E    impl ExEndSetConst {  }
+    0x3F    impl ExMapConst { key_property: [ KismetPropertyPointer ] value_property: [ KismetPropertyPointer ] elements: [ TerminatedExprList<true, {ExprToken::ExEndMapConst as u8}> ] }
+    0x40    impl ExEndMapConst {  }
+    0x42    impl ExStructMemberContext { struct_member_expression: [ KismetPropertyPointer ] struct_expression: [ Box<Expr> ] }
+    0x43    impl ExLetMulticastDelegate { variable_expression: [ Box<Expr> ] assignment_expression: [ Box<Expr> ] }
+    0x44    impl ExLetDelegate { variable_expression: [ Box<Expr> ] assignment_expression: [ Box<Expr> ] }
+    0x45    impl ExLocalVirtualFunction { virtual_function_name: [ KName ] parameters: [ TerminatedExprList<false, {ExprToken::ExEndFunctionParms as u8}> ] }
+    0x46    impl ExLocalFinalFunction { stack_node: [ PackageIndex ] parameters: [ TerminatedExprList<false, {ExprToken::ExEndFunctionParms as u8}> ] }
+    0x48    impl ExLocalOutVariable { variable: [ KismetPropertyPointer ] }
+    0x4A    impl ExDeprecatedOp4A {  }
+    0x4B    impl ExInstanceDelegate { function_name: [ KName ] }
+    0x4C    impl ExPushExecutionFlow { pushing_address: [ StatementIndex ] }
+    0x4D    impl ExPopExecutionFlow {  }
+    0x4E    impl ExComputedJump { code_offset_expression: [ Box<Expr> ] }
+    0x4F    impl ExPopExecutionFlowIfNot { boolean_expression: [ Box<Expr> ] }
+    0x50    impl ExBreakpoint {  }
+    0x51    impl ExInterfaceContext { interface_value: [ Box<Expr> ] }
+    0x52    impl ExObjToInterfaceCast { class_ptr: [ PackageIndex ] target: [ Box<Expr> ] }
+    0x53    impl ExEndOfScript {  }
+    0x54    impl ExCrossInterfaceCast { class_ptr: [ PackageIndex ] target: [ Box<Expr> ] }
+    0x55    impl ExInterfaceToObjCast { class_ptr: [ PackageIndex ] target: [ Box<Expr> ] }
+    0x5A    impl ExWireTracepoint {  }
+    0x5B    impl ExSkipOffsetConst { value: [ u32 ] }
+    0x5C    impl ExAddMulticastDelegate { delegate: [ Box<Expr> ] delegate_to_add: [ Box<Expr> ] }
+    0x5D    impl ExClearMulticastDelegate { delegate_to_clear: [ Box<Expr> ] }
+    0x5E    impl ExTracepoint {  }
+    0x5F    impl ExLetObj { variable_expression: [ Box<Expr> ] assignment_expression: [ Box<Expr> ] }
+    0x60    impl ExLetWeakObjPtr { variable_expression: [ Box<Expr> ] assignment_expression: [ Box<Expr> ] }
+    0x61    impl ExBindDelegate { function_name: [ KName ] delegate: [ Box<Expr> ] object_term: [ Box<Expr> ] }
+    0x62    impl ExRemoveMulticastDelegate { delegate: [ Box<Expr> ] delegate_to_add: [ Box<Expr> ] }
+    0x63    impl ExCallMulticastDelegate { stack_node: [ PackageIndex ] parameters: [ TerminatedExprList<false, {ExprToken::ExEndFunctionParms as u8}> ] delegate: [ Box<Expr> ] }
+    0x64    impl ExLetValueOnPersistentFrame { destination_property: [ KismetPropertyPointer ] assignment_expression: [ Box<Expr> ] }
+    0x65    impl ExArrayConst { inner_property: [ KismetPropertyPointer ] elements: [ TerminatedExprList<true, {ExprToken::ExEndArrayConst as u8}> ] }
+    0x66    impl ExEndArrayConst {  }
+    0x67    impl ExSoftObjectConst { value: [ Box<Expr> ] }
+    0x68    impl ExCallMath { stack_node: [ PackageIndex ] parameters: [ TerminatedExprList<false, {ExprToken::ExEndFunctionParms as u8}> ] }
+    0x69 no_impl ExSwitchValue { end_goto_offset: [ u32 ] index_term: [ Box<Expr> ] default_term: [ Box<Expr> ] cases: [ Vec<KismetSwitchCase> ] }
+  //0x6A    impl ExInstrumentationEvent { event_type: [ EScriptInstrumentationType ] event_name: [ Option<KName> ] }
+    0x6B    impl ExArrayGetByRef { array_variable: [ Box<Expr> ] array_index: [ Box<Expr> ] }
+    0x6C    impl ExClassSparseDataVariable { variable: [ KismetPropertyPointer ] }
+    0x6D    impl ExFieldPathConst { value: [ Box<Expr> ] }
+);
