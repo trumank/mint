@@ -1,7 +1,10 @@
+use std::ptr::{self, NonNull};
+
 use super::*;
 
 bitflags::bitflags! {
-    #[derive(Debug, Clone)]
+    #[derive(Debug, Clone, Copy)]
+    #[repr(C)]
     pub struct EObjectFlags: u32 {
         const RF_NoFlags = 0x0000;
         const RF_Public = 0x0001;
@@ -33,9 +36,9 @@ bitflags::bitflags! {
         const RF_Dynamic = 0x04000000;
         const RF_WillBeLoaded = 0x08000000;
     }
-}
-bitflags::bitflags! {
-    #[derive(Debug, Clone)]
+
+    #[derive(Debug, Clone, Copy)]
+    #[repr(C)]
     pub struct EFunctionFlags: u32 {
         const FUNC_None = 0x0000;
         const FUNC_Final = 0x0001;
@@ -69,6 +72,179 @@ bitflags::bitflags! {
         const FUNC_Const = 0x40000000;
         const FUNC_NetValidate = 0x80000000;
         const FUNC_AllFlags = 0xffffffff;
+    }
+
+    #[derive(Debug, Clone, Copy)]
+    #[repr(C)]
+    pub struct EClassFlags: i32 {
+        const CLASS_None = 0x0000;
+        const CLASS_Abstract = 0x0001;
+        const CLASS_DefaultConfig = 0x0002;
+        const CLASS_Config = 0x0004;
+        const CLASS_Transient = 0x0008;
+        const CLASS_Parsed = 0x0010;
+        const CLASS_MatchedSerializers = 0x0020;
+        const CLASS_ProjectUserConfig = 0x0040;
+        const CLASS_Native = 0x0080;
+        const CLASS_NoExport = 0x0100;
+        const CLASS_NotPlaceable = 0x0200;
+        const CLASS_PerObjectConfig = 0x0400;
+        const CLASS_ReplicationDataIsSetUp = 0x0800;
+        const CLASS_EditInlineNew = 0x1000;
+        const CLASS_CollapseCategories = 0x2000;
+        const CLASS_Interface = 0x4000;
+        const CLASS_CustomConstructor = 0x8000;
+        const CLASS_Const = 0x00010000;
+        const CLASS_LayoutChanging = 0x00020000;
+        const CLASS_CompiledFromBlueprint = 0x00040000;
+        const CLASS_MinimalAPI = 0x00080000;
+        const CLASS_RequiredAPI = 0x00100000;
+        const CLASS_DefaultToInstanced = 0x00200000;
+        const CLASS_TokenStreamAssembled = 0x00400000;
+        const CLASS_HasInstancedReference = 0x00800000;
+        const CLASS_Hidden = 0x01000000;
+        const CLASS_Deprecated = 0x02000000;
+        const CLASS_HideDropDown = 0x04000000;
+        const CLASS_GlobalUserConfig = 0x08000000;
+        const CLASS_Intrinsic = 0x10000000;
+        const CLASS_Constructed = 0x20000000;
+        const CLASS_ConfigDoNotCheckDefaults = 0x40000000;
+        const CLASS_NewerVersionExists = i32::MIN;
+    }
+
+    #[derive(Debug, Clone, Copy)]
+    #[repr(C)]
+    pub struct EClassCastFlags : u64 {
+        const CASTCLASS_None = 0x0000000000000000;
+
+        const CASTCLASS_UField = 0x0000000000000001;
+        const CASTCLASS_FInt8Property = 0x0000000000000002;
+        const CASTCLASS_UEnum = 0x0000000000000004;
+        const CASTCLASS_UStruct = 0x0000000000000008;
+        const CASTCLASS_UScriptStruct = 0x0000000000000010;
+        const CASTCLASS_UClass = 0x0000000000000020;
+        const CASTCLASS_FByteProperty = 0x0000000000000040;
+        const CASTCLASS_FIntProperty = 0x0000000000000080;
+        const CASTCLASS_FFloatProperty = 0x0000000000000100;
+        const CASTCLASS_FUInt64Property = 0x0000000000000200;
+        const CASTCLASS_FClassProperty = 0x0000000000000400;
+        const CASTCLASS_FUInt32Property = 0x0000000000000800;
+        const CASTCLASS_FInterfaceProperty = 0x0000000000001000;
+        const CASTCLASS_FNameProperty = 0x0000000000002000;
+        const CASTCLASS_FStrProperty = 0x0000000000004000;
+        const CASTCLASS_FProperty = 0x0000000000008000;
+        const CASTCLASS_FObjectProperty = 0x0000000000010000;
+        const CASTCLASS_FBoolProperty = 0x0000000000020000;
+        const CASTCLASS_FUInt16Property = 0x0000000000040000;
+        const CASTCLASS_UFunction = 0x0000000000080000;
+        const CASTCLASS_FStructProperty = 0x0000000000100000;
+        const CASTCLASS_FArrayProperty = 0x0000000000200000;
+        const CASTCLASS_FInt64Property = 0x0000000000400000;
+        const CASTCLASS_FDelegateProperty = 0x0000000000800000;
+        const CASTCLASS_FNumericProperty = 0x0000000001000000;
+        const CASTCLASS_FMulticastDelegateProperty = 0x0000000002000000;
+        const CASTCLASS_FObjectPropertyBase = 0x0000000004000000;
+        const CASTCLASS_FWeakObjectProperty = 0x0000000008000000;
+        const CASTCLASS_FLazyObjectProperty = 0x0000000010000000;
+        const CASTCLASS_FSoftObjectProperty = 0x0000000020000000;
+        const CASTCLASS_FTextProperty = 0x0000000040000000;
+        const CASTCLASS_FInt16Property = 0x0000000080000000;
+        const CASTCLASS_FDoubleProperty = 0x0000000100000000;
+        const CASTCLASS_FSoftClassProperty = 0x0000000200000000;
+        const CASTCLASS_UPackage = 0x0000000400000000;
+        const CASTCLASS_ULevel = 0x0000000800000000;
+        const CASTCLASS_AActor = 0x0000001000000000;
+        const CASTCLASS_APlayerController = 0x0000002000000000;
+        const CASTCLASS_APawn = 0x0000004000000000;
+        const CASTCLASS_USceneComponent = 0x0000008000000000;
+        const CASTCLASS_UPrimitiveComponent = 0x0000010000000000;
+        const CASTCLASS_USkinnedMeshComponent = 0x0000020000000000;
+        const CASTCLASS_USkeletalMeshComponent = 0x0000040000000000;
+        const CASTCLASS_UBlueprint = 0x0000080000000000;
+        const CASTCLASS_UDelegateFunction = 0x0000100000000000;
+        const CASTCLASS_UStaticMeshComponent = 0x0000200000000000;
+        const CASTCLASS_FMapProperty = 0x0000400000000000;
+        const CASTCLASS_FSetProperty = 0x0000800000000000;
+        const CASTCLASS_FEnumProperty = 0x0001000000000000;
+        const CASTCLASS_USparseDelegateFunction = 0x0002000000000000;
+        const CASTCLASS_FMulticastInlineDelegateProperty = 0x0004000000000000;
+        const CASTCLASS_FMulticastSparseDelegateProperty = 0x0008000000000000;
+        const CASTCLASS_FFieldPathProperty = 0x0010000000000000;
+        const CASTCLASS_FLargeWorldCoordinatesRealProperty = 0x0080000000000000;
+        const CASTCLASS_FOptionalProperty = 0x0100000000000000;
+        const CASTCLASS_FVerseValueProperty = 0x0200000000000000;
+        const CASTCLASS_UVerseVMClass = 0x0400000000000000;
+    }
+
+    #[derive(Debug, Clone, Copy)]
+    #[repr(C)]
+    pub struct  EPropertyFlags: u64 {
+        const CPF_None = 0x0000;
+        const CPF_Edit = 0x0001;
+        const CPF_ConstParm = 0x0002;
+        const CPF_BlueprintVisible = 0x0004;
+        const CPF_ExportObject = 0x0008;
+        const CPF_BlueprintReadOnly = 0x0010;
+        const CPF_Net = 0x0020;
+        const CPF_EditFixedSize = 0x0040;
+        const CPF_Parm = 0x0080;
+        const CPF_OutParm = 0x0100;
+        const CPF_ZeroConstructor = 0x0200;
+        const CPF_ReturnParm = 0x0400;
+        const CPF_DisableEditOnTemplate = 0x0800;
+        const CPF_Transient = 0x2000;
+        const CPF_Config = 0x4000;
+        const CPF_DisableEditOnInstance = 0x00010000;
+        const CPF_EditConst = 0x00020000;
+        const CPF_GlobalConfig = 0x00040000;
+        const CPF_InstancedReference = 0x00080000;
+        const CPF_DuplicateTransient = 0x00200000;
+        const CPF_SaveGame = 0x01000000;
+        const CPF_NoClear = 0x02000000;
+        const CPF_ReferenceParm = 0x08000000;
+        const CPF_BlueprintAssignable = 0x10000000;
+        const CPF_Deprecated = 0x20000000;
+        const CPF_IsPlainOldData = 0x40000000;
+        const CPF_RepSkip = 0x80000000;
+        const CPF_RepNotify = 0x100000000;
+        const CPF_Interp = 0x200000000;
+        const CPF_NonTransactional = 0x400000000;
+        const CPF_EditorOnly = 0x800000000;
+        const CPF_NoDestructor = 0x1000000000;
+        const CPF_AutoWeak = 0x4000000000;
+        const CPF_ContainsInstancedReference = 0x8000000000;
+        const CPF_AssetRegistrySearchable = 0x10000000000;
+        const CPF_SimpleDisplay = 0x20000000000;
+        const CPF_AdvancedDisplay = 0x40000000000;
+        const CPF_Protected = 0x80000000000;
+        const CPF_BlueprintCallable = 0x100000000000;
+        const CPF_BlueprintAuthorityOnly = 0x200000000000;
+        const CPF_TextExportTransient = 0x400000000000;
+        const CPF_NonPIEDuplicateTransient = 0x800000000000;
+        const CPF_ExposeOnSpawn = 0x1000000000000;
+        const CPF_PersistentInstance = 0x2000000000000;
+        const CPF_UObjectWrapper = 0x4000000000000;
+        const CPF_HasGetValueTypeHash = 0x8000000000000;
+        const CPF_NativeAccessSpecifierPublic = 0x10000000000000;
+        const CPF_NativeAccessSpecifierProtected = 0x20000000000000;
+        const CPF_NativeAccessSpecifierPrivate = 0x40000000000000;
+        const CPF_SkipSerialization = 0x80000000000000;
+    }
+
+    #[derive(Debug, Clone, Copy)]
+    #[repr(C)]
+    pub struct EInternalObjectFlags: u32 {
+        const None = 0x0;
+        const ReachableInCluster = 0x800000;
+        const ClusterRoot = 0x1000000;
+        const Native = 0x2000000;
+        const Async = 0x4000000;
+        const AsyncLoading = 0x8000000;
+        const Unreachable = 0x10000000;
+        const PendingKill = 0x20000000;
+        const RootSet = 0x40000000;
+        const GarbageCollectionKeepFlags = 0xe000000;
+        const AllFlags = 0x7f800000;
     }
 }
 
@@ -120,8 +296,15 @@ pub struct FStructBaseChain {
 #[derive(Debug)]
 #[repr(C)]
 pub struct FFieldClass {
-    // TODO
-    name: FName,
+    pub name: FName,
+    pub id: u64,
+    pub cast_flags: EClassCastFlags,
+    pub class_flags: EClassFlags,
+    pub super_class: *const FFieldClass,
+    pub default_object: *const FField,
+    pub construct_fn:
+        extern "system" fn(*const FFieldVariant, *const FName, EObjectFlags) -> *const FField,
+    pub unqiue_name_index_counter: i32, //FThreadSafeCounter,
 }
 
 #[derive(Debug)]
@@ -134,6 +317,7 @@ pub struct FFieldVariant {
 #[derive(Debug)]
 #[repr(C)]
 pub struct FField {
+    pub vtable: *const c_void,
     pub class_private: *const FFieldClass,
     pub owner: FFieldVariant,
     pub next: *const FField,
@@ -141,8 +325,36 @@ pub struct FField {
     pub flags_private: EObjectFlags,
 }
 
+#[derive(Debug)]
+#[repr(C)]
 pub struct FProperty {
-    // TODO
+    pub ffield: FField,
+    pub array_dim: i32,
+    pub element_size: i32,
+    pub property_flags: EPropertyFlags,
+    pub rep_index: u16,
+    pub blueprint_replication_condition: u8, //TEnumAsByte<enum ELifetimeCondition>,
+    pub offset_internal: i32,
+    pub rep_notify_func: FName,
+    pub property_link_next: *const FProperty,
+    pub next_ref: *const FProperty,
+    pub destructor_link_next: *const FProperty,
+    pub post_construct_link_next: *const FProperty,
+}
+
+#[derive(Debug)]
+#[repr(u32)]
+pub enum EArrayPropertyFlags {
+    None = 0x0,
+    UsesMemoryImageAllocator = 0x1,
+}
+
+#[derive(Debug)]
+#[repr(C)]
+pub struct FArrayProperty {
+    pub fproperty: FProperty,
+    pub inner: *const FProperty,
+    pub array_flags: EArrayPropertyFlags,
 }
 
 #[derive(Debug)]
@@ -194,5 +406,78 @@ impl UObjectBase {
             (globals().uobject_base_utility_get_path_name())(self, stop_outer, &mut string);
         }
         string.to_string()
+    }
+}
+
+pub struct PropertiesIter<'a> {
+    ustruct: Option<&'a UStruct>,
+    ffield: Option<&'a FField>,
+}
+impl<'a> Iterator for PropertiesIter<'a> {
+    type Item = (&'a UStruct, &'a FProperty);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        loop {
+            if let (Some(ustruct), Some(field)) = (self.ustruct, self.ffield) {
+                self.ffield = unsafe { field.next.as_ref() };
+                if unsafe { &*field.class_private }
+                    .cast_flags
+                    .contains(EClassCastFlags::CASTCLASS_FProperty)
+                {
+                    break Some((ustruct, unsafe {
+                        &*(ptr::from_ref(field) as *const FProperty)
+                    }));
+                }
+            } else if let Some(ustruct) = self.ustruct {
+                self.ustruct = unsafe { ustruct.super_struct.as_ref() };
+                if let Some(super_struct) = self.ustruct {
+                    self.ffield = unsafe { super_struct.child_properties.as_ref() };
+                }
+            } else {
+                break None;
+            }
+        }
+    }
+}
+
+impl UStruct {
+    pub fn properties(&self) -> PropertiesIter {
+        PropertiesIter {
+            ustruct: Some(self),
+            ffield: unsafe { self.child_properties.as_ref() },
+        }
+    }
+    pub fn child_properties(&self) {
+        let mut next_ustruct = Some(self);
+
+        while let Some(ustruct) = next_ustruct {
+            let name = ustruct
+                .ufield
+                .uobject
+                .uobject_base_utility
+                .uobject_base
+                .name_private;
+            tracing::info!("class={name}");
+
+            let mut next_field = unsafe { (ustruct.child_properties as *const FField).as_ref() };
+            let mut i = 0;
+            while let Some(field) = next_field {
+                if unsafe { &*field.class_private }
+                    .cast_flags
+                    .contains(EClassCastFlags::CASTCLASS_FProperty)
+                {
+                    let prop = unsafe { &*(ptr::from_ref(field) as *const FProperty) };
+                    let offset: i32 = prop.offset_internal;
+                    let size: i32 = prop.element_size;
+
+                    let name = field.name_private;
+                    let string = name.to_string();
+                    tracing::info!("{i}: 0x{offset:02X} 0x{size:02X} {string}");
+                    i += 1;
+                }
+                next_field = unsafe { field.next.as_ref() };
+            }
+            next_ustruct = unsafe { ustruct.super_struct.as_ref() };
+        }
     }
 }

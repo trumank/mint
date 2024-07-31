@@ -22,7 +22,7 @@ use super::ExecFn;
 #[derive(Error, Debug)]
 enum MyAdapterError {
     #[error("Unhandled command")]
-    UnhandledCommandError,
+    UnhandledCommandError(String),
 
     #[error("Missing command")]
     MissingCommandError,
@@ -276,12 +276,30 @@ fn handle(input: Box<dyn std::io::Read>, output: Box<dyn std::io::Write + Send>)
             Command::Scopes(ref cmd) => {
                 // TODO
                 let frame = unsafe { &*(cmd.frame_id as *const FFrame) };
+                let func = unsafe { &*frame.node };
+
+                let id = cmd.frame_id;
+
+                let mut count = 0;
+                for (s, p) in func.ustruct.properties() {
+                    count += 1;
+                    tracing::info!(
+                        "{}: {}.{}",
+                        p.offset_internal,
+                        s.ufield
+                            .uobject
+                            .uobject_base_utility
+                            .uobject_base
+                            .name_private,
+                        p.ffield.name_private
+                    );
+                }
                 server.respond(req.success(ResponseBody::Scopes(responses::ScopesResponse {
                     scopes: vec![types::Scope {
                         name: "Locals".into(),
                         presentation_hint: Some(types::ScopePresentationhint::Locals),
-                        variables_reference: 0,
-                        named_variables: None,
+                        variables_reference: id,
+                        named_variables: Some(count),
                         indexed_variables: None,
                         expensive: false,
                         source: None,
@@ -291,6 +309,39 @@ fn handle(input: Box<dyn std::io::Read>, output: Box<dyn std::io::Write + Send>)
                         end_column: None,
                     }],
                 })))?;
+            }
+            Command::Variables(ref cmd) => {
+                let frame = unsafe { &*(cmd.variables_reference as *const FFrame) };
+                let func = unsafe { &*frame.node };
+
+                let mut variables = vec![];
+                for (s, p) in func.ustruct.properties() {
+                    variables.push(types::Variable {
+                        name: p.ffield.name_private.to_string(),
+                        value: get_prop_as_string(frame.locals, p),
+                        type_field: Some("TODO".into()),
+                        presentation_hint: None,
+                        evaluate_name: None,
+                        variables_reference: 0,
+                        named_variables: None,
+                        indexed_variables: None,
+                        memory_reference: None,
+                    })
+                    //tracing::info!(
+                    //    "{}: {}.{}",
+                    //    p.offset_internal,
+                    //    s.ufield
+                    //        .uobject
+                    //        .uobject_base_utility
+                    //        .uobject_base
+                    //        .name_private,
+                    //    p.ffield.name_private
+                    //);
+                }
+
+                server.respond(req.success(ResponseBody::Variables(
+                    responses::VariablesResponse { variables },
+                )))?;
             }
             Command::Continue(_) => {
                 PAUSE_STATE.lock().unwrap().take();
@@ -328,12 +379,117 @@ fn handle(input: Box<dyn std::io::Read>, output: Box<dyn std::io::Write + Send>)
                 server.respond(req.success(ResponseBody::Disconnect))?;
                 break;
             }
-            _ => {
-                return Err(Box::new(MyAdapterError::UnhandledCommandError));
+            cmd => {
+                return Err(Box::new(MyAdapterError::UnhandledCommandError(format!(
+                    "{cmd:#?}"
+                ))));
             }
         }
     }
     Ok(())
+}
+
+fn get_prop_as_string(obj: *const c_void, prop: &FProperty) -> String {
+    unsafe {
+        let prop_class = &*prop.ffield.class_private;
+
+        let ptr = obj.byte_offset(prop.offset_internal as isize);
+
+        let flags = prop_class.cast_flags;
+
+        //if flags.contains(ue::EClassCastFlags::CASTCLASS_FObjectProperty) {
+        //    if let Some(obj) = NonNull::new(*(ptr as *mut *mut ue::UObject)) {
+        //        ret.set(js_obj(scope, obj).into());
+        //    } else {
+        //        ret.set(v8::null(scope).into());
+        //    }
+        //} else
+        //if flags.contains(ue::EClassCastFlags::CASTCLASS_FBoolProperty) {
+        //    // TODO bitfields
+        //    ret.set(v8::Boolean::new(scope, 0 != *(ptr as *mut u8)).into());
+        //} else
+        if flags.contains(EClassCastFlags::CASTCLASS_FByteProperty) {
+            (*(ptr as *const i8)).to_string()
+        } else if flags.contains(EClassCastFlags::CASTCLASS_FBoolProperty) {
+            // TODO bitfields
+            (*(ptr as *const bool)).to_string()
+        } else if flags.contains(EClassCastFlags::CASTCLASS_FIntProperty) {
+            (*(ptr as *const i32)).to_string()
+        } else if flags.contains(EClassCastFlags::CASTCLASS_FDoubleProperty) {
+            (*(ptr as *const f64)).to_string()
+        } else if flags.contains(EClassCastFlags::CASTCLASS_FFloatProperty) {
+            (*(ptr as *const f32)).to_string()
+        } else if flags.contains(EClassCastFlags::CASTCLASS_FStrProperty) {
+            (*(ptr as *const FString)).to_string()
+        } else if flags.contains(EClassCastFlags::CASTCLASS_FNameProperty) {
+            (*(ptr as *const FName)).to_string()
+        } else if flags.contains(EClassCastFlags::CASTCLASS_FObjectProperty) {
+            (*(ptr as *const *const UObject)).as_ref().map_or_else(
+                || "null".into(),
+                |o| o.uobject_base_utility.uobject_base.get_path_name(None),
+            )
+        } else {
+            //dbg!(prop);
+            //dbg!(prop_class);
+
+            format!("<TODO> {:?}", flags)
+        }
+
+        //if flags.contains(ue::EClassCastFlags::CASTCLASS_FObjectProperty) {
+        //    if let Some(obj) = NonNull::new(*(ptr as *mut *mut ue::UObject)) {
+        //        js_obj(scope, obj).into()
+        //    } else {
+        //        v8::null(scope).into()
+        //    }
+        //} else if flags.contains(ue::EClassCastFlags::CASTCLASS_FBoolProperty) {
+        //    // TODO bitfields
+        //    v8::Boolean::new(scope, 0 != *(ptr as *mut u8)).into()
+        //} else if flags.contains(ue::EClassCastFlags::CASTCLASS_FByteProperty) {
+        //    v8::Number::new(scope, *(ptr as *mut i8) as f64).into()
+        //} else if flags.contains(ue::EClassCastFlags::CASTCLASS_FIntProperty) {
+        //    v8::Number::new(scope, *(ptr as *mut i32) as f64).into()
+        //} else if flags.contains(ue::EClassCastFlags::CASTCLASS_FDoubleProperty) {
+        //    v8::Number::new(scope, *(ptr as *mut f64)).into()
+        //} else if flags.contains(ue::EClassCastFlags::CASTCLASS_FFloatProperty) {
+        //    v8::Number::new(scope, *(ptr as *mut f32) as f64).into()
+        //} else if flags.contains(ue::EClassCastFlags::CASTCLASS_FStrProperty) {
+        //    let s = (ptr as *mut ue::FString).as_ref().unwrap().to_string();
+        //    v8::String::new(scope, &s).unwrap().into()
+        //} else if flags.contains(ue::EClassCastFlags::CASTCLASS_FNameProperty) {
+        //    let s = (ptr as *mut ue::FName).as_ref().unwrap().to_string();
+        //    v8::String::new(scope, &s).unwrap().into()
+        //} else if flags.contains(ue::EClassCastFlags::CASTCLASS_FArrayProperty) {
+        //    let prop: &ue::FArrayProperty = &*(prop as *const _ as *const ue::FArrayProperty);
+        //    let inner = prop.inner.nn().unwrap().as_ref();
+
+        //    #[repr(C)]
+        //    struct ArrayStruct {
+        //        data: *const c_void,
+        //        num: u32,
+        //        max: u32,
+        //    }
+
+        //    let array_data = (ptr as *const ArrayStruct).as_ref().unwrap();
+        //    let array = v8::Array::new(scope, array_data.num as i32);
+
+        //    for i in 0..array_data.num {
+        //        let elm = js_prop(
+        //            scope,
+        //            array_data
+        //                .data
+        //                .byte_add((i * inner.element_size as u32) as usize),
+        //            inner,
+        //        );
+        //        array.set_index(scope, i, elm);
+        //    }
+
+        //    array.into()
+        //} else {
+        //    v8::String::new(scope, &format!("<TODO> {:?}", flags))
+        //        .unwrap()
+        //        .into()
+        //}
+    }
 }
 
 struct NativesArray([Option<ExecFn>; 0x100]);
@@ -493,7 +649,10 @@ fn disassemble(name: &str, bytes: &[u8]) -> Result<Source> {
     let mut reader = std::io::Cursor::new(&bytes);
 
     let mut expr = vec![];
-    let mut builder = SourceBuilder { index: 0 };
+    let mut builder = SourceBuilder {
+        offline: false,
+        index: 0,
+    };
     let mut out = SourceCollector::default();
 
     while (reader.position() as usize) < bytes.len() {
@@ -518,13 +677,26 @@ mod test {
 
     #[test]
     fn test_dis() {
-        let bytes =
-            include_bytes!("../../../bytes/ExecuteUbergraph_Bp_StartMenu_PlayerController.bin");
+        //let bytes =
+        //include_bytes!("../../../bytes/ExecuteUbergraph_Bp_StartMenu_PlayerController.bin");
 
-        let mut reader = std::io::Cursor::new(&bytes);
+        for entry in std::fs::read_dir("../bytes").unwrap() {
+            let entry = entry.unwrap();
+            let path = entry.path();
+            if path.is_file() {
+                test_bytes(&std::fs::read(path).unwrap());
+            }
+        }
+    }
+
+    fn test_bytes(bytes: &[u8]) {
+        let mut reader = std::io::Cursor::new(bytes);
 
         let mut expr = vec![];
-        let mut builder = SourceBuilder { index: 0 };
+        let mut builder = SourceBuilder {
+            offline: true,
+            index: 0,
+        };
         let mut out = SourceCollector::default();
 
         while (reader.position() as usize) < bytes.len() {
@@ -623,11 +795,9 @@ macro_rules! for_each {
                 }
             }
             fn read(r: &mut impl std::io::Read) -> Result<Self> {
-                let token = ExprToken::read(r)?;
-                let expr = match token {
+                Ok(match ExprToken::read(r)? {
                     $( ExprToken::$name => Expr::$name($name::read(r)?), )*
-                };
-                Ok(expr)
+                })
             }
             fn walk<F>(&mut self, mut f: F) where F: FnMut(&mut Expr) {
                 match self {
@@ -636,10 +806,9 @@ macro_rules! for_each {
             }
             fn format(&self, ctx: &mut SourceBuilder) -> SourceLine {
                 ctx.index += 1;
-                let l = match self {
+                match self {
                     $( Expr::$name(ex) => ex.format(ctx), )*
-                };
-                l
+                }
             }
         }
 
@@ -666,7 +835,17 @@ impl ReadExt for KismetPropertyPointer {
     }
     fn format(&self, ctx: &mut SourceBuilder) -> SourceLine {
         ctx.index += self.size();
-        format!("{self:X?}").into()
+        if ctx.offline {
+            format!("FProperty({:X?})", self.0).into()
+        } else {
+            let prop = unsafe { (self.0 as *const FProperty).as_ref() };
+            let name = if let Some(prop) = prop {
+                prop.ffield.name_private.to_string()
+            } else {
+                "Null".to_string()
+            };
+            format!("FProperty({name:?})").into()
+        }
     }
 }
 #[derive(Debug)]
@@ -680,7 +859,13 @@ impl ReadExt for PackageIndex {
     }
     fn format(&self, ctx: &mut SourceBuilder) -> SourceLine {
         ctx.index += self.size();
-        format!("{self:X?}").into()
+        if ctx.offline {
+            format!("UObject({:X?})", self.0).into()
+        } else {
+            let obj = unsafe { &*(self.0 as *const UObject) };
+            let path = obj.uobject_base_utility.uobject_base.get_path_name(None);
+            format!("UObject({path:?})").into()
+        }
     }
 }
 #[derive(Debug)]
@@ -698,7 +883,15 @@ impl ReadExt for KName {
     }
     fn format(&self, ctx: &mut SourceBuilder) -> SourceLine {
         ctx.index += self.size();
-        format!("{self:X?}").into()
+        if ctx.offline {
+            format!("{self:X?}").into()
+        } else {
+            let name = FName {
+                comparison_index: FNameEntryId { value: self.1 },
+                number: self.2,
+            };
+            format!("FName({:?})", name.to_string()).into()
+        }
     }
 }
 
@@ -812,6 +1005,67 @@ impl ReadExt for bool {
         self.to_string().into()
     }
 }
+impl ReadExt for FVector {
+    fn size(&self) -> usize {
+        12
+    }
+    fn read(r: &mut impl std::io::Read) -> Result<Self> {
+        Ok(Self {
+            x: r.read_f32::<LE>()?,
+            y: r.read_f32::<LE>()?,
+            z: r.read_f32::<LE>()?,
+        })
+    }
+    fn format(&self, ctx: &mut SourceBuilder) -> SourceLine {
+        ctx.index += self.size();
+        format!("FVector({},{},{})", self.x, self.y, self.z).into()
+    }
+}
+impl ReadExt for FQuat {
+    fn size(&self) -> usize {
+        16
+    }
+    fn read(r: &mut impl std::io::Read) -> Result<Self> {
+        Ok(Self {
+            x: r.read_f32::<LE>()?,
+            y: r.read_f32::<LE>()?,
+            z: r.read_f32::<LE>()?,
+            w: r.read_f32::<LE>()?,
+        })
+    }
+    fn format(&self, ctx: &mut SourceBuilder) -> SourceLine {
+        ctx.index += self.size();
+        format!("FQuat({},{},{},{})", self.x, self.y, self.z, self.w).into()
+    }
+}
+impl ReadExt for FTransform {
+    fn size(&self) -> usize {
+        self.rotation.size() + self.translation.size() + self.scale.size()
+    }
+    fn read(r: &mut impl std::io::Read) -> Result<Self> {
+        Ok(Self {
+            rotation: ReadExt::read(r)?,
+            translation: ReadExt::read(r)?,
+            scale: ReadExt::read(r)?,
+        })
+    }
+    fn format(&self, ctx: &mut SourceBuilder) -> SourceLine {
+        let mut lines = SourceLine {
+            content: "FTransform".into(),
+            ..Default::default()
+        };
+        lines
+            .children
+            .push(self.rotation.format(ctx).prefix("rotation = "));
+        lines
+            .children
+            .push(self.translation.format(ctx).prefix("translation = "));
+        lines
+            .children
+            .push(self.scale.format(ctx).prefix("scale = "));
+        lines
+    }
+}
 
 impl<I: ReadExt> ReadExt for Box<I> {
     fn size(&self) -> usize {
@@ -868,14 +1122,11 @@ impl<const B: bool, const N: u8> ReadExt for TerminatedExprList<B, N> {
     }
 }
 
-type OrderedFloat<F> = F;
-
 trait ReadExt: std::fmt::Debug {
     fn size(&self) -> usize;
     fn read(r: &mut impl std::io::Read) -> Result<Self>
     where
         Self: Sized;
-    //fn walk(&mut self, f: &dyn Fn(&mut Expr)) {
     fn walk<F>(&mut self, f: F)
     where
         F: FnMut(&mut Expr),
@@ -1040,6 +1291,7 @@ struct SourceLine {
     children: Vec<SourceLine>,
 }
 struct SourceBuilder {
+    offline: bool,
     index: usize,
 }
 #[derive(Default)]
@@ -1064,7 +1316,7 @@ impl SourceLine {
 
         writeln!(
             out.source.content,
-            "{:>10}{}{}{}",
+            "{:>8}{}{}{}",
             self.index.map(|i| format!("{i}: ")).unwrap_or_default(),
             "    ".repeat(indent),
             self.prefix.as_ref().map(|p| p.as_str()).unwrap_or(""),
@@ -1218,12 +1470,12 @@ for_each!(
     0x1B    impl ExVirtualFunction { virtual_function_name: [ KName ] parameters: [ TerminatedExprList<false, {ExprToken::ExEndFunctionParms as u8}> ] }
     0x1C    impl ExFinalFunction { stack_node: [ PackageIndex ] parameters: [ TerminatedExprList<false, {ExprToken::ExEndFunctionParms as u8}> ] }
     0x1D    impl ExIntConst { value: [ i32 ] }
-    0x1E    impl ExFloatConst { value: [ OrderedFloat<f32> ] }
+    0x1E    impl ExFloatConst { value: [ f32 ] }
     0x1F no_impl ExStringConst { value: [ String ] }
     0x20    impl ExObjectConst { value: [ PackageIndex ] }
     0x21    impl ExNameConst { value: [ KName ] }
-  //0x22    impl ExRotationConst { rotator: [ Vector<OrderedFloat<f64>> ] }
-  //0x23    impl ExVectorConst { value: [ Vector<OrderedFloat<f64>> ] }
+    0x22    impl ExRotationConst { rotator: [ FVector ] }
+    0x23    impl ExVectorConst { value: [ FVector ] }
     0x24    impl ExByteConst { value: [ u8 ] }
     0x25    impl ExIntZero {  }
     0x26    impl ExIntOne {  }
@@ -1231,13 +1483,13 @@ for_each!(
     0x28    impl ExFalse {  }
     0x29    impl ExTextConst { value: [ Box<FScriptText> ] }
     0x2A    impl ExNoObject {  }
-  //0x2B    impl ExTransformConst { value: [ Transform<OrderedFloat<f64>> ] }
+    0x2B    impl ExTransformConst { value: [ FTransform ] }
     0x2C    impl ExIntConstByte {  }
     0x2D    impl ExNoInterface {  }
     0x2E    impl ExDynamicCast { class_ptr: [ PackageIndex ] target_expression: [ Box<Expr> ] }
     0x2F    impl ExStructConst { struct_value: [ PackageIndex ] struct_size: [ i32 ] value: [ TerminatedExprList<false, {ExprToken::ExEndStructConst as u8}> ] }
     0x30    impl ExEndStructConst {  }
-  //0x31    impl ExSetArray { assigning_property: [ Option<Box<Expr>> ] array_inner_prop: [ Option<PackageIndex> ] elements: [ TerminatedExprList<false, {ExprToken::ExEndArray as u8}> ] }
+    0x31    impl ExSetArray { assigning_property: [ Box<Expr> ] elements: [ TerminatedExprList<false, {ExprToken::ExEndArray as u8}> ] }
     0x32    impl ExEndArray {  }
     0x33    impl ExPropertyConst { property: [ KismetPropertyPointer ] }
     0x34 no_impl ExUnicodeStringConst { value: [ String ] }

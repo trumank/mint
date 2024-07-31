@@ -40,6 +40,31 @@ pub struct FVector {
 
 #[derive(Debug, Default)]
 #[repr(C)]
+pub struct FRotator {
+    pub yaw: f32,
+    pub pitch: f32,
+    pub roll: f32,
+}
+
+#[derive(Debug, Default)]
+#[repr(C)]
+pub struct FQuat {
+    pub x: f32,
+    pub y: f32,
+    pub z: f32,
+    pub w: f32,
+}
+
+#[derive(Debug, Default)]
+#[repr(C)]
+pub struct FTransform {
+    pub rotation: FQuat,
+    pub translation: FVector,
+    pub scale: FVector,
+}
+
+#[derive(Debug, Default)]
+#[repr(C)]
 pub struct FLinearColor {
     pub r: f32,
     pub g: f32,
