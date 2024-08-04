@@ -5,7 +5,7 @@ use std::sync::{Arc, RwLock};
 
 use fs_err as fs;
 use serde::{Deserialize, Serialize};
-use snafu::prelude::*;
+use thiserror::Error;
 
 use crate::state::config::ConfigWrapper;
 
@@ -96,22 +96,21 @@ impl Default for MaybeVersionedCache {
     }
 }
 
-#[derive(Debug, Snafu)]
+#[derive(Debug, Error)]
 pub enum CacheError {
-    #[snafu(display("failed to read cache.json with provided path {}", search_path.display()))]
+    #[error("failed to read cache.json with provided path {}", search_path.display())]
     CacheJsonReadFailed {
         source: std::io::Error,
         search_path: PathBuf,
     },
-    #[snafu(display("failed to deserialize cache.json into dynamic JSON value: {reason}"))]
+    #[error("failed to deserialize cache.json into dynamic JSON value: {reason}")]
     DeserializeJsonFailed {
-        #[snafu(source(false))]
         source: Option<serde_json::Error>,
         reason: &'static str,
     },
-    #[snafu(display("failed attempt to deserialize as legacy cache format"))]
+    #[error("failed to deserialize as legacy cache format: {source}")]
     DeserializeLegacyCacheFailed { source: serde_json::Error },
-    #[snafu(display("failed to deserialize as cache {version} format"))]
+    #[error("failed to deserialize as cache {version} format: {source}")]
     DeserializeVersionedCacheFailed {
         source: serde_json::Error,
         version: &'static str,
@@ -151,9 +150,12 @@ pub(crate) fn read_cache_metadata_or_default(
                             Ok(c) => {
                                 MaybeVersionedCache::Versioned(VersionAnnotatedCache::V0_0_0(c))
                             }
-                            Err(e) => Err(e).context(DeserializeVersionedCacheFailedSnafu {
-                                version: "v0.0.0",
-                            })?,
+                            Err(e) => {
+                                return Err(CacheError::DeserializeVersionedCacheFailed {
+                                    source: e,
+                                    version: "v0.0.0",
+                                });
+                            }
                         }
                     }
                     _ => unimplemented!(),
@@ -163,14 +165,17 @@ pub(crate) fn read_cache_metadata_or_default(
                 // numeric keys in hashmaps, see <https://github.com/serde-rs/serde/issues/1183>.
                 match serde_json::from_slice::<HashMap<String, Box<dyn ModProviderCache>>>(&buf) {
                     Ok(c) => MaybeVersionedCache::Legacy(Cache_v0_0_0 { cache: c }),
-                    Err(e) => Err(e).context(DeserializeLegacyCacheFailedSnafu)?,
+                    Err(e) => return Err(CacheError::DeserializeLegacyCacheFailed { source: e }),
                 }
             }
         }
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => MaybeVersionedCache::default(),
-        Err(e) => Err(e).context(CacheJsonReadFailedSnafu {
-            search_path: cache_metadata_path.to_owned(),
-        })?,
+        Err(e) => {
+            return Err(CacheError::CacheJsonReadFailed {
+                source: e,
+                search_path: cache_metadata_path.to_owned(),
+            })
+        }
     };
 
     let cache: VersionAnnotatedCache = match cache {
@@ -186,8 +191,8 @@ pub(crate) fn read_cache_metadata_or_default(
 #[derive(Debug, Serialize, Deserialize)]
 pub struct BlobRef(String);
 
-#[derive(Debug, Snafu)]
-#[snafu(display("blob cache {kind} failed"))]
+#[derive(Debug, Error)]
+#[error("blob cache {kind} failed: {source}")]
 pub struct BlobCacheError {
     source: std::io::Error,
     kind: &'static str,
@@ -214,8 +219,14 @@ impl BlobCache {
         let hash = hex::encode(hasher.finalize());
 
         let tmp = self.path.join(format!(".{hash}"));
-        fs::write(&tmp, blob).context(BlobCacheSnafu { kind: "write" })?;
-        fs::rename(tmp, self.path.join(&hash)).context(BlobCacheSnafu { kind: "rename" })?;
+        fs::write(&tmp, blob).map_err(|e| BlobCacheError {
+            source: e,
+            kind: "write",
+        })?;
+        fs::rename(tmp, self.path.join(&hash)).map_err(|e| BlobCacheError {
+            source: e,
+            kind: "rename",
+        })?;
 
         Ok(BlobRef(hash))
     }

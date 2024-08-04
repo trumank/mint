@@ -15,9 +15,10 @@ use std::path::{Path, PathBuf};
 
 use fs_err as fs;
 use indexmap::IndexSet;
-use repak::PakReader;
-use snafu::prelude::*;
+use thiserror::Error;
 use tracing::trace;
+
+use repak::PakReader;
 
 use self::archive_multiple_paks::ArchiveMultiplePaksLint;
 use self::archive_only_non_pak_files::ArchiveOnlyNonPakFilesLint;
@@ -32,21 +33,21 @@ use self::unmodified_game_assets::UnmodifiedGameAssetsLint;
 use crate::mod_lints::conflicting_mods::ConflictingModsLint;
 use crate::providers::{ModSpecification, ReadSeek};
 
-#[derive(Debug, Snafu)]
+#[derive(Debug, Error)]
 pub enum LintError {
-    #[snafu(transparent)]
-    RepakError { source: repak::Error },
-    #[snafu(transparent)]
-    IoError { source: std::io::Error },
-    #[snafu(transparent)]
-    PrefixMismatch { source: std::path::StripPrefixError },
-    #[snafu(display("empty archive"))]
+    #[error("repak error: {0}")]
+    RepakError(#[from] repak::Error),
+    #[error("io error while linting: {0}")]
+    IoError(#[from] std::io::Error),
+    #[error("failed to strip prefix: {0}")]
+    PrefixMismatch(#[from] std::path::StripPrefixError),
+    #[error("encountered empty archive")]
     EmptyArchive,
-    #[snafu(display("zip archive error"))]
+    #[error("failed to process zip archive")]
     ZipArchiveError,
-    #[snafu(display("zip only contains non-pak files"))]
+    #[error("zip only contains non-pak files")]
     OnlyNonPakFiles,
-    #[snafu(display("some lints require specifying a valid game pak path"))]
+    #[error("some lints require specifying a valid game pak path, but no valid game pak path was provided")]
     InvalidGamePath,
 }
 
@@ -78,7 +79,8 @@ impl LintCtxt {
         MultiplePakFilesHandler: FnMut(ModSpecification),
     {
         for (mod_spec, mod_pak_path) in &self.mods {
-            let maybe_archive_reader = Box::new(BufReader::new(fs::File::open(mod_pak_path)?));
+            let file = fs::File::open(mod_pak_path)?;
+            let maybe_archive_reader = Box::new(BufReader::new(file));
             let bufs = match lint_get_all_files_from_data(maybe_archive_reader) {
                 Ok(bufs) => bufs,
                 Err(e) => match e {
@@ -165,7 +167,9 @@ pub(crate) fn lint_get_all_files_from_data(
     mut data: Box<dyn ReadSeek>,
 ) -> Result<Vec<(PathBuf, PakOrNotPak)>, LintError> {
     if let Ok(mut archive) = zip::ZipArchive::new(&mut data) {
-        ensure!(!archive.is_empty(), EmptyArchiveSnafu);
+        if archive.is_empty() {
+            return Err(LintError::EmptyArchive);
+        }
 
         let mut files = Vec::new();
         for i in 0..archive.len() {
@@ -199,7 +203,7 @@ pub(crate) fn lint_get_all_files_from_data(
         {
             Ok(files)
         } else {
-            OnlyNonPakFilesSnafu.fail()?
+            Err(LintError::OnlyNonPakFiles)
         }
     } else {
         data.rewind()?;

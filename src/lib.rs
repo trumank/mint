@@ -17,28 +17,29 @@ use directories::ProjectDirs;
 use fs_err as fs;
 use integrate::IntegrationError;
 use providers::{ModResolution, ModSpecification, ProviderError, ProviderFactory};
-use snafu::prelude::*;
-use state::{State, StateError};
+use thiserror::Error;
 use tracing::*;
 
-#[derive(Debug, Snafu)]
-pub enum MintError {
-    #[snafu(transparent)]
-    IoError { source: std::io::Error },
-    #[snafu(transparent)]
-    RepakError { source: repak::Error },
-    #[snafu(transparent)]
-    ProviderError { source: ProviderError },
-    #[snafu(transparent)]
-    IntegrationError { source: IntegrationError },
-    #[snafu(transparent)]
-    GenericError {
-        source: mint_lib::error::GenericError,
-    },
-    #[snafu(transparent)]
-    StateError { source: StateError },
-    #[snafu(display("invalid DRG pak path: {path}"))]
-    InvalidDrgPak { path: String },
+use state::{State, StateError};
+
+#[derive(Debug, Error)]
+pub enum AppError {
+    #[error(transparent)]
+    IoError(#[from] std::io::Error),
+    #[error(transparent)]
+    RepakError(#[from] repak::Error),
+    #[error(transparent)]
+    ProviderError(#[from] ProviderError),
+    #[error(transparent)]
+    IntegrationError(#[from] IntegrationError),
+    #[error(transparent)]
+    MintError(#[from] mint_lib::MintError),
+    #[error(transparent)]
+    StateError(#[from] StateError),
+    #[error("invalid DRG pak path: {}", path.display())]
+    InvalidDrgPak { path: PathBuf },
+    #[error("{0}")]
+    GenericError(String),
 }
 
 #[derive(Debug)]
@@ -49,7 +50,7 @@ pub struct Dirs {
 }
 
 impl Dirs {
-    pub fn default_xdg() -> Result<Self, MintError> {
+    pub fn default_xdg() -> Result<Self, AppError> {
         let legacy_dirs = ProjectDirs::from("", "", "drg-mod-integration")
             .expect("failed to construct project dirs");
 
@@ -69,7 +70,7 @@ impl Dirs {
         )
     }
 
-    pub fn from_path<P: AsRef<Path>>(path: P) -> Result<Self, MintError> {
+    pub fn from_path<P: AsRef<Path>>(path: P) -> Result<Self, AppError> {
         Self::from_paths(
             path.as_ref().join("config"),
             path.as_ref().join("cache"),
@@ -81,7 +82,7 @@ impl Dirs {
         config_dir: P,
         cache_dir: P,
         data_dir: P,
-    ) -> Result<Self, MintError> {
+    ) -> Result<Self, AppError> {
         fs::create_dir_all(&config_dir)?;
         fs::create_dir_all(&cache_dir)?;
         fs::create_dir_all(&data_dir)?;
@@ -94,7 +95,7 @@ impl Dirs {
     }
 }
 
-pub fn is_drg_pak<P: AsRef<Path>>(path: P) -> Result<(), MintError> {
+pub fn is_drg_pak<P: AsRef<Path>>(path: P) -> Result<(), AppError> {
     let mut reader = std::io::BufReader::new(fs::File::open(path.as_ref())?);
     let pak = repak::PakBuilder::new().reader(&mut reader)?;
     pak.get("FSD/FSD.uproject", &mut reader)?;
@@ -153,7 +154,7 @@ pub async fn resolve_unordered_and_integrate<P: AsRef<Path>>(
 async fn resolve_into_urls<'b>(
     state: &State,
     mod_specs: &[ModSpecification],
-) -> Result<Vec<ModResolution>, MintError> {
+) -> Result<Vec<ModResolution>, AppError> {
     let mods = state.store.resolve_mods(mod_specs, false).await?;
 
     let mods_set = mod_specs
@@ -190,7 +191,7 @@ async fn resolve_into_urls<'b>(
 pub async fn resolve_ordered(
     state: &State,
     mod_specs: &[ModSpecification],
-) -> Result<Vec<PathBuf>, MintError> {
+) -> Result<Vec<PathBuf>, AppError> {
     let urls = resolve_into_urls(state, mod_specs).await?;
     Ok(state
         .store
@@ -204,17 +205,17 @@ pub async fn resolve_unordered_and_integrate_with_provider_init<P, F>(
     mod_specs: &[ModSpecification],
     update: bool,
     init: F,
-) -> Result<(), MintError>
+) -> Result<(), AppError>
 where
     P: AsRef<Path>,
-    F: Fn(&mut State, String, &ProviderFactory) -> Result<(), MintError>,
+    F: Fn(&mut State, String, &ProviderFactory) -> Result<(), AppError>,
 {
     loop {
         match resolve_unordered_and_integrate(&game_path, state, mod_specs, update).await {
             Ok(()) => return Ok(()),
             Err(ref e)
-                if let IntegrationError::ProviderError { ref source } = e
-                    && let ProviderError::NoProvider { ref url, factory } = source =>
+                if let IntegrationError::ProviderError(src) = e
+                    && let ProviderError::NoProvider { ref url, factory } = src =>
             {
                 init(state, url.clone(), factory)?
             }
@@ -228,17 +229,17 @@ pub async fn resolve_ordered_with_provider_init<F>(
     state: &mut State,
     mod_specs: &[ModSpecification],
     init: F,
-) -> Result<Vec<PathBuf>, MintError>
+) -> Result<Vec<PathBuf>, AppError>
 where
-    F: Fn(&mut State, String, &ProviderFactory) -> Result<(), MintError>,
+    F: Fn(&mut State, String, &ProviderFactory) -> Result<(), AppError>,
 {
     loop {
         match resolve_ordered(state, mod_specs).await {
             Ok(mod_paths) => return Ok(mod_paths),
             Err(ref e)
-                if let MintError::IntegrationError { ref source } = e
-                    && let IntegrationError::ProviderError { ref source } = source
-                    && let ProviderError::NoProvider { ref url, factory } = source =>
+                if let AppError::IntegrationError(src) = e
+                    && let IntegrationError::ProviderError(src) = src
+                    && let ProviderError::NoProvider { ref url, factory } = src =>
             {
                 init(state, url.clone(), factory)?
             }

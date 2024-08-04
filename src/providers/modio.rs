@@ -182,45 +182,57 @@ impl Middleware for LoggingMiddleware {
     }
 }
 
-#[derive(Debug, Snafu)]
+#[derive(Debug, Error)]
 pub enum DrgModioError {
-    #[snafu(display("missing OAuth token"))]
+    #[error("missing OAuth token")]
     MissingOauthToken,
-    #[snafu(display("mod.io error: {source}"))]
-    GenericModioError { source: modio::Error },
-    #[snafu(display("failed to perform basic mod.io probe: {source}"))]
-    CheckFailed { source: modio::Error },
-    #[snafu(display("failed to fetch mod files for <{url}> (mod_id = {mod_id}): {source}"))]
+    #[error("mod.io error: {0}")]
+    GenericModioError(modio::Error),
+    #[error("failed to perform basic mod.io probe: {0}")]
+    CheckFailed(modio::Error),
+    #[error("failed to fetch mod files for <{url}> (mod_id = {mod_id}): {source}")]
     FetchModFilesFailed {
         source: modio::Error,
         url: String,
         mod_id: u32,
     },
-    #[snafu(display(
-        "failed to fetch mod file {modfile_id} for <{url}> (mod_id = {mod_id}): {source}"
-    ))]
+    #[error("failed to fetch mod file {modfile_id} for <{url}> (mod_id = {mod_id}): {source}")]
     FetchModFileFailed {
         source: modio::Error,
         url: String,
         mod_id: u32,
         modfile_id: u32,
     },
-    #[snafu(display("failed to fetch mod <{url}> (mod_id = {mod_id}): {source}"))]
+    #[error("failed to fetch mod <{url}> (mod_id = {mod_id}): {source}")]
     FetchModFailed {
         source: modio::Error,
         url: String,
         mod_id: u32,
     },
-    #[snafu(display(
-        "failed to fetch dependencies for mod <{url}> (mod_id = {mod_id}): {source}"
-    ))]
+    #[error("failed to fetch dependencies for mod <{url}> (mod_id = {mod_id}): {source}")]
     FetchDependenciesFailed {
         source: modio::Error,
         url: String,
         mod_id: u32,
     },
-    #[snafu(display("encountered mod.io-related error: {msg}"))]
-    GenericError { msg: &'static str },
+    #[error("failed to fetch mod by name with filter `{filter}`: {source}")]
+    NoByNameMatch {
+        source: modio::Error,
+        filter: String,
+    },
+    #[error("failed to fetch mods with ids `{mod_ids:?}`: {source}")]
+    FetchModsByIdsFailed {
+        source: modio::Error,
+        mod_ids: Vec<u32>,
+    },
+    #[error("failed to fetch mod updates for `{mod_ids:?}` since {last_update}: {source}")]
+    FetchModUpdatesFailed {
+        source: modio::Error,
+        mod_ids: Vec<u32>,
+        last_update: u64,
+    },
+    #[error("encountered mod.io-related error: {0}")]
+    GenericError(&'static str),
 }
 
 impl DrgModioError {
@@ -279,11 +291,13 @@ impl DrgModio for modio::Modio {
         let modio = modio::Modio::new(
             modio::Credentials::with_token(
                 "".to_owned(), // TODO patch modio to not use API key at all
-                parameters.get("oauth").context(MissingOauthTokenSnafu)?,
+                parameters
+                    .get("oauth")
+                    .ok_or_else(|| DrgModioError::MissingOauthToken)?,
             ),
             client,
         )
-        .context(GenericModioSnafu)?;
+        .map_err(DrgModioError::GenericModioError)?;
 
         Ok(modio)
     }
@@ -297,7 +311,7 @@ impl DrgModio for modio::Modio {
             .search(Id::eq(0))
             .collect()
             .await
-            .context(CheckFailedSnafu)?;
+            .map_err(DrgModioError::CheckFailed)?;
         Ok(())
     }
 
@@ -312,16 +326,18 @@ impl DrgModio for modio::Modio {
             .search(Id::ne(0))
             .collect()
             .await
-            .with_context(|_| FetchModFilesFailedSnafu {
+            .map_err(|e| DrgModioError::FetchModFilesFailed {
                 mod_id: id,
                 url: url.clone(),
+                source: e,
             })?;
-        let r#mod = self
-            .game(MODIO_DRG_ID)
-            .mod_(id)
-            .get()
-            .await
-            .context(FetchModFailedSnafu { mod_id: id, url })?;
+        let r#mod = self.game(MODIO_DRG_ID).mod_(id).get().await.map_err(|e| {
+            DrgModioError::FetchModFailed {
+                mod_id: id,
+                url,
+                source: e,
+            }
+        })?;
 
         Ok(ModioMod::new(r#mod, files))
     }
@@ -337,16 +353,21 @@ impl DrgModio for modio::Modio {
             .search(Id::ne(0))
             .collect()
             .await
-            .with_context(|_| FetchModFilesFailedSnafu {
+            .map_err(|e| DrgModioError::FetchModFilesFailed {
                 mod_id,
                 url: url.clone(),
+                source: e,
             })?;
         let r#mod = self
             .game(MODIO_DRG_ID)
             .mod_(mod_id)
             .get()
             .await
-            .context(FetchModFailedSnafu { mod_id, url })?;
+            .map_err(|e| DrgModioError::FetchModFailed {
+                mod_id,
+                url,
+                source: e,
+            })?;
 
         Ok(ModioMod::new(r#mod, files))
     }
@@ -363,10 +384,11 @@ impl DrgModio for modio::Modio {
             .file(modfile_id)
             .get()
             .await
-            .with_context(|_| FetchModFileFailedSnafu {
-                url,
+            .map_err(|e| DrgModioError::FetchModFileFailed {
                 mod_id,
                 modfile_id,
+                url,
+                source: e,
             })?;
         Ok(file)
     }
@@ -382,7 +404,11 @@ impl DrgModio for modio::Modio {
             .dependencies()
             .list()
             .await
-            .with_context(|_| FetchDependenciesFailedSnafu { url, mod_id })?
+            .map_err(|e| DrgModioError::FetchDependenciesFailed {
+                source: e,
+                url,
+                mod_id,
+            })?
             .into_iter()
             .map(|d| d.mod_id)
             .collect::<Vec<_>>())
@@ -402,7 +428,10 @@ impl DrgModio for modio::Modio {
             .search(filter)
             .collect()
             .await
-            .context(GenericModioSnafu)?
+            .map_err(|e| DrgModioError::NoByNameMatch {
+                source: e,
+                filter: name_id.to_string(),
+            })?
             .into_iter()
             .map(|m| m.into())
             .collect())
@@ -415,7 +444,7 @@ impl DrgModio for modio::Modio {
         use modio::filter::In;
         use modio::mods::filters::Id;
 
-        let filter = Id::_in(filter_ids);
+        let filter = Id::_in(filter_ids.clone());
 
         Ok(self
             .game(MODIO_DRG_ID)
@@ -423,7 +452,10 @@ impl DrgModio for modio::Modio {
             .search(filter)
             .collect()
             .await
-            .context(GenericModioSnafu)?)
+            .map_err(|e| DrgModioError::FetchModsByIdsFailed {
+                source: e,
+                mod_ids: filter_ids,
+            })?)
     }
 
     async fn fetch_mod_updates_since(
@@ -448,12 +480,16 @@ impl DrgModio for modio::Modio {
                     EventTypes::ModCommentAdded,
                     EventTypes::ModCommentDeleted,
                 ])
-                .and(ModId::_in(mod_ids))
+                .and(ModId::_in(mod_ids.clone()))
                 .and(DateAdded::gt(last_update)),
             )
             .collect()
             .await
-            .context(GenericModioSnafu)?;
+            .map_err(|e| DrgModioError::FetchModUpdatesFailed {
+                source: e,
+                mod_ids,
+                last_update,
+            })?;
         Ok(events.iter().map(|e| e.mod_id).collect::<HashSet<_>>())
     }
 
@@ -473,12 +509,11 @@ impl<M: DrgModio + Send + Sync> ModProvider for ModioProvider<M> {
         update: bool,
         cache: ProviderCache,
     ) -> Result<ModResponse, ProviderError> {
-        ensure!(
-            !spec.url.contains("?preview="),
-            PreviewLinkSnafu {
-                url: spec.url.to_string()
-            }
-        );
+        if spec.url.contains("?preview=") {
+            return Err(ProviderError::PreviewLink {
+                url: spec.url.to_string(),
+            });
+        }
 
         fn read_cache<F, R>(cache: &ProviderCache, update: bool, f: F) -> Option<R>
         where
@@ -506,9 +541,11 @@ impl<M: DrgModio + Send + Sync> ModProvider for ModioProvider<M> {
         }
 
         let url = &spec.url;
-        let captures = re_mod().captures(url).context(InvalidUrlSnafu {
-            url: url.to_string(),
-        })?;
+        let captures = re_mod()
+            .captures(url)
+            .ok_or_else(|| ProviderError::InvalidUrl {
+                url: url.to_string(),
+            })?;
 
         if let (Some(mod_id), Some(_modfile_id)) =
             (captures.name("mod_id"), captures.name("modfile_id"))
@@ -630,7 +667,7 @@ impl<M: DrgModio + Send + Sync> ModProvider for ModioProvider<M> {
                 mod_id,
                 Some(
                     mod_.latest_modfile
-                        .with_context(|| NoAssociatedModfileSnafu {
+                        .ok_or_else(|| ProviderError::NoAssociatedModfile {
                             url: url.to_string(),
                         })?,
                 ),
@@ -654,7 +691,7 @@ impl<M: DrgModio + Send + Sync> ModProvider for ModioProvider<M> {
                             c.mods.insert(id, mod_.clone());
                             c.mod_id_map.insert(mod_.name_id, id);
                         });
-                        modfile_id.with_context(|| NoAssociatedModfileSnafu {
+                        modfile_id.ok_or_else(|| ProviderError::NoAssociatedModfile {
                             url: url.to_string(),
                         })?
                     }
@@ -668,10 +705,9 @@ impl<M: DrgModio + Send + Sync> ModProvider for ModioProvider<M> {
             } else {
                 let mut mods = self.modio.fetch_mods_by_name(name_id).await?;
                 if mods.len() > 1 {
-                    AmbiguousModNameIdSnafu {
+                    return Err(ProviderError::AmbiguousModNameId {
                         name_id: name_id.to_string(),
-                    }
-                    .fail()?
+                    });
                 } else if let Some(mod_) = mods.pop() {
                     let mod_id = mod_.id;
                     let mod_ = self.modio.fetch_mod(spec.url.clone(), mod_id).await?;
@@ -680,7 +716,7 @@ impl<M: DrgModio + Send + Sync> ModProvider for ModioProvider<M> {
                         c.mods.insert(mod_id, mod_.clone());
                         c.mod_id_map.insert(mod_.name_id, mod_id);
                     });
-                    let file = modfile_id.with_context(|| NoAssociatedModfileSnafu {
+                    let file = modfile_id.ok_or_else(|| ProviderError::NoAssociatedModfile {
                         url: url.to_string(),
                     })?;
 
@@ -690,10 +726,9 @@ impl<M: DrgModio + Send + Sync> ModProvider for ModioProvider<M> {
                         Some(file),
                     )))
                 } else {
-                    NoModsForNameIdSnafu {
+                    Err(ProviderError::NoModsForNameId {
                         name_id: name_id.to_string(),
-                    }
-                    .fail()?
+                    })
                 }
             }
         }
@@ -710,7 +745,7 @@ impl<M: DrgModio + Send + Sync> ModProvider for ModioProvider<M> {
         let url = &res.url;
         let captures = re_mod()
             .captures(&res.url.0)
-            .with_context(|| InvalidUrlSnafu {
+            .ok_or_else(|| ProviderError::InvalidUrl {
                 url: url.0.to_string(),
             })?;
 
@@ -759,12 +794,12 @@ impl<M: DrgModio + Send + Sync> ModProvider for ModioProvider<M> {
                     while let Some(bytes) = stream
                         .try_next()
                         .await
-                        .with_context(|_| ModCtxtModioSnafu { mod_id })?
+                        .map_err(|e| ProviderError::ModioErrorWithModCtxt { source: e, mod_id })?
                     {
                         cursor
                             .write_all(&bytes)
                             .await
-                            .with_context(|_| ModCtxtIoSnafu { mod_id })?;
+                            .map_err(|e| ProviderError::IoErrorWithModCtxt { source: e, mod_id })?;
                         if let Some(tx) = &tx {
                             tx.send(FetchProgress::Progress {
                                 resolution: res.clone(),
@@ -798,10 +833,9 @@ impl<M: DrgModio + Send + Sync> ModProvider for ModioProvider<M> {
                 },
             )
         } else {
-            InvalidUrlSnafu {
+            Err(ProviderError::InvalidUrl {
                 url: url.0.to_string(),
-            }
-            .fail()?
+            })
         }
     }
 
@@ -1107,19 +1141,19 @@ mod test {
                 mod_names
                     .get(name)
                     .map(|id| vec![ModioModResponse { id: **id }])
-                    .ok_or(DrgModioError::GenericError { msg: "not found" })
+                    .ok_or(DrgModioError::GenericError("not found"))
             });
         mock.expect_fetch_mod().times(1).returning(move |_, id| {
             mods.get(&id)
                 .map(|m| m.mod_.clone())
-                .ok_or(DrgModioError::GenericError { msg: "not found" })
+                .ok_or(DrgModioError::GenericError("not found"))
         });
         mock.expect_fetch_dependencies()
             .times(1)
             .returning(move |_, id| {
                 mods.get(&id)
                     .map(|m| m.dependencies.clone())
-                    .ok_or(DrgModioError::GenericError { msg: "not found" })
+                    .ok_or(DrgModioError::GenericError("not found"))
             });
 
         let cache = Arc::new(RwLock::new(ConfigWrapper::<VersionAnnotatedCache>::memory(

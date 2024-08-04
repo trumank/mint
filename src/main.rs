@@ -9,8 +9,8 @@ use mint::mod_lints::{run_lints, LintId};
 use mint::providers::ProviderFactory;
 use mint::{gui::gui, providers::ModSpecification, state::State};
 use mint::{
-    resolve_ordered_with_provider_init, resolve_unordered_and_integrate_with_provider_init, Dirs,
-    MintError,
+    resolve_ordered_with_provider_init, resolve_unordered_and_integrate_with_provider_init,
+    AppError, Dirs,
 };
 
 /// Command line integration tool.
@@ -160,7 +160,7 @@ fn init_provider(
     state: &mut State,
     url: String,
     factory: &ProviderFactory,
-) -> Result<(), MintError> {
+) -> Result<(), AppError> {
     info!("initializing provider for {:?}", url);
 
     let params = state

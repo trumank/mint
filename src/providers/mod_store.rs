@@ -1,7 +1,6 @@
 use std::collections::HashSet;
 use std::path::Path;
 
-use snafu::prelude::*;
 use tracing::*;
 
 use crate::providers::*;
@@ -79,18 +78,17 @@ impl ModStore {
     pub fn get_provider(&self, url: &str) -> Result<Arc<dyn ModProvider>, ProviderError> {
         let factory = Self::get_provider_factories()
             .find(|f| (f.can_provide)(url))
-            .context(ProviderNotFoundSnafu {
+            .ok_or_else(|| ProviderError::ProviderNotFound {
                 url: url.to_string(),
             })?;
         let lock = self.providers.read().unwrap();
-        Ok(match lock.get(factory.id) {
-            Some(e) => e.clone(),
-            None => NoProviderSnafu {
+        match lock.get(factory.id) {
+            Some(e) => Ok(e.clone()),
+            None => Err(ProviderError::NoProvider {
                 url: url.to_string(),
                 factory,
-            }
-            .fail()?,
-        })
+            }),
+        }
     }
 
     pub async fn resolve_mods(

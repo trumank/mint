@@ -11,7 +11,7 @@ use tracing::trace;
 
 use crate::providers::ModSpecification;
 
-use super::{InvalidGamePathSnafu, Lint, LintCtxt, LintError};
+use super::{Lint, LintCtxt, LintError};
 
 #[derive(Default)]
 pub struct UnmodifiedGameAssetsLint;
@@ -21,7 +21,7 @@ impl Lint for UnmodifiedGameAssetsLint {
 
     fn check_mods(&mut self, lcx: &LintCtxt) -> Result<Self::Output, LintError> {
         let Some(game_pak_path) = &lcx.fsd_pak_path else {
-            InvalidGamePathSnafu.fail()?
+            return Err(LintError::InvalidGamePath);
         };
 
         // Adapted from

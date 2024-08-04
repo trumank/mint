@@ -9,7 +9,7 @@ use std::{
 
 use fs_err as fs;
 use serde::{Deserialize, Serialize};
-use snafu::prelude::*;
+use thiserror::Error;
 
 use self::config::ConfigWrapper;
 use crate::{
@@ -432,28 +432,28 @@ impl From<&VersionAnnotatedConfig> for MetaConfig {
     }
 }
 
-#[derive(Debug, Snafu)]
+#[derive(Debug, Error)]
 pub enum StateError {
-    #[snafu(display("failed to deserialize user config"))]
-    CfgDeserializationFailed { source: serde_json::Error },
-    #[snafu(display("unsupported config version"))]
+    #[error("failed to deserialize user config: {0}")]
+    CfgDeserializationFailed(serde_json::Error),
+    #[error("unsupported config version")]
     UnsupportedCfgVersion,
-    #[snafu(display("failed to read config.json"))]
-    CfgReadFailed { source: std::io::Error },
-    #[snafu(display("failed to save config"))]
-    CfgSaveFailed { source: std::io::Error },
-    #[snafu(display("failed to serialize user config"))]
-    CfgSerializationFailed { source: serde_json::Error },
-    #[snafu(transparent)]
-    IoError { source: std::io::Error },
-    #[snafu(transparent)]
-    PersistError { source: tempfile::PersistError },
-    #[snafu(transparent)]
-    ProviderError { source: ProviderError },
-    #[snafu(display("failed to deserialize mod data"))]
-    ModDataDeserializationFailed { source: serde_json::Error },
-    #[snafu(display("failed to deserialize legacy profiles"))]
-    LegacyProfilesDeserializationFailed { source: serde_json::Error },
+    #[error("failed to read config.json: {0}")]
+    CfgReadFailed(std::io::Error),
+    #[error("failed to save config: {0}")]
+    CfgSaveFailed(std::io::Error),
+    #[error("failed to serialize user config: {0}")]
+    CfgSerializationFailed(serde_json::Error),
+    #[error(transparent)]
+    IoError(#[from] std::io::Error),
+    #[error(transparent)]
+    PersistError(#[from] tempfile::PersistError),
+    #[error(transparent)]
+    ProviderError(#[from] ProviderError),
+    #[error("failed to deserialize mod data: {0}")]
+    ModDataDeserializationFailed(serde_json::Error),
+    #[error("failed to deserialize legacy profiles: {0}")]
+    LegacyProfilesDeserializationFailed(serde_json::Error),
 }
 
 pub struct State {
@@ -492,11 +492,13 @@ fn read_config_or_default(config_path: &PathBuf) -> Result<VersionAnnotatedConfi
     Ok(match fs::read(config_path) {
         Ok(buf) => {
             let config = serde_json::from_slice::<MaybeVersionedConfig>(&buf)
-                .context(CfgDeserializationFailedSnafu)?;
+                .map_err(StateError::CfgDeserializationFailed)?;
             match config {
                 MaybeVersionedConfig::Versioned(v) => match v {
                     VersionAnnotatedConfig::V0_0_0(v) => VersionAnnotatedConfig::V0_0_0(v),
-                    VersionAnnotatedConfig::Unsupported => UnsupportedCfgVersionSnafu.fail()?,
+                    VersionAnnotatedConfig::Unsupported => {
+                        return Err(StateError::UnsupportedCfgVersion)
+                    }
                 },
                 MaybeVersionedConfig::Legacy(legacy) => {
                     VersionAnnotatedConfig::V0_0_0(Config_v0_0_0 {
@@ -518,12 +520,12 @@ fn read_mod_data_or_default(
 ) -> Result<VersionAnnotatedModData, StateError> {
     let mod_data = match fs::read(mod_data_path) {
         Ok(buf) => serde_json::from_slice::<MaybeVersionedModData>(&buf)
-            .context(ModDataDeserializationFailedSnafu)?,
+            .map_err(StateError::ModDataDeserializationFailed)?,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
             match fs::read(&legacy_mod_profiles_path) {
                 Ok(buf) => {
                     let mod_data = serde_json::from_slice::<MaybeVersionedModData>(&buf)
-                        .context(LegacyProfilesDeserializationFailedSnafu)?;
+                        .map_err(StateError::LegacyProfilesDeserializationFailed)?;
                     fs::remove_file(&legacy_mod_profiles_path)?;
                     mod_data
                 }

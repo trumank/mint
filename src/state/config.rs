@@ -42,9 +42,9 @@ impl<C: ConfigTrait> ConfigWrapper<C> {
             temp_file
                 .write_all(
                     &serde_json::to_vec_pretty(&self.config)
-                        .context(CfgSerializationFailedSnafu)?,
+                        .map_err(StateError::CfgSerializationFailed)?,
                 )
-                .context(CfgSaveFailedSnafu)?;
+                .map_err(StateError::CfgSaveFailed)?;
             temp_file.persist(final_path)?;
         }
         Ok(())

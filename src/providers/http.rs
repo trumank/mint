@@ -135,11 +135,13 @@ impl ModProvider for HttpProvider {
                     .get(&url.0)
                     .send()
                     .await
-                    .context(RequestFailedSnafu {
+                    .map_err(|e| ProviderError::RequestFailed {
+                        source: e,
                         url: url.0.to_string(),
                     })?
                     .error_for_status()
-                    .context(ResponseSnafu {
+                    .map_err(|e| ProviderError::ResponseError {
+                        source: e,
                         url: url.0.to_string(),
                     })?;
                 let size = response.content_length(); // TODO will be incorrect if compressed
@@ -147,16 +149,16 @@ impl ModProvider for HttpProvider {
                     .headers()
                     .get(reqwest::header::HeaderName::from_static("content-type"))
                 {
-                    let content_type = mime.to_str().context(InvalidMimeSnafu {
+                    let content_type = mime.to_str().map_err(|e| ProviderError::InvalidMime {
+                        source: e,
                         url: url.0.to_string(),
                     })?;
-                    ensure!(
-                        ["application/zip", "application/octet-stream"].contains(&content_type),
-                        UnexpectedContentTypeSnafu {
+                    if !["application/zip", "application/octet-stream"].contains(&content_type) {
+                        return Err(ProviderError::UnexpectedContentType {
                             found_content_type: content_type.to_string(),
                             url: url.0.to_string(),
-                        }
-                    );
+                        });
+                    }
                 }
 
                 use futures::stream::TryStreamExt;
@@ -164,13 +166,20 @@ impl ModProvider for HttpProvider {
 
                 let mut cursor = std::io::Cursor::new(vec![]);
                 let mut stream = response.bytes_stream();
-                while let Some(bytes) = stream.try_next().await.with_context(|_| FetchSnafu {
-                    url: url.0.to_string(),
-                })? {
+                while let Some(bytes) =
+                    stream
+                        .try_next()
+                        .await
+                        .map_err(|e| ProviderError::FetchError {
+                            source: e,
+                            url: url.0.to_string(),
+                        })?
+                {
                     cursor
                         .write_all(&bytes)
                         .await
-                        .with_context(|_| BufferIoSnafu {
+                        .map_err(|e| ProviderError::BufferIoError {
+                            source: e,
                             url: url.0.to_string(),
                         })?;
                     if let Some(size) = size {
