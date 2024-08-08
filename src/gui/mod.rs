@@ -25,7 +25,6 @@ use eframe::{
 };
 use egui_commonmark::{CommonMarkCache, CommonMarkViewer};
 use itertools::Itertools as _;
-use mint_lib::error::ResultExt as _;
 use mint_lib::mod_info::{ModioTags, RequiredStatus};
 use mint_lib::update::GitHubRelease;
 use strum::{EnumIter, IntoEnumIterator};
@@ -47,14 +46,14 @@ use crate::{
         ApprovalStatus, FetchProgress, ModInfo, ModSpecification, ModStore, ProviderFactory,
     },
     state::{ModConfig, ModData_v0_1_0 as ModData, ModOrGroup, ModProfile, State},
-    MintError,
+    AppError,
 };
 use message::MessageHandle;
 use request_counter::{RequestCounter, RequestID};
 
 use self::toggle_switch::toggle_switch;
 
-pub fn gui(dirs: Dirs, args: Option<Vec<String>>) -> Result<(), MintError> {
+pub fn gui(dirs: Dirs, args: Option<Vec<String>>) -> Result<(), AppError> {
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_inner_size([900.0, 500.0])
@@ -66,7 +65,7 @@ pub fn gui(dirs: Dirs, args: Option<Vec<String>>) -> Result<(), MintError> {
         options,
         Box::new(|cc| Box::new(App::new(cc, dirs, args).unwrap())),
     )
-    .with_generic(|e| format!("{e}"))?;
+    .map_err(|e| AppError::GenericError(format!("{e}")))?;
     Ok(())
 }
 
@@ -209,7 +208,7 @@ impl App {
         cc: &eframe::CreationContext,
         dirs: Dirs,
         args: Option<Vec<String>>,
-    ) -> Result<Self, MintError> {
+    ) -> Result<Self, AppError> {
         let (tx, rx) = mpsc::channel(10);
         let state = State::init(dirs)?;
 
@@ -1762,7 +1761,9 @@ impl eframe::App for App {
                         }
 
                         ui.add_enabled_ui(self.state.config.drg_pak_path.is_some(), |ui| {
-                            let mut button = ui.button("Install mods");
+                            let mut button = ui.button("Apply changes").on_hover_text(
+                                "Install the hook dll to game folder and regenerate mod bundle",
+                            );
                             if self.state.config.drg_pak_path.is_none() {
                                 button = button.on_disabled_hover_text(
                                     "DRG install not found. Configure it in the settings menu.",
@@ -1800,7 +1801,9 @@ impl eframe::App for App {
                         });
 
                         ui.add_enabled_ui(self.state.config.drg_pak_path.is_some(), |ui| {
-                            let mut button = ui.button("Uninstall mods");
+                            let mut button = ui.button("Uninstall hook and mods").on_hover_text(
+                                "Remove the hook dll and mod bundle from game folder",
+                            );
                             if self.state.config.drg_pak_path.is_none() {
                                 button = button.on_disabled_hover_text(
                                     "DRG install not found. Configure it in the settings menu.",

@@ -3,7 +3,6 @@ use std::ops::DerefMut;
 use std::time::SystemTime;
 use std::{collections::HashMap, sync::Arc};
 
-use snafu::prelude::*;
 use tokio::{
     sync::mpsc::{self, Sender},
     task::JoinHandle,
@@ -24,9 +23,9 @@ use crate::{
     providers::{FetchProgress, ModInfo, ModStore},
     state::ModConfig,
 };
-use mint_lib::error::GenericError;
 use mint_lib::mod_info::MetaConfig;
 use mint_lib::update::GitHubRelease;
+use mint_lib::MintError;
 
 #[derive(Debug)]
 pub struct MessageHandle<S> {
@@ -215,8 +214,8 @@ impl Integrate {
                     app.last_action = Some(LastAction::success("integration complete".to_string()));
                 }
                 Err(ref e)
-                    if let IntegrationError::ProviderError { ref source } = e
-                        && let ProviderError::NoProvider { url: _, factory } = source =>
+                    if let IntegrationError::ProviderError(src) = e
+                        && let ProviderError::NoProvider { url: _, factory } = src =>
                 {
                     app.window_provider_parameters =
                         Some(WindowProviderParameters::new(factory, &app.state));
@@ -303,7 +302,7 @@ impl UpdateCache {
 #[derive(Debug)]
 pub struct CheckUpdates {
     rid: RequestID,
-    result: Result<GitHubRelease, GenericError>,
+    result: Result<GitHubRelease, MintError>,
 }
 
 impl CheckUpdates {
@@ -405,7 +404,8 @@ async fn integrate_async(
             to_integrate.into_iter().zip(paths).collect(),
         )
     })
-    .await??;
+    .await
+    .unwrap()?;
 
     Ok(())
 }
@@ -474,8 +474,8 @@ impl LintMods {
                         Some(LastAction::success("lint mod report complete".to_string()));
                 }
                 Err(ref e)
-                    if let IntegrationError::ProviderError { ref source } = e
-                        && let ProviderError::NoProvider { url: _, factory } = source =>
+                    if let IntegrationError::ProviderError(src) = e
+                        && let ProviderError::NoProvider { factory, .. } = src =>
                 {
                     app.window_provider_parameters =
                         Some(WindowProviderParameters::new(factory, &app.state));
@@ -640,33 +640,40 @@ async fn self_update_async(
         ))
         .send()
         .await
-        .map_err(Into::into)
-        .with_context(|_| SelfUpdateFailedSnafu)?
+        .map_err(IntegrationError::SelfUpdateFailed)?
         .error_for_status()
-        .map_err(Into::into)
-        .with_context(|_| SelfUpdateFailedSnafu)?;
+        .map_err(IntegrationError::SelfUpdateFailed)?;
     let size = response.content_length();
     debug!(?response);
     debug!(?size);
 
     let tmp_dir = tempfile::Builder::new()
         .prefix("self_update")
-        .tempdir_in(std::env::current_dir()?)?;
+        .tempdir_in(std::env::current_dir().unwrap())
+        .expect("failed to create tempdir");
     let tmp_archive_path = tmp_dir.path().join(asset_name);
     let mut tmp_archive = tokio::fs::File::create(&tmp_archive_path)
         .await
-        .map_err(Into::into)
-        .with_context(|_| SelfUpdateFailedSnafu)?;
+        .map_err(|e| IntegrationError::IoError {
+            summary: "self update failed".to_string(),
+            details: format!("{e}"),
+        })?;
     let mut stream = response.bytes_stream();
 
     let mut total_bytes_written = 0;
     while let Some(bytes) = stream
         .try_next()
         .await
-        .map_err(Into::into)
-        .with_context(|_| SelfUpdateFailedSnafu)?
+        .map_err(IntegrationError::SelfUpdateFailed)?
     {
-        let bytes_written = tmp_archive.write(&bytes).await?;
+        let bytes_written =
+            tmp_archive
+                .write(&bytes)
+                .await
+                .map_err(|e| IntegrationError::IoError {
+                    summary: "self update failed".to_string(),
+                    details: format!("{e}"),
+                })?;
         total_bytes_written += bytes_written;
         if let Some(size) = size {
             tx.send(SelfUpdateProgress::Progress {
@@ -696,20 +703,24 @@ async fn self_update_async(
             self_update::Extract::from_source(&tmp_archive_path)
                 .archive(self_update::ArchiveKind::Zip)
                 .extract_file(tmp_dir.path(), bin_name)
-                .map_err(Into::into)
-                .with_context(|_| SelfUpdateFailedSnafu)?;
+                .map_err(|e| IntegrationError::IoError {
+                    summary: "self update failed".to_string(),
+                    details: format!("{e}"),
+                })?;
 
             info!("replacing old executable with new executable");
             let tmp_file = tmp_dir.path().join("replacement_tmp");
             let bin_path = tmp_dir.path().join(bin_name);
 
-            let original_exe_path = std::env::current_exe()?;
+            let original_exe_path = std::env::current_exe().unwrap();
 
             self_update::Move::from_source(&bin_path)
                 .replace_using_temp(&tmp_file)
                 .to_dest(&original_exe_path)
-                .map_err(Into::into)
-                .with_context(|_| SelfUpdateFailedSnafu)?;
+                .map_err(|e| IntegrationError::IoError {
+                    summary: "self update failed".to_string(),
+                    details: format!("{e}"),
+                })?;
 
             #[cfg(target_os = "linux")]
             {
@@ -721,11 +732,12 @@ async fn self_update_async(
 
             Ok(original_exe_path)
         })
-        .await??;
+        .await
+        .unwrap()?;
 
     tx.send(SelfUpdateProgress::Complete).await.unwrap();
 
-    info!("update successful");
+    info!("self-update successful");
 
     Ok(original_exe_path)
 }

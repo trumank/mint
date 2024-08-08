@@ -17,4 +17,4 @@ tracing.workspace = true
 tracing-appender.workspace = true
 tracing-subscriber.workspace = true
 reqwest.workspace = true
-snafu.workspace = true
+thiserror.workspace = true

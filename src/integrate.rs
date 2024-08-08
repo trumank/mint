@@ -3,11 +3,13 @@ use std::io::{BufReader, BufWriter, Cursor, ErrorKind, Read, Seek, Write};
 use std::path::{Path, PathBuf};
 
 use fs_err as fs;
-
-use repak::PakWriter;
 use serde::Deserialize;
-use snafu::{prelude::*, Whatever};
+use thiserror::Error;
 use tracing::info;
+
+use mint_lib::mod_info::{ApprovalStatus, Meta, MetaConfig, MetaMod, SemverVersion};
+use mint_lib::{DRGInstallation, MintError};
+use repak::PakWriter;
 use uasset_utils::asset_registry::{AssetRegistry, Readable as _, Writable as _};
 use uasset_utils::paths::{PakPath, PakPathBuf, PakPathComponentTrait};
 use uasset_utils::splice::{
@@ -15,12 +17,6 @@ use uasset_utils::splice::{
 };
 use unreal_asset::engine_version::EngineVersion;
 use unreal_asset::AssetBuilder;
-
-use crate::mod_lints::LintError;
-use crate::providers::{ModInfo, ProviderError, ReadSeek};
-use mint_lib::mod_info::{ApprovalStatus, Meta, MetaConfig, MetaMod, SemverVersion};
-use mint_lib::DRGInstallation;
-
 use unreal_asset::{
     exports::ExportBaseTrait,
     flags::EObjectFlags,
@@ -34,67 +30,174 @@ use unreal_asset::{
     Asset,
 };
 
-/// Why does the uninstall function require a list of Modio mod IDs?
-/// Glad you ask. The official integration enables *every mod the user has installed* once it gets
-/// re-enabled. We do the user a favor and collect all the installed mods and explicitly add them
-/// back to the config so they will be disabled when the game is launched again. Since we have
-/// Modio IDs anyway, with just a little more effort we can make the 'uninstall' button work as an
-/// 'install' button for the official integration. Best anti-feature ever.
-#[tracing::instrument(level = "debug", skip(path_pak))]
-pub fn uninstall<P: AsRef<Path>>(path_pak: P, modio_mods: HashSet<u32>) -> Result<(), Whatever> {
-    let installation = DRGInstallation::from_pak_path(path_pak)
-        .whatever_context("failed to get DRG installation")?;
-    let path_mods_pak = installation.paks_path().join("mods_P.pak");
-    match fs::remove_file(&path_mods_pak) {
-        Ok(()) => Ok(()),
-        Err(e) if e.kind() == ErrorKind::NotFound => Ok(()),
-        Err(e) => Err(e),
+use crate::mod_lints::LintError;
+use crate::providers::{ModInfo, ProviderError, ReadSeek};
+
+#[derive(Debug, Error)]
+pub enum IntegrationError {
+    #[error("failed to uninstall: {summary}")]
+    UninstallFailed { summary: String, details: String },
+    #[error("failed to determine game installation: {summary}")]
+    UnknownGameInstallation { summary: String, details: String },
+    #[error("encountered I/O error: {summary}")]
+    IoError { summary: String, details: String },
+    #[error("unable to process pak: {summary}")]
+    InvalidPak {
+        summary: String,
+        details: String,
+        path: Option<PathBuf>,
+    },
+    #[error("failed to build asset: {cause}")]
+    AssetBuildFailure {
+        cause: unreal_asset::Error,
+        mod_info: Option<ModInfo>,
+        mod_asset_path: Option<String>,
+    },
+    #[error("failed to process `AssetRegister.bin`: {summary}")]
+    AssetRegistryFailure {
+        summary: String,
+        details: String,
+        mod_info: Option<ModInfo>,
+    },
+    #[error("failed to read asset `{asset_path}`: {summary}")]
+    AssetReadFailure {
+        summary: String,
+        asset_path: String,
+        details: String,
+    },
+    #[error("failed to write to mod bundle: {summary}")]
+    WriteModBundleFailed { summary: String, details: String },
+    #[error("failed to read mod file \"{}\" @ `{path}`: {summary}", mod_info.name)]
+    ModReadFailure {
+        summary: String,
+        details: String,
+        path: String,
+        mod_info: ModInfo,
+    },
+    #[error("failed to read mod \"{}\" asset \"{mod_asset_path}\": {summary}", mod_info.name)]
+    ModAssetReadFailure {
+        summary: String,
+        details: String,
+        mod_info: ModInfo,
+        mod_asset_path: String,
+    },
+    #[error("{0}")]
+    ProviderError(#[from] ProviderError),
+    #[error("invalid file within zip archive: {0}")]
+    InvalidZipFile(zip::result::ZipError),
+    #[error("error encountered while linting: {0}")]
+    LintError(#[from] LintError),
+    #[error("error encountered while trying to self-update: {0}")]
+    SelfUpdateFailed(reqwest::Error),
+}
+
+impl IntegrationError {
+    pub(crate) fn opt_mod_id(&self) -> Option<u32> {
+        match self {
+            IntegrationError::AssetBuildFailure {
+                mod_info: Some(mod_info),
+                ..
+            }
+            | IntegrationError::AssetRegistryFailure {
+                mod_info: Some(mod_info),
+                ..
+            }
+            | IntegrationError::ModReadFailure { mod_info, .. }
+            | IntegrationError::ModAssetReadFailure { mod_info, .. } => mod_info.modio_id,
+            IntegrationError::ProviderError(p) => p.opt_mod_id(),
+            _ => None,
+        }
     }
-    .with_whatever_context(|_| format!("failed to remove {}", path_mods_pak.display()))?;
-    #[cfg(feature = "hook")]
+}
+
+fn no_install_info<P: AsRef<Path>, S: AsRef<str>>(
+    path: P,
+    e: MintError,
+    msg: S,
+) -> IntegrationError {
+    IntegrationError::UninstallFailed {
+        summary: msg.as_ref().to_string(),
+        details: format!("pak path: `{}`, caused by: {e}", path.as_ref().display()),
+    }
+}
+
+fn try_remove_file<P: AsRef<Path>, S: AsRef<str>>(path: P, msg: S) -> Result<(), IntegrationError> {
+    if let Err(e) = fs::remove_file(&path)
+        && e.kind() != ErrorKind::NotFound
     {
-        let path_hook_dll = installation
+        Err(IntegrationError::UninstallFailed {
+            summary: msg.as_ref().to_string(),
+            details: format!("path: `{}`, cause: {e}", path.as_ref().display()),
+        })
+    } else {
+        Ok(())
+    }
+}
+
+/// Why does the uninstall function require a list of Modio mod IDs? Glad you ask. The official
+/// integration enables *every mod the user has installed* once it gets re-enabled. We do the user a
+/// favor and collect all the installed mods and explicitly add them back to the config so they will
+/// be disabled when the game is launched again. Since we have Modio IDs anyway, with just a little
+/// more effort we can make the 'uninstall' button work as an 'install' button for the official
+/// integration. Best anti-feature ever.
+#[tracing::instrument(level = "debug", skip(game_pak_path))]
+pub fn uninstall<P: AsRef<Path>>(
+    game_pak_path: P,
+    modio_mods: HashSet<u32>,
+) -> Result<(), IntegrationError> {
+    let game_pak_path = game_pak_path.as_ref();
+    let installation = DRGInstallation::from_pak_path(game_pak_path)
+        .map_err(|e| no_install_info(game_pak_path, e, "failed to determine game installation"))?;
+
+    let mods_pak_path = installation.paks_path().join("mods_P.pak");
+    try_remove_file(&mods_pak_path, "failed to remove generated mod pak")?;
+
+    if cfg!(feature = "hook") {
+        let hook_dll_path = installation
             .binaries_directory()
             .join(installation.installation_type.hook_dll_name());
-        match fs::remove_file(&path_hook_dll) {
-            Ok(()) => Ok(()),
-            Err(e) if e.kind() == ErrorKind::NotFound => Ok(()),
-            Err(e) => Err(e),
-        }
-        .with_whatever_context(|_| format!("failed to remove {}", path_hook_dll.display()))?;
+        try_remove_file(&hook_dll_path, "failed to remove dll hook")?;
     }
-    uninstall_modio(&installation, modio_mods).ok();
+
+    try_uninstall_modio(&installation, modio_mods);
     Ok(())
 }
 
+/// Try remove mod.io data, but it's okay if we fail to remove it.
 #[tracing::instrument(level = "debug")]
-fn uninstall_modio(
-    installation: &DRGInstallation,
-    modio_mods: HashSet<u32>,
-) -> Result<(), Whatever> {
+fn try_uninstall_modio(installation: &DRGInstallation, modio_mods: HashSet<u32>) {
     #[derive(Debug, Deserialize)]
     struct ModioState {
         #[serde(rename = "Mods")]
         mods: Vec<ModioMod>,
     }
+
     #[derive(Debug, Deserialize)]
     struct ModioMod {
         #[serde(rename = "ID")]
         id: u32,
     }
+
     let Some(modio_dir) = installation.modio_directory() else {
-        return Ok(());
+        return;
     };
-    let modio_state: ModioState = serde_json::from_reader(std::io::BufReader::new(
-        fs::File::open(modio_dir.join("metadata/state.json"))
-            .whatever_context("failed to read mod.io metadata/state.json")?,
-    ))
-    .whatever_context("failed to parse mod.io metadata/state.json")?;
+
+    let Ok(state) = fs::File::open(modio_dir.join("metadata/state.json")) else {
+        return;
+    };
+
+    let Ok(modio_state): Result<ModioState, _> =
+        serde_json::from_reader(std::io::BufReader::new(state))
+    else {
+        return;
+    };
+
     let config_path = installation
         .root
         .join("Saved/Config/WindowsNoEditor/GameUserSettings.ini");
-    let mut config = ini::Ini::load_from_file(&config_path)
-        .whatever_context("failed to load GameUserSettings.ini")?;
+    let Ok(mut config) = ini::Ini::load_from_file(&config_path) else {
+        return;
+    };
 
     let ignore_keys = HashSet::from(["CurrentModioUserId"]);
 
@@ -102,17 +205,30 @@ fn uninstall_modio(
         .entry(Some("/Script/FSD.UserGeneratedContent".to_string()))
         .or_insert_with(Default::default);
     if let Some(ugc_section) = config.section_mut(Some("/Script/FSD.UserGeneratedContent")) {
-        let local_mods = installation
-            .root
-            .join("Mods")
-            .read_dir()
-            .whatever_context("failed to read game Mods directory")?
-            .map(|f| {
-                let f = f.whatever_context("failed to read game Mods subdirectory")?;
-                Ok((!f.path().is_file())
-                    .then_some(f.file_name().to_string_lossy().to_string().to_string()))
-            })
-            .collect::<Result<Vec<Option<String>>, Whatever>>()?;
+        let local_mods_dir = installation.root.join("Mods");
+
+        let mut local_mods = vec![];
+        let Ok(dir_entries) = local_mods_dir.read_dir() else {
+            return;
+        };
+        for entry in dir_entries {
+            let Ok(entry) = entry else {
+                return;
+            };
+
+            if entry.path().is_dir() {
+                let Some(file_name) = entry
+                    .path()
+                    .file_name()
+                    .map(|name| name.to_string_lossy().to_string())
+                else {
+                    return;
+                };
+
+                local_mods.push(file_name);
+            }
+        }
+
         let to_remove = HashSet::from_iter(ugc_section.iter().map(|(k, _)| k))
             .difference(&ignore_keys)
             .map(|&k| k.to_owned())
@@ -130,129 +246,181 @@ fn uninstall_modio(
                 },
             );
         }
-        for m in local_mods.into_iter().flatten() {
+
+        for m in local_mods {
             ugc_section.insert(m, "False");
         }
         ugc_section.insert("CheckGameversion", "False");
     }
 
-    config
-        .write_to_file_opt(
-            config_path,
-            ini::WriteOption {
-                line_separator: ini::LineSeparator::CRLF,
-                ..Default::default()
-            },
-        )
-        .whatever_context("failed to write to GameUserSettings.ini")?;
-    Ok(())
+    let _ = config.write_to_file_opt(
+        config_path,
+        ini::WriteOption {
+            line_separator: ini::LineSeparator::CRLF,
+            ..Default::default()
+        },
+    );
 }
 
 static INTEGRATION_DIR: include_dir::Dir<'_> =
     include_dir::include_dir!("$CARGO_MANIFEST_DIR/assets/integration");
 
-#[derive(Debug, Snafu)]
-#[snafu(visibility(pub(crate)))]
-pub enum IntegrationError {
-    #[snafu(display("unable to determine DRG installation at provided path {}", path.display()))]
-    DrgInstallationNotFound { path: PathBuf },
-    #[snafu(transparent)]
-    IoError { source: std::io::Error },
-    #[snafu(transparent)]
-    RepakError { source: repak::Error },
-    #[snafu(transparent)]
-    UnrealAssetError { source: unreal_asset::Error },
-    #[snafu(display("mod {:?}: I/O error encountered during its processing", mod_info.name))]
-    CtxtIoError {
-        source: std::io::Error,
-        mod_info: ModInfo,
-    },
-    #[snafu(display("mod {:?}: repak error encountered during its processing", mod_info.name))]
-    CtxtRepakError {
-        source: repak::Error,
-        mod_info: ModInfo,
-    },
-    #[snafu(display(
-        "mod {:?}: modfile {} contains unexpected prefix",
-        mod_info.name,
-        modfile_path
-    ))]
-    ModfileInvalidPrefix {
-        mod_info: ModInfo,
-        modfile_path: String,
-    },
-    #[snafu(display(
-        "mod {:?}: failed to integrate: {source}",
-        mod_info.name,
-    ))]
-    CtxtGenericError {
-        source: Box<dyn std::error::Error + Send + Sync>,
-        mod_info: ModInfo,
-    },
-    #[snafu(transparent)]
-    ProviderError { source: ProviderError },
-    #[snafu(display("integration error: {msg}"))]
-    GenericError { msg: String },
-    #[snafu(transparent)]
-    JoinError { source: tokio::task::JoinError },
-    #[snafu(transparent)]
-    LintError { source: LintError },
-    #[snafu(display("self update failed: {source:?}"))]
-    SelfUpdateFailed {
-        source: Box<dyn std::error::Error + Send + Sync>,
-    },
+fn io_error<S: AsRef<str>, P: AsRef<Path>>(
+    msg: S,
+    e: std::io::Error,
+    path: Option<P>,
+) -> IntegrationError {
+    IntegrationError::IoError {
+        summary: msg.as_ref().to_string(),
+        details: if let Some(path) = path {
+            format!("path: `{}`, cause: {e}", path.as_ref().display())
+        } else {
+            format!("{e}")
+        },
+    }
 }
 
-impl IntegrationError {
-    pub fn opt_mod_id(&self) -> Option<u32> {
-        match self {
-            IntegrationError::CtxtIoError { mod_info, .. }
-            | IntegrationError::CtxtRepakError { mod_info, .. }
-            | IntegrationError::CtxtGenericError { mod_info, .. }
-            | IntegrationError::ModfileInvalidPrefix { mod_info, .. } => mod_info.modio_id,
-            IntegrationError::ProviderError { source } => source.opt_mod_id(),
-            _ => None,
-        }
+fn repak_error<S: AsRef<str>, P: AsRef<Path>>(
+    msg: S,
+    e: repak::Error,
+    path: Option<P>,
+) -> IntegrationError {
+    IntegrationError::InvalidPak {
+        summary: msg.as_ref().to_string(),
+        details: format!("{e}"),
+        path: path.map(|p| p.as_ref().to_path_buf()),
+    }
+}
+
+fn unreal_asset_error<S: AsRef<str>, P: AsRef<Path>>(
+    msg: S,
+    e: unreal_asset::Error,
+    path: Option<P>,
+) -> IntegrationError {
+    IntegrationError::InvalidPak {
+        summary: msg.as_ref().to_string(),
+        details: format!("{e}"),
+        path: path.map(|p| p.as_ref().to_path_buf()),
+    }
+}
+
+fn fail_asset_registry<S: AsRef<str>, T: AsRef<str>>(
+    summary: S,
+    details: T,
+    mod_info: Option<ModInfo>,
+) -> IntegrationError {
+    IntegrationError::AssetRegistryFailure {
+        summary: summary.as_ref().to_string(),
+        details: details.as_ref().to_string(),
+        mod_info,
+    }
+}
+
+fn read_asset_failed<S: AsRef<str>, P: AsRef<Path>>(
+    msg: S,
+    e: repak::Error,
+    path: Option<P>,
+) -> IntegrationError {
+    IntegrationError::InvalidPak {
+        summary: msg.as_ref().to_string(),
+        details: format!("{e}"),
+        path: path.map(|p| p.as_ref().to_path_buf()),
+    }
+}
+
+fn fail_read_mod<S: AsRef<str>, T: AsRef<str>, P: AsRef<Path>>(
+    summary: S,
+    details: T,
+    mod_info: ModInfo,
+    path: P,
+) -> IntegrationError {
+    IntegrationError::ModReadFailure {
+        summary: summary.as_ref().to_string(),
+        details: details.as_ref().to_string(),
+        path: path.as_ref().to_string_lossy().to_string(),
+        mod_info,
+    }
+}
+
+fn fail_read_mod_asset<S: AsRef<str>, T: AsRef<str>, P: AsRef<str>>(
+    summary: S,
+    details: T,
+    mod_info: ModInfo,
+    mod_asset_path: P,
+) -> IntegrationError {
+    IntegrationError::ModAssetReadFailure {
+        summary: summary.as_ref().to_string(),
+        details: details.as_ref().to_string(),
+        mod_asset_path: mod_asset_path.as_ref().to_string(),
+        mod_info,
     }
 }
 
 #[tracing::instrument(skip_all)]
 pub fn integrate<P: AsRef<Path>>(
-    path_pak: P,
+    game_pak_path: P,
     config: MetaConfig,
     mods: Vec<(ModInfo, PathBuf)>,
 ) -> Result<(), IntegrationError> {
-    let Ok(installation) = DRGInstallation::from_pak_path(&path_pak) else {
-        return Err(IntegrationError::DrgInstallationNotFound {
-            path: path_pak.as_ref().to_path_buf(),
+    let game_pak_path = game_pak_path.as_ref();
+    let Ok(installation) = DRGInstallation::from_pak_path(game_pak_path) else {
+        return Err(IntegrationError::UnknownGameInstallation {
+            summary: "failed to identify game installation".to_string(),
+            details: format!("search based on `{}`", game_pak_path.display()),
         });
     };
-    let path_mod_pak = installation.paks_path().join("mods_P.pak");
+    let mod_pak_path = installation.paks_path().join("mods_P.pak");
 
-    let mut fsd_pak_reader = BufReader::new(fs::File::open(path_pak.as_ref())?);
-    let fsd_pak = repak::PakBuilder::new().reader(&mut fsd_pak_reader)?;
+    let game_pak_file = fs::File::open(game_pak_path)
+        .map_err(|e| io_error("failed to open game pak file", e, Some(&game_pak_path)))?;
+
+    let mut fsd_pak_reader = BufReader::new(game_pak_file);
+
+    let fsd_pak = repak::PakBuilder::new()
+        .reader(&mut fsd_pak_reader)
+        .map_err(|e| {
+            repak_error(
+                "failed to process game pak, possibly invalid",
+                e,
+                Some(&game_pak_path),
+            )
+        })?;
 
     #[derive(Debug, Default)]
-    struct RawAsset {
+    struct RawAsset<'path, 'mod_info> {
+        path: Option<&'path str>,
+        mod_info: Option<&'mod_info ModInfo>,
         uasset: Option<Vec<u8>>,
         uexp: Option<Vec<u8>>,
     }
 
-    impl RawAsset {
+    impl RawAsset<'_, '_> {
         fn parse(&self) -> Result<Asset<Cursor<&Vec<u8>>>, IntegrationError> {
-            Ok(AssetBuilder::new(
+            let asset = AssetBuilder::new(
                 Cursor::new(self.uasset.as_ref().unwrap()),
                 EngineVersion::VER_UE4_27,
             )
             .bulk(Cursor::new(self.uexp.as_ref().unwrap()))
-            .build()?)
+            .build()
+            .map_err(|e| IntegrationError::AssetBuildFailure {
+                cause: e,
+                mod_info: self.mod_info.cloned(),
+                mod_asset_path: self.path.map(|p| p.to_string()),
+            })?;
+
+            Ok(asset)
         }
     }
 
     let ar_path = "FSD/AssetRegistry.bin";
+
+    let raw_asset_registry = fsd_pak
+        .get(ar_path, &mut fsd_pak_reader)
+        .map_err(|e| fail_asset_registry("failed to read asset registry", format!("{e}"), None))?;
     let mut asset_registry =
-        AssetRegistry::read(&mut Cursor::new(fsd_pak.get(ar_path, &mut fsd_pak_reader)?))
-            .map_err(|e| IntegrationError::GenericError { msg: e.to_string() })?;
+        AssetRegistry::read(&mut Cursor::new(raw_asset_registry)).map_err(|e| {
+            fail_asset_registry("failed to deserialize asset registry", format!("{e}"), None)
+        })?;
 
     let mut other_deferred = vec![];
     let mut deferred = |path| {
@@ -284,41 +452,61 @@ pub fn integrate<P: AsRef<Path>>(
     // collect assets from game pak file
     for (path, asset) in &mut deferred_assets {
         // TODO repak should return an option...
-        asset.uasset = match fsd_pak.get(&format!("{path}.uasset"), &mut fsd_pak_reader) {
-            Ok(file) => Ok(Some(file)),
-            Err(repak::Error::MissingEntry(_)) => Ok(None),
-            Err(e) => Err(e),
-        }?;
-        asset.uexp = match fsd_pak.get(&format!("{path}.uexp"), &mut fsd_pak_reader) {
-            Ok(file) => Ok(Some(file)),
-            Err(repak::Error::MissingEntry(_)) => Ok(None),
-            Err(e) => Err(e),
-        }?;
+        let uasset_path = format!("{path}.uasset");
+        asset.uasset = match fsd_pak.get(&uasset_path, &mut fsd_pak_reader) {
+            Ok(file) => Some(file),
+            Err(repak::Error::MissingEntry(_)) => None,
+            Err(e) => {
+                return Err(read_asset_failed(
+                    "failed to read uasset",
+                    e,
+                    Some(&uasset_path),
+                ));
+            }
+        };
+
+        let uexp_path = format!("{path}.uexp");
+        asset.uexp = match fsd_pak.get(&uexp_path, &mut fsd_pak_reader) {
+            Ok(file) => Some(file),
+            Err(repak::Error::MissingEntry(_)) => None,
+            Err(e) => {
+                return Err(read_asset_failed(
+                    "failed to read uexp",
+                    e,
+                    Some(&uexp_path),
+                ))
+            }
+        };
     }
 
-    let mut bundle = ModBundleWriter::new(
-        BufWriter::new(
-            fs::OpenOptions::new()
-                .write(true)
-                .create(true)
-                .truncate(true)
-                .open(&path_mod_pak)?,
-        ),
-        &fsd_pak.files(),
-    )?;
+    let mod_bundle_file = fs::OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .open(&mod_pak_path)
+        .map_err(|e| {
+            io_error(
+                "failed to open mod bundle file in r+w truncate mode",
+                e,
+                Some(&mod_pak_path),
+            )
+        })?;
+
+    let mut bundle = ModBundleWriter::new(BufWriter::new(mod_bundle_file), &fsd_pak.files())?;
 
     #[cfg(feature = "hook")]
     {
-        let path_hook_dll = installation
+        let hook_dll_path = installation
             .binaries_directory()
             .join(installation.installation_type.hook_dll_name());
         let hook_dll = include_bytes!(env!("CARGO_CDYLIB_FILE_HOOK_hook"));
-        if path_hook_dll
+        if hook_dll_path
             .metadata()
             .map(|m| m.len() != hook_dll.len() as u64)
             .unwrap_or(true)
         {
-            fs::write(&path_hook_dll, hook_dll)?;
+            fs::write(&hook_dll_path, hook_dll)
+                .map_err(|e| io_error("failed to write hook dll", e, Some(&hook_dll_path)))?;
         }
     }
 
@@ -328,24 +516,32 @@ pub fn integrate<P: AsRef<Path>>(
     let mut added_paths = HashSet::new();
 
     for (mod_info, path) in &mods {
-        let raw_mod_file = fs::File::open(path).with_context(|_| CtxtIoSnafu {
-            mod_info: mod_info.clone(),
+        let raw_mod_file = fs::File::open(path).map_err(|e| {
+            fail_read_mod(
+                "could not open mod blob",
+                format!("{e}"),
+                mod_info.clone(),
+                path,
+            )
         })?;
-        let mut buf = get_pak_from_data(Box::new(BufReader::new(raw_mod_file))).map_err(|e| {
-            if let IntegrationError::IoError { source } = e {
-                IntegrationError::CtxtIoError {
-                    source,
-                    mod_info: mod_info.clone(),
-                }
-            } else {
-                e
-            }
-        })?;
-        let pak = repak::PakBuilder::new()
-            .reader(&mut buf)
-            .with_context(|_| CtxtRepakSnafu {
-                mod_info: mod_info.clone(),
+
+        let mut buf =
+            extract_pak_from_blob(Box::new(BufReader::new(raw_mod_file)), path).map_err(|e| {
+                fail_read_mod(
+                    "could not obtain mod file from raw mod blob",
+                    format!("{e}"),
+                    mod_info.clone(),
+                    path,
+                )
             })?;
+        let pak = repak::PakBuilder::new().reader(&mut buf).map_err(|e| {
+            fail_read_mod(
+                "could not interpret mod file as valid UE 4.27 mod pak",
+                format!("{e}"),
+                mod_info.clone(),
+                path,
+            )
+        })?;
 
         let mount = PakPath::new(pak.mount_point());
 
@@ -356,9 +552,13 @@ pub fn integrate<P: AsRef<Path>>(
                 let j = mount.join(&p);
                 Ok((
                     j.strip_prefix("../../../")
-                        .map_err(|_| IntegrationError::ModfileInvalidPrefix {
-                            mod_info: mod_info.clone(),
-                            modfile_path: j.to_string(),
+                        .map_err(|e| {
+                            fail_read_mod_asset(
+                                "could not strip prefix",
+                                format!("{e}"),
+                                mod_info.clone(),
+                                &p,
+                            )
                         })?
                         .to_path_buf(),
                     p,
@@ -366,42 +566,57 @@ pub fn integrate<P: AsRef<Path>>(
             })
             .collect::<Result<HashMap<_, _>, _>>()?;
 
-        for (normalized, pak_path) in &pak_files {
+        for (normalized, asset_path) in &pak_files {
             match normalized.extension() {
                 Some("uasset" | "umap")
                     if pak_files.contains_key(&normalized.with_extension("uexp")) =>
                 {
-                    let uasset = pak
-                        .get(pak_path, &mut buf)
-                        .with_context(|_| CtxtRepakSnafu {
-                            mod_info: mod_info.clone(),
-                        })?;
+                    let uasset = pak.get(asset_path, &mut buf).map_err(|e| {
+                        fail_read_mod_asset(
+                            "failed to read uasset file",
+                            format!("{e}"),
+                            mod_info.clone(),
+                            asset_path,
+                        )
+                    })?;
 
                     let uexp = pak
                         .get(
-                            PakPath::new(pak_path).with_extension("uexp").as_str(),
+                            PakPath::new(asset_path).with_extension("uexp").as_str(),
                             &mut buf,
                         )
-                        .with_context(|_| CtxtRepakSnafu {
-                            mod_info: mod_info.clone(),
+                        .map_err(|e| {
+                            fail_read_mod_asset(
+                                "failed to read uexp file",
+                                format!("{e}"),
+                                mod_info.clone(),
+                                asset_path,
+                            )
                         })?;
 
                     let asset = AssetBuilder::new(Cursor::new(uasset), EngineVersion::VER_UE4_27)
                         .bulk(Cursor::new(uexp))
                         .skip_data(true)
-                        .build()?;
+                        .build()
+                        .map_err(|e| IntegrationError::AssetBuildFailure {
+                            cause: e,
+                            mod_info: Some(mod_info.clone()),
+                            mod_asset_path: Some(asset_path.clone()),
+                        })?;
+
                     asset_registry
                         .populate(normalized.with_extension("").as_str(), &asset)
-                        .map_err(|e| IntegrationError::CtxtGenericError {
-                            source: e.into(),
-                            mod_info: mod_info.clone(),
+                        .map_err(|e| IntegrationError::AssetRegistryFailure {
+                            summary: "failed to populate asset registry with mod info".to_string(),
+                            details: format!("{e}"),
+                            mod_info: Some(mod_info.clone()),
                         })?;
                 }
                 _ => {}
             }
         }
 
-        for (normalized, pak_path) in pak_files {
+        for (normalized, asset_path) in pak_files {
             let lowercase = normalized.as_str().to_ascii_lowercase();
             if added_paths.contains(&lowercase) {
                 continue;
@@ -423,11 +638,14 @@ pub fn integrate<P: AsRef<Path>>(
                 }
             }
 
-            let file_data = pak
-                .get(&pak_path, &mut buf)
-                .with_context(|_| CtxtRepakSnafu {
-                    mod_info: mod_info.clone(),
-                })?;
+            let file_data = pak.get(&asset_path, &mut buf).map_err(|e| {
+                fail_read_mod_asset(
+                    "failed to extract asset data",
+                    format!("{e}"),
+                    mod_info.clone(),
+                    &asset_path,
+                )
+            })?;
             if let Some(raw) = normalized
                 .as_str()
                 .strip_suffix(".uasset")
@@ -479,9 +697,9 @@ pub fn integrate<P: AsRef<Path>>(
     bundle.write_meta(config, &mods)?;
 
     let mut buf = vec![];
-    asset_registry
-        .write(&mut buf)
-        .map_err(|e| IntegrationError::GenericError { msg: e.to_string() })?;
+    asset_registry.write(&mut buf).map_err(|e| {
+        fail_asset_registry("failed to serialize asset registry", format!("{e}"), None)
+    })?;
     bundle.write_file(&buf, ar_path)?;
 
     bundle.finish()?;
@@ -489,7 +707,7 @@ pub fn integrate<P: AsRef<Path>>(
     info!(
         "{} mods installed to {}",
         mods.len(),
-        path_mod_pak.display()
+        mod_pak_path.display()
     );
 
     Ok(())
@@ -571,7 +789,8 @@ impl<W: Write + Seek> ModBundleWriter<W> {
 
     fn write_file(&mut self, data: &[u8], path: &str) -> Result<(), IntegrationError> {
         self.pak_writer
-            .write_file(self.normalize_path(path).as_str(), data)?;
+            .write_file(self.normalize_path(path).as_str(), data)
+            .map_err(|e| repak_error("failed to write file", e, Some(path)))?;
         Ok(())
     }
 
@@ -582,9 +801,13 @@ impl<W: Write + Seek> ModBundleWriter<W> {
     ) -> Result<(), IntegrationError> {
         let mut data_out = (Cursor::new(vec![]), Cursor::new(vec![]));
 
-        asset.write_data(&mut data_out.0, Some(&mut data_out.1))?;
-        data_out.0.rewind()?;
-        data_out.1.rewind()?;
+        asset
+            .write_data(&mut data_out.0, Some(&mut data_out.1))
+            .map_err(|e| unreal_asset_error("failed to write asset data", e, Some(path)))?;
+
+        let rewind_err = |e| io_error("failed to rewind asset data", e, Some(path));
+        data_out.0.rewind().map_err(rewind_err)?;
+        data_out.1.rewind().map_err(rewind_err)?;
 
         self.write_file(&data_out.0.into_inner(), &format!("{path}.uasset"))?;
         self.write_file(&data_out.1.into_inner(), &format!("{path}.uexp"))?;
@@ -628,7 +851,9 @@ impl<W: Write + Seek> ModBundleWriter<W> {
     }
 
     fn finish(self) -> Result<(), IntegrationError> {
-        self.pak_writer.write_index()?;
+        self.pak_writer
+            .write_index()
+            .map_err(|e| repak_error("failed to write pak index", e, None::<&Path>))?;
         Ok(())
     }
 }
@@ -639,22 +864,30 @@ struct Dir {
     children: HashMap<String, Dir>,
 }
 
-pub(crate) fn get_pak_from_data(
+/// Try to extract a valid Unreal `.pak` from a given data blob. The data blob can be:
+///
+/// 1. A zip archive containing a valid Unreal `.pak`, or
+/// 2. A valid Unreal `.pak` itself.
+///
+/// If a zip archive contains multiple valid `.pak`s, then the first encountered `.pak` is picked,
+/// but the iteration order of `.pak`s within the zip archive is unspecified.
+pub(crate) fn extract_pak_from_blob<P: AsRef<Path>>(
     mut data: Box<dyn ReadSeek>,
+    path: P,
 ) -> Result<Box<dyn ReadSeek>, IntegrationError> {
     if let Ok(mut archive) = zip::ZipArchive::new(&mut data) {
         (0..archive.len())
             .map(|i| -> Result<Option<Box<dyn ReadSeek>>, IntegrationError> {
                 let mut file = archive
                     .by_index(i)
-                    .map_err(|_| IntegrationError::GenericError {
-                        msg: "failed to extract file in zip archive".to_string(),
-                    })?;
+                    .map_err(IntegrationError::InvalidZipFile)?;
                 match file.enclosed_name() {
                     Some(p) => {
                         if file.is_file() && p.extension() == Some(std::ffi::OsStr::new("pak")) {
                             let mut buf = vec![];
-                            file.read_to_end(&mut buf)?;
+                            let p = p.to_path_buf();
+                            file.read_to_end(&mut buf)
+                                .map_err(|e| io_error("failed to read zip file", e, Some(p)))?;
                             Ok(Some(Box::new(Cursor::new(buf))))
                         } else {
                             Ok(None)
@@ -664,11 +897,14 @@ pub(crate) fn get_pak_from_data(
                 }
             })
             .find_map(Result::transpose)
-            .context(GenericSnafu {
-                msg: "zip archive does not contain pak",
+            .ok_or_else(|| IntegrationError::InvalidPak {
+                summary: "failed to extract a valid `.pak` file from zip archive".to_string(),
+                details: String::new(),
+                path: Some(path.as_ref().to_path_buf()),
             })?
     } else {
-        data.rewind()?;
+        data.rewind()
+            .map_err(|e| io_error("failed to rewind data", e, Some(path)))?;
         Ok(data)
     }
 }

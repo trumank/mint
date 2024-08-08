@@ -1,32 +1,27 @@
-use snafu::Snafu;
+use thiserror::Error;
 
-#[derive(Debug, Snafu)]
-#[snafu(display("mint encountered an error: {msg}"))]
-pub struct GenericError {
-    pub msg: String,
-}
+/// Possible errors when using the mint lib.
+#[derive(Debug, Error)]
+#[non_exhaustive]
+pub enum MintError {
+    /// Failed to update.
+    #[error("failed to fetch github release: {summary}")]
+    FetchGithubReleaseFailed {
+        summary: String,
+        details: Option<String>,
+    },
 
-pub trait ResultExt<T, E> {
-    fn generic(self, msg: String) -> Result<T, GenericError>;
-    fn with_generic<F>(self, f: F) -> Result<T, GenericError>
-    where
-        F: FnOnce(E) -> String;
-}
+    /// Failed to locate Deep Rock Galactic installation.
+    #[error("unable to locate Deep Rock Galactic installation: {summary}")]
+    UnknownInstallation {
+        summary: String,
+        details: Option<String>,
+    },
 
-impl<T, E> ResultExt<T, E> for Result<T, E> {
-    fn generic(self, msg: String) -> Result<T, GenericError> {
-        match self {
-            Ok(ok) => Ok(ok),
-            Err(_) => Err(GenericError { msg }),
-        }
-    }
-    fn with_generic<F>(self, f: F) -> Result<T, GenericError>
-    where
-        F: FnOnce(E) -> String,
-    {
-        match self {
-            Ok(ok) => Ok(ok),
-            Err(e) => Err(GenericError { msg: f(e) }),
-        }
-    }
+    /// Failed to setup tracing.
+    #[error("failed to setup logging")]
+    LogSetupFailed {
+        summary: String,
+        details: Option<String>,
+    },
 }

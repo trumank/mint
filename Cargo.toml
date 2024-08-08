@@ -28,7 +28,7 @@ tracing-appender = "0.2.3"
 tracing-subscriber = { version = "0.3.18", features = ["fmt", "env-filter", "std", "registry"] }
 tokio = "1.35.1"
 reqwest = { version = "0.11.23", default-features = false, features = ["blocking", "rustls", "json"] }
-snafu = "0.8.0"
+thiserror = "1"
 
 [package]
 name = "mint"
@@ -80,7 +80,6 @@ sha2 = "0.10.8"
 steamlocate.workspace = true
 task-local-extensions = "0.1.4"
 tempfile = "3.9.0"
-thiserror = "1.0.56"
 tokio = { workspace = true, features = ["full"] }
 tracing.workspace = true
 typetag = "0.2.16"
@@ -92,7 +91,7 @@ repak.workspace = true
 include_dir = "0.7.3"
 postcard.workspace = true
 fs-err.workspace = true
-snafu.workspace = true
+thiserror.workspace = true
 strum = { version = "0.26", features = ["derive"] }
 itertools.workspace = true
 egui_dnd = "0.6.0"
