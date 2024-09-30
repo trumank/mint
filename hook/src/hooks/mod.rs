@@ -6,12 +6,10 @@ use std::{
     ffi::c_void,
     path::{Path, PathBuf},
     ptr::NonNull,
-    sync::Arc,
 };
 
 use anyhow::{Context, Result};
 use fs_err as fs;
-use hook_resolvers::GasFixResolution;
 use mint_lib::DRGInstallationType;
 use windows::Win32::System::Memory::{VirtualProtect, PAGE_EXECUTE_READWRITE};
 
@@ -88,12 +86,6 @@ pub unsafe fn initialize() -> Result<()> {
 
     server_list::init_hooks()?;
 
-    if !globals().meta.config.disable_fix_exploding_gas {
-        if let Ok(gas_fix) = &globals().resolution.gas_fix {
-            apply_gas_fix(gas_fix)?;
-        }
-    }
-
     let installation_type = DRGInstallationType::from_exe_path()?;
 
     match installation_type {
@@ -141,45 +133,6 @@ pub unsafe fn initialize() -> Result<()> {
             }
         }
     }
-    Ok(())
-}
-
-unsafe fn apply_gas_fix(gas_fix: &Arc<GasFixResolution>) -> Result<()> {
-    #[repr(C)]
-    struct UObjectTemperatureComponent {
-        padding: [u8; 0xd8],
-        on_start_burning: [u64; 2],
-        on_frozen_server: [u64; 2],
-        temperature_change_scale: f32,
-        burn_temperature: f32,
-        freeze_temperature: f32,
-        douse_fire_temperature: f32,
-        cooling_rate: f32,
-        is_heatsource_when_on_fire: bool,
-        on_fire_heat_range: f32,
-        timer_handle: u64,
-        is_object_on_fire: bool,
-        current_temperature: f32,
-    }
-
-    let fn_process_multicast_delegate: unsafe extern "system" fn(*mut c_void, *mut c_void) =
-        std::mem::transmute(gas_fix.process_multicast_delegate.0);
-
-    UObjectTemperatureComponentTimerCallback.initialize(
-        std::mem::transmute(gas_fix.timer_callback.0),
-        move |this| {
-            let obj = &*(this as *const UObjectTemperatureComponent);
-            let on_fire = obj.is_object_on_fire;
-            UObjectTemperatureComponentTimerCallback.call(this);
-            if !on_fire && obj.is_object_on_fire {
-                fn_process_multicast_delegate(
-                    std::ptr::addr_of!(obj.on_start_burning) as *mut c_void,
-                    std::ptr::null_mut(),
-                );
-            }
-        },
-    )?;
-    UObjectTemperatureComponentTimerCallback.enable()?;
     Ok(())
 }
 

@@ -4,6 +4,12 @@
 
 ## [Unreleased] - ReleaseDate
 
+### Core Functionality
+
+- Removed redundant patch to fix gas clouds not exploding
+
+## [0.2.11] - 2024-09-22
+
 ### General
 
 - Fix unintentionally linking to libssl on Linux. This used to prevent some users on various Linux
