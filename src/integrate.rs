@@ -611,8 +611,8 @@ impl<W: Write + Seek> ModBundleWriter<W> {
                 .iter()
                 .map(|(info, _)| MetaMod {
                     name: info.name.clone(),
-                    version: "TODO".into(), // TODO
-                    author: "TODO".into(),  // TODO
+                    version: "".into(), // TODO
+                    author: "".into(),  // TODO
                     required: info.suggested_require,
                     url: info.resolution.get_resolvable_url_or_name().to_string(),
                     approval: info
