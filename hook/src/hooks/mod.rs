@@ -25,12 +25,82 @@ use crate::{
 
 retour::static_detour! {
     static HookUFunctionBind: unsafe extern "system" fn(*mut ue::UFunction);
+    static HookUClassBind: unsafe extern "system" fn(*mut *mut ue::UClass, *const UE4CodeGen_Private_FClassParams);
     static SaveGameToSlot: unsafe extern "system" fn(*const USaveGame, *const ue::FString, i32) -> bool;
     static LoadGameFromSlot: unsafe extern "system" fn(*const ue::FString, i32) -> *const USaveGame;
     static DoesSaveGameExist: unsafe extern "system" fn(*const ue::FString, i32) -> bool;
     static UObjectTemperatureComponentTimerCallback: unsafe extern "system" fn(*mut c_void);
     static WinMain: unsafe extern "system" fn(*mut (), *mut (), *mut (), i32, *const ()) -> i32;
 
+}
+#[derive(Debug, Clone)]
+#[repr(C)]
+struct UE4CodeGen_Private_FClassParams {
+    /* offset 0x000 */
+    ClassNoRegisterFunc: unsafe extern "system" fn() -> *const ue::UClass,
+    /* offset 0x008 */ ClassConfigNameUTF8: *const (),
+    /* offset 0x010 */ CppClassInfo: *const (),
+    /* offset 0x018 */ DependencySingletonFuncArray: *const (),
+    /* offset 0x020 */ FunctionLinkArray: *const (),
+    /* offset 0x028 */
+    PropertyArray: *const *const UE4CodeGen_Private_FPropertyParamsBase,
+    /* offset 0x030 */ ImplementedInterfaceArray: *const (),
+    /* offset 0x038 */ NumDependencySingletons: i32,
+    /* offset 0x03c */ NumFunctions: i32,
+    /* offset 0x040 */ NumProperties: i32,
+    /* offset 0x044 */ NumImplementedInterfaces: i32,
+    /* offset 0x048 */ ClassFlags: u32,
+}
+
+#[derive(Debug, Clone)]
+#[repr(C)]
+struct UE4CodeGen_Private_FPropertyParamsBase {
+    /* offset 0x000 */ NameUTF8: *const char,
+    /* offset 0x008 */ RepNotifyFuncUTF8: *const char,
+    /* offset 0x010 */ PropertyFlags: ue::EPropertyFlags,
+    /* offset 0x018 */ Flags: UE4CodeGen_Private_EPropertyGenFlags,
+    /* offset 0x01c */ ObjectFlags: ue::EObjectFlags,
+    /* offset 0x020 */ ArrayDim: i32,
+    /* offset 0x024 */
+    Offset: i32, // TODO actually UE4CodeGen_Private::FGenericPropertyParams
+}
+
+#[derive(Debug, Clone)]
+#[repr(u32)]
+enum UE4CodeGen_Private_EPropertyGenFlags {
+    Byte = 0x0,
+    Int8 = 0x1,
+    Int16 = 0x2,
+    Int = 0x3,
+    Int64 = 0x4,
+    UInt16 = 0x5,
+    UInt32 = 0x6,
+    UInt64 = 0x7,
+    UnsizedInt = 0x8,
+    UnsizedUInt = 0x9,
+    Float = 0xa,
+    Double = 0xb,
+    Bool = 0xc,
+    SoftClass = 0xd,
+    WeakObject = 0xe,
+    LazyObject = 0xf,
+    SoftObject = 0x10,
+    Class = 0x11,
+    Object = 0x12,
+    Interface = 0x13,
+    Name = 0x14,
+    Str = 0x15,
+    Array = 0x16,
+    Map = 0x17,
+    Set = 0x18,
+    Struct = 0x19,
+    Delegate = 0x1a,
+    InlineMulticastDelegate = 0x1b,
+    SparseMulticastDelegate = 0x1c,
+    Text = 0x1d,
+    Enum = 0x1e,
+    FieldPath = 0x1f,
+    NativeBool = 0x20,
 }
 
 #[repr(C)]
@@ -87,6 +157,80 @@ pub unsafe fn initialize() -> Result<()> {
         },
     )?;
     HookUFunctionBind.enable()?;
+
+    HookUClassBind.initialize(
+        std::mem::transmute(0x141d63510usize),
+        move |class, params| {
+            let p = &*params;
+            let static_class = &*(p.ClassNoRegisterFunc)();
+            let path = static_class
+                .ustruct
+                .ufield
+                .uobject
+                .uobject_base_utility
+                .uobject_base
+                .get_path_name(None);
+
+            if path == "/Script/FSD.EnemyWaveManager" {
+                tracing::info!("{static_class:p}");
+                let mut params = (*params).clone();
+                let mut new_props =
+                    std::slice::from_raw_parts(params.PropertyArray, params.NumProperties as usize)
+                        .to_vec();
+
+                let ex_prop = [
+                    UE4CodeGen_Private_FPropertyParamsBase {
+                        NameUTF8: "InjectedReflectionProp\0".as_ptr() as *const char,
+                        RepNotifyFuncUTF8: std::ptr::null(),
+                        PropertyFlags: ue::EPropertyFlags::CPF_Edit
+                            | ue::EPropertyFlags::CPF_BlueprintVisible
+                            | ue::EPropertyFlags::CPF_BlueprintReadOnly
+                            | ue::EPropertyFlags::CPF_Protected
+                            | ue::EPropertyFlags::CPF_NativeAccessSpecifierProtected,
+                        Flags: UE4CodeGen_Private_EPropertyGenFlags::Float,
+                        ObjectFlags: ue::EObjectFlags::RF_Public
+                            | ue::EObjectFlags::RF_MarkAsNative
+                            | ue::EObjectFlags::RF_Transient,
+                        ArrayDim: 1,
+                        Offset: 0x134,
+                    },
+                    UE4CodeGen_Private_FPropertyParamsBase {
+                        NameUTF8: "InjectedReflectionProp2\0".as_ptr() as *const char,
+                        RepNotifyFuncUTF8: std::ptr::null(),
+                        PropertyFlags: ue::EPropertyFlags::CPF_Edit
+                            | ue::EPropertyFlags::CPF_BlueprintVisible
+                            | ue::EPropertyFlags::CPF_BlueprintReadOnly
+                            | ue::EPropertyFlags::CPF_Protected
+                            | ue::EPropertyFlags::CPF_NativeAccessSpecifierProtected,
+                        Flags: UE4CodeGen_Private_EPropertyGenFlags::Float,
+                        ObjectFlags: ue::EObjectFlags::RF_Public
+                            | ue::EObjectFlags::RF_MarkAsNative
+                            | ue::EObjectFlags::RF_Transient,
+                        ArrayDim: 1,
+                        Offset: 0x138,
+                    },
+                ];
+
+                new_props.extend(ex_prop.iter().map(|p| std::ptr::from_ref(p)));
+
+                //new_props.sort_by_key(|p| (**p).Offset);
+
+                params.PropertyArray = new_props.as_ptr();
+                params.NumProperties = new_props.len() as i32;
+                HookUClassBind.call(class, &params);
+            } else {
+                HookUClassBind.call(class, params);
+            }
+
+            if path == "/Script/FSD.EnemyWaveManager" {
+                tracing::info!("UClass::Bind({:?})", path);
+                for (struct_, prop) in (&**class).ustruct.properties() {
+                    tracing::info!("prop {:?}", prop.ffield.name_private.to_string())
+                }
+            }
+        },
+    )?;
+    HookUClassBind.enable()?;
 
     server_list::init_hooks()?;
 
