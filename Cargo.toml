@@ -43,7 +43,7 @@ default = ["hook", "oodle_platform_dependent"]
 hook = ["dep:hook"]
 oodle = ["repak/oodle_implicit_dynamic"]
 oodle_platform_dependent = ["workspace_hack/oodle_platform_dependent"]
-debug = ["egui/deadlock_detection", "egui/extra_debug_asserts", "egui/extra_asserts"]
+debug = ["egui/deadlock_detection"]
 
 [dependencies]
 workspace_hack = { path = "workspace_hack" }
@@ -53,9 +53,9 @@ async-trait = "0.1.77"
 clap = { version = "4.4.14", features = ["derive"] }
 dialoguer = "0.11.0"
 directories = "5.0.1"
-eframe = "0.25.0"
-egui = "0.25.0"
-egui_commonmark = "0.11.0"
+eframe = "0.29.1"
+egui = "0.29.1"
+egui_commonmark = "0.18.0"
 futures = "0.3.30"
 hex = "0.4.3"
 image = { version = "0.24.7", default-features = false, features = ["png"] }
@@ -95,7 +95,7 @@ fs-err.workspace = true
 snafu.workspace = true
 strum = { version = "0.26", features = ["derive"] }
 itertools.workspace = true
-egui_dnd = "0.6.0"
+egui_dnd = "0.10.0"
 
 [target.'cfg(target_env = "msvc")'.dependencies]
 hook = { path = "hook", artifact = "cdylib", optional = true, target = "x86_64-pc-windows-msvc"}

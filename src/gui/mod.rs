@@ -19,7 +19,7 @@ use std::{
 use eframe::egui::{Button, CollapsingHeader, RichText, Visuals};
 use eframe::epaint::{Pos2, Vec2};
 use eframe::{
-    egui::{FontSelection, Layout, TextFormat, Ui},
+    egui::{FontSelection, Layout, TextFormat, Ui, Id, UiBuilder},
     emath::{Align, Align2},
     epaint::{text::LayoutJob, Color32, Stroke},
 };
@@ -64,7 +64,7 @@ pub fn gui(dirs: Dirs, args: Option<Vec<String>>) -> Result<(), MintError> {
     eframe::run_native(
         &format!("mint {}", env!("CARGO_PKG_VERSION")),
         options,
-        Box::new(|cc| Box::new(App::new(cc, dirs, args).unwrap())),
+        Box::new(|cc| Ok(Box::new(App::new(cc, dirs, args).unwrap()))),
     )
     .with_generic(|e| format!("{e}"))?;
     Ok(())
@@ -215,10 +215,10 @@ impl App {
 
         Ok(Self {
             default_visuals: cc
-                .integration_info
-                .system_theme
-                .map(|t| t.egui_visuals())
-                .unwrap_or_default(),
+                .egui_ctx
+                .style()
+                .visuals
+                .clone(),
             args,
             tx,
             rx,
@@ -475,7 +475,7 @@ impl App {
                 }
 
                 if let Some(info) = &info {
-                    egui::ComboBox::from_id_source(row_index)
+                    egui::ComboBox::from_id_salt(row_index)
                         .selected_text(
                             self.state
                                 .store
@@ -533,7 +533,7 @@ impl App {
                                     }
                                 })
                                 .speed(0.05)
-                                .clamp_range(RangeInclusive::new(-999, 999)),
+                                .range(RangeInclusive::new(-999, 999)),
                         )
                         .on_hover_text_at_pointer(
                             "Load Priority\nIn case of asset conflict, mods with higher priority take precedent.\nCan have duplicate values.",
@@ -815,7 +815,7 @@ impl App {
         {
             let now = SystemTime::now();
             let wait_time = Duration::from_secs(10);
-            egui::Area::new("available-update-overlay")
+            egui::Area::new(Id::new("available-update-overlay"))
                 .movable(false)
                 .fixed_pos(Pos2::ZERO)
                 .order(egui::Order::Background)
@@ -863,7 +863,7 @@ impl App {
                     .anchor(Align2::CENTER_CENTER, Vec2::ZERO)
                     .resizable(false)
                     .show(ctx, |ui| {
-                        CommonMarkViewer::new("available-update")
+                        CommonMarkViewer::new()
                             .max_image_width(Some(512))
                             .show(ui, &mut self.cache, &update.body);
                         ui.with_layout(egui::Layout::right_to_left(Align::TOP), |ui| {
@@ -1916,195 +1916,200 @@ impl eframe::App for App {
             });
         });
         egui::CentralPanel::default().show(ctx, |ui| {
-            ui.set_enabled(
+            ui.add_enabled_ui(
                 self.integrate_rid.is_none()
                     && self.update_rid.is_none()
                     && self.lint_rid.is_none(),
-            );
-            // profile selection
+                    |ui|{
 
-            let buttons = |ui: &mut Ui, mod_data: &mut ModData| {
-                if ui
-                    .button("📋")
-                    .on_hover_text_at_pointer("Copy profile mods")
-                    .clicked()
-                {
-                    let mut mods = Vec::new();
-                    let active_profile = mod_data.active_profile.clone();
-                    mod_data.for_each_enabled_mod(&active_profile, |mc| {
-                        mods.push(mc.clone());
-                    });
-                    let mods = Self::build_mod_string(&mods);
-                    ui.output_mut(|o| o.copied_text = mods);
-                }
-
-                // TODO find better icon, flesh out multiple-view usage, fix GUI locking
-                /*
-                if ui
-                    .button("pop out")
-                    .on_hover_text_at_pointer("pop out")
-                    .clicked()
-                {
-                    self.open_profiles.insert(mod_data.active_profile.clone());
-                }
-                */
-            };
-
-            if named_combobox::ui(
-                ui,
-                "profile",
-                self.state.mod_data.deref_mut().deref_mut(),
-                Some(buttons),
-            ) {
-                self.state.mod_data.save().unwrap();
-            }
-
-            ui.separator();
-
-            ui.with_layout(egui::Layout::right_to_left(Align::TOP), |ui| {
-                if self.resolve_mod_rid.is_some() {
-                    ui.spinner();
-                }
-                ui.with_layout(ui.layout().with_main_justify(true), |ui| {
-                    // define multiline layouter to be able to show multiple lines in a single line widget
-                    let font_id = FontSelection::default().resolve(ui.style());
-                    let text_color = ui.visuals().widgets.inactive.text_color();
-                    let mut multiline_layouter = move |ui: &Ui, text: &str, wrap_width: f32| {
-                        let layout_job = LayoutJob::simple(
-                            text.to_string(),
-                            font_id.clone(),
-                            text_color,
-                            wrap_width,
-                        );
-                        ui.fonts(|f| f.layout_job(layout_job))
-                    };
-
-                    let resolve = ui.add_enabled(
-                        self.resolve_mod_rid.is_none(),
-                        egui::TextEdit::singleline(&mut self.resolve_mod)
-                            .layouter(&mut multiline_layouter)
-                            .hint_text("Add mod..."),
-                    );
-                    if is_committed(&resolve) {
-                        message::ResolveMods::send(self, ctx, self.parse_mods(), false);
-                        self.problematic_mod_id = None;
-                    }
-                });
-            });
-
-            let profile = self.state.mod_data.active_profile.clone();
-
-            ui.horizontal(|ui| {
-                ui.label("Sort by: ");
-
-                let (mut sort_category, mut is_ascending) = self
-                    .get_sorting_config()
-                    .map(|c| (Some(c.sort_category), c.is_ascending))
-                    .unwrap_or_default();
-
-                let mut clicked = ui.radio_value(&mut sort_category, None, "Manual").clicked();
-                for category in SortBy::iter() {
-                    let mut radio_label = category.as_str().to_owned();
-                    if sort_category == Some(category) {
-                        radio_label.push_str(if is_ascending { " ⏶" } else { " ⏷" });
-                    }
-                    let resp = ui.radio_value(&mut sort_category, Some(category), radio_label);
-                    if resp.clicked() {
-                        clicked = true;
-                        if resp.changed() {
-                            is_ascending = true;
-                        } else {
-                            is_ascending = !is_ascending;
-                        }
-                    };
-                }
-                if clicked {
-                    self.update_sorting_config(sort_category, is_ascending);
-                }
-
-                ui.add_space(16.);
-                // TODO: actually implement mod groups.
-                let search_string = &mut self.search_string;
-                let lower = search_string.to_lowercase();
-                let any_matches = self.state.mod_data.any_mod(&profile, |mc, _| {
-                    self.state
-                        .store
-                        .get_mod_info(&mc.spec)
-                        .map(|i| i.name.to_lowercase().contains(&lower))
-                        .unwrap_or(false)
-                });
-
-                let mut text_edit = egui::TextEdit::singleline(search_string).hint_text("Search");
-                if !any_matches {
-                    text_edit = text_edit.text_color(ui.visuals().error_fg_color);
-                }
-                let res = ui
-                    .child_ui(ui.max_rect(), egui::Layout::bottom_up(Align::RIGHT))
-                    .add(text_edit);
-                if res.changed() {
-                    self.scroll_to_match = true;
-                }
-                if res.lost_focus()
-                    && ui.input(|i| {
-                        i.key_pressed(egui::Key::Enter) || i.key_pressed(egui::Key::Escape)
-                    })
-                {
-                    *search_string = String::new();
-                    self.scroll_to_match = false;
-                } else if self.focus_search {
-                    res.request_focus();
-                    self.focus_search = false;
-                }
-            });
-            ui.add_space(4.);
-
-            self.ui_profile(ui, &profile);
-
-            // must access memory outside of input lock to prevent deadlock
-            let is_anything_focused = ctx.memory(|m| m.focus().is_some());
-            ctx.input(|i| {
-                if !i.raw.dropped_files.is_empty()
-                    && self.integrate_rid.is_none()
-                    && self.update_rid.is_none()
-                {
-                    let mut mods = String::new();
-                    for f in i
-                        .raw
-                        .dropped_files
-                        .iter()
-                        .filter_map(|f| f.path.as_ref().map(|p| p.to_string_lossy()))
-                    {
-                        mods.push_str(&f);
-                        mods.push('\n');
-                    }
-
-                    self.resolve_mod = mods.trim().to_string();
-                    message::ResolveMods::send(self, ctx, self.parse_mods(), false);
-                    self.problematic_mod_id = None;
-                }
-                for e in &i.events {
-                    match e {
-                        egui::Event::Paste(s) => {
-                            if self.integrate_rid.is_none()
-                                && self.update_rid.is_none()
-                                && self.lint_rid.is_none()
-                                && !is_anything_focused
+                        // profile selection
+                        let buttons = |ui: &mut Ui, mod_data: &mut ModData| {
+                            if ui
+                                .button("📋")
+                                .on_hover_text_at_pointer("Copy profile mods")
+                                .clicked()
                             {
-                                self.resolve_mod = s.trim().to_string();
-                                message::ResolveMods::send(self, ctx, self.parse_mods(), false);
+                                let mut mods = Vec::new();
+                                let active_profile = mod_data.active_profile.clone();
+                                mod_data.for_each_enabled_mod(&active_profile, |mc| {
+                                    mods.push(mc.clone());
+                                });
+                                let mods = Self::build_mod_string(&mods);
+                                ui.output_mut(|o| o.copied_text = mods);
                             }
+            
+                            // TODO find better icon, flesh out multiple-view usage, fix GUI locking
+                            /*
+                            if ui
+                                .button("pop out")
+                                .on_hover_text_at_pointer("pop out")
+                                .clicked()
+                            {
+                                self.open_profiles.insert(mod_data.active_profile.clone());
+                            }
+                            */
+                        };
+            
+                        if named_combobox::ui(
+                            ui,
+                            "profile",
+                            self.state.mod_data.deref_mut().deref_mut(),
+                            Some(buttons),
+                        ) {
+                            self.state.mod_data.save().unwrap();
                         }
-                        egui::Event::Text(text) => {
-                            if !is_anything_focused {
-                                self.search_string = text.to_string();
+            
+                        ui.separator();
+            
+                        ui.with_layout(egui::Layout::right_to_left(Align::TOP), |ui| {
+                            if self.resolve_mod_rid.is_some() {
+                                ui.spinner();
+                            }
+                            ui.with_layout(ui.layout().with_main_justify(true), |ui| {
+                                // define multiline layouter to be able to show multiple lines in a single line widget
+                                let font_id = FontSelection::default().resolve(ui.style());
+                                let text_color = ui.visuals().widgets.inactive.text_color();
+                                let mut multiline_layouter = move |ui: &Ui, text: &str, wrap_width: f32| {
+                                    let layout_job = LayoutJob::simple(
+                                        text.to_string(),
+                                        font_id.clone(),
+                                        text_color,
+                                        wrap_width,
+                                    );
+                                    ui.fonts(|f| f.layout_job(layout_job))
+                                };
+            
+                                let resolve = ui.add_enabled(
+                                    self.resolve_mod_rid.is_none(),
+                                    egui::TextEdit::singleline(&mut self.resolve_mod)
+                                        .layouter(&mut multiline_layouter)
+                                        .hint_text("Add mod..."),
+                                );
+                                if is_committed(&resolve) {
+                                    message::ResolveMods::send(self, ctx, self.parse_mods(), false);
+                                    self.problematic_mod_id = None;
+                                }
+                            });
+                        });
+            
+                        let profile = self.state.mod_data.active_profile.clone();
+            
+                        ui.horizontal(|ui| {
+                            ui.label("Sort by: ");
+            
+                            let (mut sort_category, mut is_ascending) = self
+                                .get_sorting_config()
+                                .map(|c| (Some(c.sort_category), c.is_ascending))
+                                .unwrap_or_default();
+            
+                            let mut clicked = ui.radio_value(&mut sort_category, None, "Manual").clicked();
+                            for category in SortBy::iter() {
+                                let mut radio_label = category.as_str().to_owned();
+                                if sort_category == Some(category) {
+                                    radio_label.push_str(if is_ascending { " ⏶" } else { " ⏷" });
+                                }
+                                let resp = ui.radio_value(&mut sort_category, Some(category), radio_label);
+                                if resp.clicked() {
+                                    clicked = true;
+                                    if resp.changed() {
+                                        is_ascending = true;
+                                    } else {
+                                        is_ascending = !is_ascending;
+                                    }
+                                };
+                            }
+                            if clicked {
+                                self.update_sorting_config(sort_category, is_ascending);
+                            }
+            
+                            ui.add_space(16.);
+                            // TODO: actually implement mod groups.
+                            let search_string = &mut self.search_string;
+                            let lower = search_string.to_lowercase();
+                            let any_matches = self.state.mod_data.any_mod(&profile, |mc, _| {
+                                self.state
+                                    .store
+                                    .get_mod_info(&mc.spec)
+                                    .map(|i| i.name.to_lowercase().contains(&lower))
+                                    .unwrap_or(false)
+                            });
+            
+                            let mut text_edit = egui::TextEdit::singleline(search_string).hint_text("Search");
+                            if !any_matches {
+                                text_edit = text_edit.text_color(ui.visuals().error_fg_color);
+                            }
+                            let res = ui
+                                .new_child(UiBuilder::new()
+                                    .max_rect(ui.available_rect_before_wrap())
+                                    .layout(egui::Layout::bottom_up(Align::RIGHT))
+                                )
+                                .add(text_edit);
+                            if res.changed() {
                                 self.scroll_to_match = true;
-                                self.focus_search = true;
                             }
-                        }
-                        _ => {}
+                            if res.lost_focus()
+                                && ui.input(|i| {
+                                    i.key_pressed(egui::Key::Enter) || i.key_pressed(egui::Key::Escape)
+                                })
+                            {
+                                *search_string = String::new();
+                                self.scroll_to_match = false;
+                            } else if self.focus_search {
+                                res.request_focus();
+                                self.focus_search = false;
+                            }
+                        });
+                        ui.add_space(4.);
+            
+                        self.ui_profile(ui, &profile);
+            
+                        // must access memory outside of input lock to prevent deadlock
+                        let is_anything_focused = ctx.memory(|m| m.focused().is_some());
+                        ctx.input(|i| {
+                            if !i.raw.dropped_files.is_empty()
+                                && self.integrate_rid.is_none()
+                                && self.update_rid.is_none()
+                            {
+                                let mut mods = String::new();
+                                for f in i
+                                    .raw
+                                    .dropped_files
+                                    .iter()
+                                    .filter_map(|f| f.path.as_ref().map(|p| p.to_string_lossy()))
+                                {
+                                    mods.push_str(&f);
+                                    mods.push('\n');
+                                }
+            
+                                self.resolve_mod = mods.trim().to_string();
+                                message::ResolveMods::send(self, ctx, self.parse_mods(), false);
+                                self.problematic_mod_id = None;
+                            }
+                            for e in &i.events {
+                                match e {
+                                    egui::Event::Paste(s) => {
+                                        if self.integrate_rid.is_none()
+                                            && self.update_rid.is_none()
+                                            && self.lint_rid.is_none()
+                                            && !is_anything_focused
+                                        {
+                                            self.resolve_mod = s.trim().to_string();
+                                            message::ResolveMods::send(self, ctx, self.parse_mods(), false);
+                                        }
+                                    }
+                                    egui::Event::Text(text) => {
+                                        if !is_anything_focused {
+                                            self.search_string = text.to_string();
+                                            self.scroll_to_match = true;
+                                            self.focus_search = true;
+                                        }
+                                    }
+                                    _ => {}
+                                }
+                            }
+                        });
                     }
-                }
-            });
+            );
         });
     }
 }

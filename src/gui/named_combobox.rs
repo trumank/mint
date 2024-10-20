@@ -208,7 +208,7 @@ where
 {
     let mut selected = entries.selected_name().to_owned();
 
-    egui::ComboBox::from_id_source(format!("dropdown-{name}"))
+    egui::ComboBox::from_id_salt(format!("dropdown-{name}"))
         .width(ui.available_width())
         .selected_text(selected.clone())
         .show_ui(ui, |ui| {
