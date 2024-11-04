@@ -6,7 +6,7 @@ use std::{
     ffi::c_void,
     path::{Path, PathBuf},
     ptr::NonNull,
-    sync::Arc,
+    sync::{Arc, OnceLock},
 };
 
 use anyhow::{Context, Result};
@@ -106,17 +106,16 @@ pub unsafe fn initialize() -> Result<()> {
             }
         }
         DRGInstallationType::Xbox => {
-            SAVES_DIR = Some(
-                std::env::current_exe()
-                    .ok()
-                    .as_deref()
-                    .and_then(Path::parent)
-                    .and_then(Path::parent)
-                    .and_then(Path::parent)
-                    .context("could not determine save location")?
-                    .join("Saved")
-                    .join("SaveGames"),
-            );
+            let saves_dir = std::env::current_exe()
+                .ok()
+                .as_deref()
+                .and_then(Path::parent)
+                .and_then(Path::parent)
+                .and_then(Path::parent)
+                .context("could not determine save location")?
+                .join("Saved")
+                .join("SaveGames");
+            SAVES_DIR.get_or_init(|| saves_dir);
 
             if let Ok(save_game) = &globals().resolution.save_game {
                 SaveGameToSlot
@@ -207,14 +206,14 @@ unsafe fn patch_mem(address: *mut u8, patch: impl AsRef<[u8]>) -> Result<()> {
     Ok(())
 }
 
-static mut SAVES_DIR: Option<PathBuf> = None;
+static SAVES_DIR: OnceLock<PathBuf> = OnceLock::new();
 
 fn get_path_for_slot(slot_name: &ue::FString) -> Option<PathBuf> {
     let mut str_path = slot_name.to_string();
     str_path.push_str(".sav");
 
     let path = std::path::Path::new(&str_path);
-    let mut normalized_path = unsafe { SAVES_DIR.as_ref() }?.clone();
+    let mut normalized_path = SAVES_DIR.get().unwrap().clone();
 
     for component in path.components() {
         if let std::path::Component::Normal(c) = component {
@@ -300,7 +299,7 @@ fn detour_main(
     };
 
     // about to exit, drop log guard
-    drop(unsafe { LOG_GUARD.take() });
+    drop(LOG_GUARD.with_borrow_mut(|g| g.take()).unwrap());
 
     ret
 }

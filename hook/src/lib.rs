@@ -53,7 +53,9 @@ unsafe extern "system" fn init(_: usize) {
 }
 
 static mut GLOBALS: Option<Globals> = None;
-static mut LOG_GUARD: Option<tracing_appender::non_blocking::WorkerGuard> = None;
+thread_local! {
+    static LOG_GUARD: std::cell::RefCell<Option<tracing_appender::non_blocking::WorkerGuard>>  = None.into();
+}
 
 pub struct Globals {
     resolution: hook_resolvers::HookResolution,
@@ -126,7 +128,10 @@ impl Globals {
 }
 
 pub fn globals() -> &'static Globals {
-    unsafe { GLOBALS.as_ref().unwrap() }
+    #[allow(static_mut_refs)]
+    unsafe {
+        GLOBALS.as_ref().unwrap()
+    }
 }
 
 unsafe fn patch() -> Result<()> {
@@ -156,7 +161,7 @@ unsafe fn patch() -> Result<()> {
     info!("PS scan: {:#x?}", resolution);
 
     GLOBALS = Some(Globals { resolution, meta });
-    LOG_GUARD = guard;
+    LOG_GUARD.with_borrow_mut(|g| *g = guard);
 
     hooks::initialize()?;
 
