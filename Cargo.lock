@@ -2454,6 +2454,7 @@ dependencies = [
  "mint_lib",
  "patternsleuth",
  "postcard",
+ "proxy_dll",
  "repak",
  "retour",
  "serde",
@@ -3286,6 +3287,12 @@ dependencies = [
  "tracing",
  "url",
 ]
+
+[[package]]
+name = "msvc_def"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ceed45db162aa13e647de49ecdde6ca4e8e7a0ebb2cd964414bed01879074862"
 
 [[package]]
 name = "naga"
@@ -4159,6 +4166,28 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "afbdc74edc00b6f6a218ca6a5364d6226a259d4b8ea1af4a0ea063f27e179f4d"
 
 [[package]]
+name = "proxy_dll"
+version = "0.1.0"
+source = "git+https://github.com/trumank/proxy_dll.git#ad0cee8b74597ee1819d0d2eeb516b812035bbeb"
+dependencies = [
+ "msvc_def",
+ "proxy_dll_proc",
+ "windows-sys 0.59.0",
+]
+
+[[package]]
+name = "proxy_dll_proc"
+version = "0.1.0"
+source = "git+https://github.com/trumank/proxy_dll.git#ad0cee8b74597ee1819d0d2eeb516b812035bbeb"
+dependencies = [
+ "msvc_def",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.86",
+ "windows-sys 0.59.0",
+]
+
+[[package]]
 name = "pulldown-cmark"
 version = "0.12.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4233,14 +4262,14 @@ dependencies = [
  "once_cell",
  "socket2 0.5.5",
  "tracing",
- "windows-sys 0.59.0",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
 name = "quote"
-version = "1.0.35"
+version = "1.0.37"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "291ec9ab5efd934aaf503a6466c5d5251535d108ee747472c3977cc5acc868ef"
+checksum = "b5b9d34b8991d19d98081b46eacdd8eb58c6f2b201139f7c5f643cc155a633af"
 dependencies = [
  "proc-macro2",
 ]

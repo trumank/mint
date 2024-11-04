@@ -8,48 +8,13 @@ use fs_err as fs;
 use hooks::{FnLoadGameFromMemory, FnSaveGameToMemory};
 use mint_lib::mod_info::Meta;
 use tracing::{info, warn};
-use windows::Win32::{
-    Foundation::HMODULE,
-    System::{
-        SystemServices::*,
-        Threading::{GetCurrentThread, QueueUserAPC},
-    },
-};
 
-// x3daudio1_7.dll
-#[no_mangle]
-#[allow(non_snake_case, unused_variables)]
-extern "system" fn X3DAudioCalculate() {}
-#[no_mangle]
-#[allow(non_snake_case, unused_variables)]
-extern "system" fn X3DAudioInitialize() {}
+proxy_dll::proxy_dll!([x3daudio1_7, d3d9], init);
 
-// d3d9.dll
-#[no_mangle]
-#[allow(non_snake_case, unused_variables)]
-extern "system" fn D3DPERF_EndEvent() {}
-#[no_mangle]
-#[allow(non_snake_case, unused_variables)]
-extern "system" fn D3DPERF_BeginEvent() {}
-
-#[no_mangle]
-#[allow(non_snake_case, unused_variables)]
-extern "system" fn DllMain(dll_module: HMODULE, call_reason: u32, _: *mut ()) -> bool {
+fn init() {
     unsafe {
-        match call_reason {
-            DLL_PROCESS_ATTACH => {
-                QueueUserAPC(Some(init), GetCurrentThread(), 0);
-            }
-            DLL_PROCESS_DETACH => (),
-            _ => (),
-        }
-
-        true
+        patch().ok();
     }
-}
-
-unsafe extern "system" fn init(_: usize) {
-    patch().ok();
 }
 
 static mut GLOBALS: Option<Globals> = None;
