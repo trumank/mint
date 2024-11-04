@@ -150,7 +150,7 @@ pub async fn resolve_unordered_and_integrate<P: AsRef<Path>>(
     )
 }
 
-async fn resolve_into_urls<'b>(
+async fn resolve_into_urls(
     state: &State,
     mod_specs: &[ModSpecification],
 ) -> Result<Vec<ModResolution>, MintError> {

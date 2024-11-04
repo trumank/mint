@@ -1577,9 +1577,8 @@ impl App {
     }
 }
 
-fn sort_mods(
-    config: SortingConfig,
-) -> impl Fn((&ModOrGroup, Option<&ModInfo>), (&ModOrGroup, Option<&ModInfo>)) -> Ordering {
+type ModListEntry<'a> = (&'a ModOrGroup, Option<&'a ModInfo>);
+fn sort_mods(config: SortingConfig) -> impl Fn(ModListEntry, ModListEntry) -> Ordering {
     move |(a, info_a), (b, info_b)| {
         if matches!(a, ModOrGroup::Group { .. }) || matches!(b, ModOrGroup::Group { .. }) {
             unimplemented!("Groups in sorting not implemented");
@@ -1751,11 +1750,13 @@ impl eframe::App for App {
                                 .clicked()
                             {
                                 let args = args.clone();
-                                tokio::task::spawn_blocking(move || {
+                                std::thread::spawn(move || {
                                     let mut iter = args.iter();
                                     std::process::Command::new(iter.next().unwrap())
                                         .args(iter)
                                         .spawn()
+                                        .unwrap()
+                                        .wait()
                                         .unwrap();
                                 });
                             }
