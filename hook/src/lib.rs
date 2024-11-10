@@ -1,7 +1,7 @@
 mod hooks;
 mod ue;
 
-use std::{io::BufReader, path::Path};
+use std::{io::BufReader, path::Path, sync::OnceLock};
 
 use anyhow::{Context, Result};
 use fs_err as fs;
@@ -17,7 +17,7 @@ fn init() {
     }
 }
 
-static mut GLOBALS: Option<Globals> = None;
+static GLOBALS: OnceLock<Globals> = OnceLock::new();
 thread_local! {
     static LOG_GUARD: std::cell::RefCell<Option<tracing_appender::non_blocking::WorkerGuard>>  = None.into();
 }
@@ -93,10 +93,7 @@ impl Globals {
 }
 
 pub fn globals() -> &'static Globals {
-    #[allow(static_mut_refs)]
-    unsafe {
-        GLOBALS.as_ref().unwrap()
-    }
+        GLOBALS.get().unwrap()
 }
 
 unsafe fn patch() -> Result<()> {
@@ -125,7 +122,7 @@ unsafe fn patch() -> Result<()> {
     let resolution = image.resolve(hook_resolvers::HookResolution::resolver())?;
     info!("PS scan: {:#x?}", resolution);
 
-    GLOBALS = Some(Globals { resolution, meta });
+    GLOBALS.get_or_init(|| Globals { resolution, meta });
     LOG_GUARD.with_borrow_mut(|g| *g = guard);
 
     hooks::initialize()?;
