@@ -331,10 +331,6 @@ impl ModData!["0.1.0"] {
     }
 }
 
-fn is_false(value: &bool) -> bool {
-    !value
-}
-
 #[obake::versioned]
 #[obake(version("0.0.0"))]
 #[derive(Debug, Serialize, Deserialize)]
@@ -342,8 +338,6 @@ pub struct Config {
     pub provider_parameters: HashMap<String, HashMap<String, String>>,
     pub drg_pak_path: Option<PathBuf>,
     pub gui_theme: Option<GuiTheme>,
-    #[serde(default, skip_serializing_if = "is_false")]
-    pub disable_fix_exploding_gas: bool,
     pub sorting_config: Option<SortingConfig>,
 }
 
@@ -418,17 +412,14 @@ impl Default for Config!["0.0.0"] {
                 .as_ref()
                 .map(DRGInstallation::main_pak),
             gui_theme: None,
-            disable_fix_exploding_gas: false,
             sorting_config: None,
         }
     }
 }
 
 impl From<&VersionAnnotatedConfig> for MetaConfig {
-    fn from(value: &VersionAnnotatedConfig) -> Self {
-        MetaConfig {
-            disable_fix_exploding_gas: value.disable_fix_exploding_gas,
-        }
+    fn from(_value: &VersionAnnotatedConfig) -> Self {
+        MetaConfig {}
     }
 }
 

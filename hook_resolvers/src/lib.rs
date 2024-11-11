@@ -106,29 +106,6 @@ impl_resolver_singleton!(PEImage, Disable, |ctx| async {
     Ok(Self(ensure_one(res.into_iter().flatten())?))
 });
 
-#[derive(Debug, PartialEq)]
-#[cfg_attr(feature = "serde-resolvers", derive(Serialize, Deserialize))]
-pub struct UObjectTemperatureComponentTimerCallback(pub usize);
-impl_resolver_singleton!(collect, UObjectTemperatureComponentTimerCallback);
-impl_resolver_singleton!(
-    PEImage,
-    UObjectTemperatureComponentTimerCallback,
-    |ctx| async {
-        let patterns = ["40 55 57 41 56 48 8D 6C 24 ?? 48 81 EC 20 01 00 00"];
-        let res = join_all(patterns.iter().map(|p| ctx.scan(Pattern::new(p).unwrap()))).await;
-        Ok(Self(ensure_one(res.into_iter().flatten())?))
-    }
-);
-#[derive(Debug, PartialEq)]
-#[cfg_attr(feature = "serde-resolvers", derive(Serialize, Deserialize))]
-pub struct ProcessMulticastDelegate(pub usize);
-impl_resolver_singleton!(collect, ProcessMulticastDelegate);
-impl_resolver_singleton!(PEImage, ProcessMulticastDelegate, |ctx| async {
-    let patterns = ["4C 8B DC 57 41 54 41 56 48 81 EC A0 00 00 00"];
-    let res = join_all(patterns.iter().map(|p| ctx.scan(Pattern::new(p).unwrap()))).await;
-    Ok(Self(ensure_one(res.into_iter().flatten())?))
-});
-
 impl_try_collector! {
     #[derive(Debug, PartialEq)]
     #[cfg_attr(feature = "serde-resolvers", derive(Serialize, Deserialize))]
@@ -162,15 +139,6 @@ impl_try_collector! {
 impl_try_collector! {
     #[derive(Debug, PartialEq)]
     #[cfg_attr(feature = "serde-resolvers", derive(Serialize, Deserialize))]
-    pub struct GasFixResolution {
-        pub timer_callback: UObjectTemperatureComponentTimerCallback,
-        pub process_multicast_delegate: ProcessMulticastDelegate,
-    }
-}
-
-impl_try_collector! {
-    #[derive(Debug, PartialEq)]
-    #[cfg_attr(feature = "serde-resolvers", derive(Serialize, Deserialize))]
     pub struct CoreResolution {
         pub gmalloc: GMalloc,
         pub main: Main,
@@ -191,7 +159,6 @@ impl_collector! {
         pub server_name: ServerNameResolution,
         pub server_mods: ServerModsResolution,
         pub save_game: SaveGameResolution,
-        pub gas_fix: GasFixResolution,
         pub core: CoreResolution,
     }
 }

@@ -131,9 +131,7 @@ pub struct Meta {
     pub config: MetaConfig,
 }
 #[derive(Debug, Serialize, Deserialize)]
-pub struct MetaConfig {
-    pub disable_fix_exploding_gas: bool,
-}
+pub struct MetaConfig {}
 #[derive(Debug, Serialize, Deserialize)]
 pub struct SemverVersion {
     pub major: u32,
