@@ -2004,36 +2004,32 @@ impl eframe::App for App {
                     .unwrap_or_default();
 
                 egui::ComboBox::from_id_salt("sort_cat")
-                .selected_text(
-                    {
-                        match sort_category {
-                            None => "Manual",
-                            Some(category) => category.as_str(),
+                    .selected_text(
+                        {
+                            match sort_category {
+                                None => "Manual",
+                                Some(category) => category.as_str(),
+                            }
                         }
-                    }
-                    .to_string(),
-                )
-                .show_ui(ui, |ui| {
-                    if ui
-                        .selectable_value(&mut sort_category, None, "Manual")
-                        .clicked()
-                    {
-                        self.update_sorting_config(sort_category, is_ascending);
-                    };
-                    for category in SortBy::iter() {
-                        let combo_label = category.as_str().to_owned();
+                        .to_string(),
+                    )
+                    .show_ui(ui, |ui| {
                         if ui
-                            .selectable_value(
-                                &mut sort_category,
-                                Some(category),
-                                combo_label,
-                            )
+                            .selectable_value(&mut sort_category, None, "Manual")
                             .clicked()
                         {
                             self.update_sorting_config(sort_category, is_ascending);
                         };
-                    }
-                });
+                        for category in SortBy::iter() {
+                            let combo_label = category.as_str().to_owned();
+                            if ui
+                                .selectable_value(&mut sort_category, Some(category), combo_label)
+                                .clicked()
+                            {
+                                self.update_sorting_config(sort_category, is_ascending);
+                            };
+                        }
+                    });
 
                 ui.label("Order: ");
 
