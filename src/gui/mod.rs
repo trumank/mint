@@ -903,7 +903,7 @@ impl App {
         };
 
         while let Ok((rid, res)) = window.rx.try_recv() {
-            if window.check_rid.as_ref().map_or(false, |r| rid == r.0) {
+            if window.check_rid.as_ref().is_some_and(|r| rid == r.0) {
                 match res {
                     Ok(()) => {
                         let window = self.window_provider_parameters.take().unwrap();

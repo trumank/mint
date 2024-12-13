@@ -13,9 +13,7 @@ inventory::submit! {
             re_mod()
                 .captures(url)
                 .and_then(|c| c.name("hostname"))
-                .map_or(false, |h| {
-                    !["mod.io", "drg.mod.io", "drg.old.mod.io"].contains(&h.as_str())
-                })
+                .is_some_and(|h| !["mod.io", "drg.mod.io", "drg.old.mod.io"].contains(&h.as_str()))
         },
         parameters: &[],
     }
