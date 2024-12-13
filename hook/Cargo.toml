@@ -33,4 +33,4 @@ bitflags = "2.6.0"
 widestring = "1.1.0"
 tokio = { workspace = true, features = ["full"] }
 tracing-appender = "0.2.3"
-proxy_dll = { git = "https://github.com/trumank/proxy_dll.git", version = "0.1.0" }
+proxy_dll = { git = "https://github.com/trumank/proxy_dll.git" }
