@@ -21,7 +21,7 @@ tracing.workspace = true
 patternsleuth = { workspace = true, features = ["process-internal", "image-pe"] }
 retour = { git = "https://github.com/Hpmason/retour-rs", features = ["static-detour"] }
 hook_resolvers = { path = "../hook_resolvers" }
-windows = { version = "0.58.0", features = [
+windows = { version = "0.61.1", features = [
   "Win32_Foundation",
   "Win32_System_SystemServices",
   "Win32_System_LibraryLoader",
@@ -29,8 +29,8 @@ windows = { version = "0.58.0", features = [
   "Win32_System_Threading",
 ] }
 mint_lib = { path = "../mint_lib" }
-bitflags = "2.6.0"
-widestring = "1.1.0"
+bitflags = "2.9.0"
+widestring = "1.2.0"
 tokio = { workspace = true, features = ["full"] }
 tracing-appender = "0.2.3"
 proxy_dll = { git = "https://github.com/trumank/proxy_dll.git" }
