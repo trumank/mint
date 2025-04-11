@@ -547,7 +547,7 @@ impl App {
                         .on_hover_text_at_pointer("copy URL")
                         .clicked()
                     {
-                        ui.output_mut(|o| o.copied_text = mc.spec.url.to_string());
+                        ui.ctx().copy_text(mc.spec.url.to_string());
                     }
 
                     if mc.enabled {
@@ -647,7 +647,7 @@ impl App {
                         .on_hover_text_at_pointer("Copy URL")
                         .clicked()
                     {
-                        ui.output_mut(|o| o.copied_text = mc.spec.url.to_string());
+                        ui.ctx().copy_text(mc.spec.url.to_string());
                     }
 
                     let search = searchable_text(&mc.spec.url, &self.search_string, {
@@ -726,7 +726,7 @@ impl App {
                     .sorted_by(|a, b| comp((a.1 .0, a.1 .1.as_ref()), (b.1 .0, b.1 .1.as_ref())))
                     .enumerate()
                     .for_each(|(visual_index, (store_index, item))| {
-                        let mut frame = egui::Frame::none();
+                        let mut frame = egui::Frame::NONE;
                         if visual_index % 2 == 1 {
                             frame.fill = ui.visuals().faint_bg_color
                         }
@@ -742,7 +742,7 @@ impl App {
                     .show(
                         profile.mods.iter_mut().enumerate(),
                         |ui, (_index, item), handle, state| {
-                            let mut frame = egui::Frame::none();
+                            let mut frame = egui::Frame::NONE;
                             if state.dragged {
                                 frame.fill = ui.visuals().extreme_bg_color
                             } else if state.index % 2 == 1 {
@@ -822,7 +822,7 @@ impl App {
                 .fixed_pos(Pos2::ZERO)
                 .order(egui::Order::Background)
                 .show(ctx, |ui| {
-                    egui::Frame::none()
+                    egui::Frame::NONE
                         .fill(Color32::from_rgba_unmultiplied(0, 0, 0, 127))
                         .show(ui, |ui| {
                             ui.allocate_space(ui.available_size());
@@ -1883,12 +1883,8 @@ impl eframe::App for App {
                         ))
                         .clicked()
                     {
-                        ui.ctx().output_mut(|o| {
-                            o.open_url = Some(egui::output::OpenUrl {
-                                url: available_update.html_url.clone(),
-                                new_tab: true,
-                            });
-                        });
+                        ui.ctx()
+                            .open_url(egui::OpenUrl::new_tab(&available_update.html_url));
                     }
                 }
                 ui.with_layout(egui::Layout::left_to_right(Align::TOP), |ui| {
@@ -1936,7 +1932,7 @@ impl eframe::App for App {
                         mods.push(mc.clone());
                     });
                     let mods = Self::build_mod_string(&mods);
-                    ui.output_mut(|o| o.copied_text = mods);
+                    ui.ctx().copy_text(mods);
                 }
 
                 // TODO find better icon, flesh out multiple-view usage, fix GUI locking

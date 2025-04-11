@@ -81,7 +81,7 @@ impl ModProvider for HttpProvider {
 
         let name = url
             .path_segments()
-            .and_then(|s| s.last())
+            .and_then(|mut s| s.next_back())
             .map(|s| s.to_string())
             .unwrap_or_else(|| url.to_string());
 
@@ -217,7 +217,7 @@ impl ModProvider for HttpProvider {
         let url = url::Url::parse(&spec.url).ok()?;
         let name = url
             .path_segments()
-            .and_then(|s| s.last())
+            .and_then(|mut s| s.next_back())
             .map(|s| s.to_string())
             .unwrap_or_else(|| url.to_string());
         Some(ModInfo {

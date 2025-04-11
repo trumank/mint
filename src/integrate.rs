@@ -165,12 +165,12 @@ pub enum IntegrationError {
     #[snafu(display("mod {:?}: I/O error encountered during its processing", mod_info.name))]
     CtxtIoError {
         source: std::io::Error,
-        mod_info: ModInfo,
+        mod_info: Box<ModInfo>,
     },
     #[snafu(display("mod {:?}: repak error encountered during its processing", mod_info.name))]
     CtxtRepakError {
         source: repak::Error,
-        mod_info: ModInfo,
+        mod_info: Box<ModInfo>,
     },
     #[snafu(display(
         "mod {:?}: modfile {} contains unexpected prefix",
@@ -178,7 +178,7 @@ pub enum IntegrationError {
         modfile_path
     ))]
     ModfileInvalidPrefix {
-        mod_info: ModInfo,
+        mod_info: Box<ModInfo>,
         modfile_path: String,
     },
     #[snafu(display(
@@ -187,7 +187,7 @@ pub enum IntegrationError {
     ))]
     CtxtGenericError {
         source: Box<dyn std::error::Error + Send + Sync>,
-        mod_info: ModInfo,
+        mod_info: Box<ModInfo>,
     },
     #[snafu(transparent)]
     ProviderError { source: ProviderError },
@@ -335,7 +335,7 @@ pub fn integrate<P: AsRef<Path>>(
             if let IntegrationError::IoError { source } = e {
                 IntegrationError::CtxtIoError {
                     source,
-                    mod_info: mod_info.clone(),
+                    mod_info: mod_info.clone().into(),
                 }
             } else {
                 e
@@ -357,7 +357,7 @@ pub fn integrate<P: AsRef<Path>>(
                 Ok((
                     j.strip_prefix("../../../")
                         .map_err(|_| IntegrationError::ModfileInvalidPrefix {
-                            mod_info: mod_info.clone(),
+                            mod_info: mod_info.clone().into(),
                             modfile_path: j.to_string(),
                         })?
                         .to_path_buf(),
@@ -394,7 +394,7 @@ pub fn integrate<P: AsRef<Path>>(
                         .populate(normalized.with_extension("").as_str(), &asset)
                         .map_err(|e| IntegrationError::CtxtGenericError {
                             source: e.into(),
-                            mod_info: mod_info.clone(),
+                            mod_info: mod_info.clone().into(),
                         })?;
                 }
                 _ => {}

@@ -42,7 +42,7 @@ pub enum Message {
     FetchModProgress(FetchModProgress),
     UpdateCache(UpdateCache),
     CheckUpdates(CheckUpdates),
-    LintMods(LintMods),
+    LintMods(Box<LintMods>),
     SelfUpdate(SelfUpdate),
     FetchSelfUpdateProgress(FetchSelfUpdateProgress),
 }
@@ -448,10 +448,13 @@ impl LintMods {
                 Err(e) => Err(e),
             };
 
-            tx.send(Message::LintMods(LintMods {
-                rid,
-                result: report_res,
-            }))
+            tx.send(Message::LintMods(
+                LintMods {
+                    rid,
+                    result: report_res,
+                }
+                .into(),
+            ))
             .await
             .unwrap();
             ctx.request_repaint();
