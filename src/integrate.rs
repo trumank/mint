@@ -7,7 +7,7 @@ use fs_err as fs;
 use repak::PakWriter;
 use serde::Deserialize;
 use snafu::{prelude::*, Whatever};
-use tracing::info;
+use tracing::{info, warn};
 use uasset_utils::asset_registry::{AssetRegistry, Readable as _, Writable as _};
 use uasset_utils::paths::{PakPath, PakPathBuf, PakPathComponentTrait};
 use uasset_utils::splice::{
@@ -389,7 +389,16 @@ pub fn integrate<P: AsRef<Path>>(
                     let asset = AssetBuilder::new(Cursor::new(uasset), EngineVersion::VER_UE4_27)
                         .bulk(Cursor::new(uexp))
                         .skip_data(true)
-                        .build()?;
+                        .build();
+
+                    let asset = match asset {
+                        Ok(asset) => asset,
+                        Err(err) => {
+                            warn!("failed to parse asset {normalized}: {err}");
+                            continue;
+                        }
+                    };
+
                     asset_registry
                         .populate(normalized.with_extension("").as_str(), &asset)
                         .map_err(|e| IntegrationError::CtxtGenericError {
