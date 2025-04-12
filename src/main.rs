@@ -84,7 +84,7 @@ enum Action {
 }
 
 #[derive(Parser, Debug)]
-#[command(author, version)]
+#[command(author, version=mint_lib::built_info::GIT_VERSION.unwrap())]
 struct Args {
     #[command(subcommand)]
     action: Option<Action>,
