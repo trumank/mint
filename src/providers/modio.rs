@@ -17,7 +17,7 @@ use crate::providers::*;
 
 static RE_MOD: OnceLock<regex::Regex> = OnceLock::new();
 fn re_mod() -> &'static regex::Regex {
-    RE_MOD.get_or_init(|| regex::Regex::new("^https://mod.io/g/drg/m/(?P<name_id>[^/#]+)(:?#(?P<mod_id>\\d+)(:?/(?P<modfile_id>\\d+))?)?$").unwrap())
+    RE_MOD.get_or_init(|| regex::Regex::new("^https://mod\\.io/g/drg/m/(?P<name_id>[^/#]+)(?:#(?:(?P<mod_id>\\d+)(?:/(?P<modfile_id>\\d+))?|[a-z]+))?$").unwrap())
 }
 
 const MODIO_DRG_ID: u32 = 2475;
