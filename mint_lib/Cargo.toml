@@ -21,4 +21,4 @@ reqwest.workspace = true
 snafu.workspace = true
 
 [build-dependencies]
-built = { version = "0.7.3", features = ["semver", "git2"] }
+built = { version = "0.8.0", features = ["semver", "git2"] }
