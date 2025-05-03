@@ -15,14 +15,15 @@ impl Lint for AssetRegisterBinLint {
 
         lcx.for_each_mod_file(|mod_spec, _, _, raw_path, normalized_path| {
             if let Some(filename) = raw_path.file_name()
-                && filename == "AssetRegistry.bin" {
-                    asset_register_bin_mods
-                        .entry(mod_spec.clone())
-                        .and_modify(|paths: &mut BTreeSet<String>| {
-                            paths.insert(normalized_path.clone());
-                        })
-                        .or_insert_with(|| [normalized_path.clone()].into());
-                }
+                && filename == "AssetRegistry.bin"
+            {
+                asset_register_bin_mods
+                    .entry(mod_spec.clone())
+                    .and_modify(|paths: &mut BTreeSet<String>| {
+                        paths.insert(normalized_path.clone());
+                    })
+                    .or_insert_with(|| [normalized_path.clone()].into());
+            }
 
             Ok(())
         })?;

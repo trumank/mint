@@ -859,9 +859,9 @@ fn hook_pcb<R: Read + Seek>(asset: &mut Asset<R>) {
                     .get_base_export()
                     .object_name
                     .get_content(|n| n == "ReceiveBeginPlay")
-                {
-                    return Some((PackageIndex::from_export(i as i32).unwrap(), func));
-                }
+            {
+                return Some((PackageIndex::from_export(i as i32).unwrap(), func));
+            }
             None
         })
         .unwrap();
@@ -1065,9 +1065,10 @@ fn patch<C: Seek + Read>(asset: &mut Asset<C>) -> Result<(), IntegrationError> {
     ) -> Option<TrackedStatement> {
         walk(&mut statement.ex, &|ex| {
             if let KismetExpression::ExCallMath(f) = ex
-                && (Some(f.stack_node) == is_modded || Some(f.stack_node) == is_modded_sandbox) {
-                    *ex = ExFalse::default().into()
-                }
+                && (Some(f.stack_node) == is_modded || Some(f.stack_node) == is_modded_sandbox)
+            {
+                *ex = ExFalse::default().into()
+            }
         });
         Some(statement)
     }
@@ -1093,12 +1094,13 @@ fn patch_modding_tab<C: Seek + Read>(asset: &mut Asset<C>) -> Result<(), Integra
         for statement in statements {
             walk(&mut statement.ex, &|ex| {
                 if let KismetExpression::ExSetArray(arr) = ex
-                    && arr.elements.len() == 2 {
-                        arr.elements.retain(|e| !matches!(e, KismetExpression::ExInstanceVariable(v) if v.variable.new.as_ref().unwrap().path.last().unwrap().get_content(|c| c == "BTN_Modding")));
-                        if arr.elements.len() != 2 {
-                            info!("patched modding tab visibility");
-                        }
+                    && arr.elements.len() == 2
+                {
+                    arr.elements.retain(|e| !matches!(e, KismetExpression::ExInstanceVariable(v) if v.variable.new.as_ref().unwrap().path.last().unwrap().get_content(|c| c == "BTN_Modding")));
+                    if arr.elements.len() != 2 {
+                        info!("patched modding tab visibility");
                     }
+                }
             });
         }
     }

@@ -243,9 +243,10 @@ pub struct FetchModProgress {
 impl FetchModProgress {
     fn receive(self, app: &mut App) {
         if let Some(MessageHandle { rid, state, .. }) = &mut app.integrate_rid
-            && *rid == self.rid {
-                state.insert(self.spec, self.progress);
-            }
+            && *rid == self.rid
+        {
+            state.insert(self.spec, self.progress);
+        }
     }
 }
 
@@ -338,11 +339,11 @@ impl CheckUpdates {
                             .tag_name
                             .strip_prefix('v')
                             .map(semver::Version::parse),
-                    )
-                        && release_version > version {
-                            app.available_update = Some(release);
-                            app.show_update_time = Some(SystemTime::now());
-                        }
+                    ) && release_version > version
+                    {
+                        app.available_update = Some(release);
+                        app.show_update_time = Some(SystemTime::now());
+                    }
                 }
                 Err(e) => tracing::warn!("failed to fetch update {e}"),
             }
@@ -593,9 +594,10 @@ pub struct FetchSelfUpdateProgress {
 impl FetchSelfUpdateProgress {
     fn receive(self, app: &mut App) {
         if let Some(MessageHandle { rid, state, .. }) = &mut app.self_update_rid
-            && *rid == self.rid {
-                *state = self.progress;
-            }
+            && *rid == self.rid
+        {
+            *state = self.progress;
+        }
     }
 }
 

@@ -168,14 +168,15 @@ impl Middleware for LoggingMiddleware {
             );
             let res = next.clone().run(req.try_clone().unwrap(), extensions).await;
             if let Ok(res) = &res
-                && let Some(retry) = res.headers().get("retry-after") {
-                    info!("retrying after: {}...", retry.to_str().unwrap());
-                    tokio::time::sleep(tokio::time::Duration::from_secs(
-                        retry.to_str().unwrap().parse::<u64>().unwrap(),
-                    ))
-                    .await;
-                    continue;
-                }
+                && let Some(retry) = res.headers().get("retry-after")
+            {
+                info!("retrying after: {}...", retry.to_str().unwrap());
+                tokio::time::sleep(tokio::time::Duration::from_secs(
+                    retry.to_str().unwrap().parse::<u64>().unwrap(),
+                ))
+                .await;
+                continue;
+            }
             return res;
         }
     }
