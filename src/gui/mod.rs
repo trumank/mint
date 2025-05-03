@@ -457,23 +457,24 @@ impl App {
                 }
 
                 if mc.enabled
-                    && let Some(req) = &self.integrate_rid {
-                        match req.state.get(&mc.spec) {
-                            Some(SpecFetchProgress::Progress { progress, size }) => {
-                                ui.add(
-                                    egui::ProgressBar::new(*progress as f32 / *size as f32)
-                                        .show_percentage()
-                                        .desired_width(100.0),
-                                );
-                            }
-                            Some(SpecFetchProgress::Complete) => {
-                                ui.add(egui::ProgressBar::new(1.0).desired_width(100.0));
-                            }
-                            None => {
-                                ui.spinner();
-                            }
+                    && let Some(req) = &self.integrate_rid
+                {
+                    match req.state.get(&mc.spec) {
+                        Some(SpecFetchProgress::Progress { progress, size }) => {
+                            ui.add(
+                                egui::ProgressBar::new(*progress as f32 / *size as f32)
+                                    .show_percentage()
+                                    .desired_width(100.0),
+                            );
+                        }
+                        Some(SpecFetchProgress::Complete) => {
+                            ui.add(egui::ProgressBar::new(1.0).desired_width(100.0));
+                        }
+                        None => {
+                            ui.spinner();
                         }
                     }
+                }
 
                 if let Some(info) = &info {
                     egui::ComboBox::from_id_salt(row_index)
@@ -1736,18 +1737,18 @@ impl eframe::App for App {
                                     }
                                 })
                                 .clicked()
-                            {
-                                let args = args.clone();
-                                std::thread::spawn(move || {
-                                    let mut iter = args.iter();
-                                    std::process::Command::new(iter.next().unwrap())
-                                        .args(iter)
-                                        .spawn()
-                                        .unwrap()
-                                        .wait()
-                                        .unwrap();
-                                });
-                            }
+                        {
+                            let args = args.clone();
+                            std::thread::spawn(move || {
+                                let mut iter = args.iter();
+                                std::process::Command::new(iter.next().unwrap())
+                                    .args(iter)
+                                    .spawn()
+                                    .unwrap()
+                                    .wait()
+                                    .unwrap();
+                            });
+                        }
 
                         ui.add_enabled_ui(self.state.config.drg_pak_path.is_some(), |ui| {
                             let mut button = ui.button("Install mods");
@@ -1868,10 +1869,10 @@ impl eframe::App for App {
                             available_update.tag_name, available_update.html_url
                         ))
                         .clicked()
-                    {
-                        ui.ctx()
-                            .open_url(egui::OpenUrl::new_tab(&available_update.html_url));
-                    }
+                {
+                    ui.ctx()
+                        .open_url(egui::OpenUrl::new_tab(&available_update.html_url));
+                }
                 ui.with_layout(egui::Layout::left_to_right(Align::TOP), |ui| {
                     if let Some(last_action) = &self.last_action {
                         let msg = match &last_action.status {
