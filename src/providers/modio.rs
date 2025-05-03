@@ -17,7 +17,30 @@ use crate::providers::*;
 
 static RE_MOD: OnceLock<regex::Regex> = OnceLock::new();
 fn re_mod() -> &'static regex::Regex {
-    RE_MOD.get_or_init(|| regex::Regex::new("^https://mod\\.io/g/drg/m/(?P<name_id>[^/#]+)(?:#(?:(?P<mod_id>\\d+)(?:/(?P<modfile_id>\\d+))?|[a-z]+))?$").unwrap())
+    RE_MOD.get_or_init(|| regex::Regex::new("^https://mod\\.io/g/drg/m/(?P<name_id>[^/#]+)/?(?:#(?:(?P<mod_id>\\d+)(?:/(?P<modfile_id>\\d+))?|[a-z]+))?$").unwrap())
+}
+
+fn parse_url(url: &str) -> Result<ModIoModUrl, ProviderError> {
+    let captures = re_mod().captures(url).context(InvalidUrlSnafu {
+        url: url.to_string(),
+    })?;
+
+    Ok(ModIoModUrl {
+        name_id: captures.name("name_id").unwrap().as_str(),
+        mod_id: captures
+            .name("mod_id")
+            .and_then(|m| m.as_str().parse().ok()),
+        modfile_id: captures
+            .name("modfile_id")
+            .and_then(|m| m.as_str().parse().ok()),
+    })
+}
+
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+struct ModIoModUrl<'n> {
+    name_id: &'n str,
+    mod_id: Option<u32>,
+    modfile_id: Option<u32>,
 }
 
 const MODIO_DRG_ID: u32 = 2475;
@@ -27,7 +50,7 @@ inventory::submit! {
     super::ProviderFactory {
         id: MODIO_PROVIDER_ID,
         new: ModioProvider::<modio::Modio>::new_provider,
-        can_provide: |url| re_mod().is_match(url),
+        can_provide: |url| parse_url(url).is_ok(),
         parameters: &[
             super::ProviderParameter {
                 id: "oauth",
@@ -506,16 +529,10 @@ impl<M: DrgModio + Send + Sync> ModProvider for ModioProvider<M> {
         }
 
         let url = &spec.url;
-        let captures = re_mod().captures(url).context(InvalidUrlSnafu {
-            url: url.to_string(),
-        })?;
+        let parsed = parse_url(url)?;
 
-        if let (Some(mod_id), Some(_modfile_id)) =
-            (captures.name("mod_id"), captures.name("modfile_id"))
-        {
+        if let (Some(mod_id), Some(_modfile_id)) = (parsed.mod_id, parsed.modfile_id) {
             // both mod ID and modfile ID specified, but not necessarily name
-            let mod_id = mod_id.as_str().parse::<u32>().unwrap();
-
             let mod_ =
                 if let Some(mod_) = read_cache(&cache, update, |c| c.mods.get(&mod_id).cloned()) {
                     mod_
@@ -609,10 +626,8 @@ impl<M: DrgModio + Send + Sync> ModProvider for ModioProvider<M> {
                 modio_tags: Some(process_modio_tags(&mod_.tags)),
                 modio_id: Some(mod_id),
             }))
-        } else if let Some(mod_id) = captures.name("mod_id") {
+        } else if let Some(mod_id) = parsed.mod_id {
             // only mod ID specified, use latest version (either cached local or remote depending)
-            let mod_id = mod_id.as_str().parse::<u32>().unwrap();
-
             let mod_ = match read_cache(&cache, update, |c| c.mods.get(&mod_id).cloned()) {
                 Some(mod_) => mod_,
                 None => {
@@ -636,7 +651,7 @@ impl<M: DrgModio + Send + Sync> ModProvider for ModioProvider<M> {
                 ),
             )))
         } else {
-            let name_id = captures.name("name_id").unwrap().as_str();
+            let name_id = parsed.name_id;
 
             let cached_id = read_cache(&cache, update, |c| c.mod_id_map.get(name_id).cloned());
 
@@ -708,20 +723,14 @@ impl<M: DrgModio + Send + Sync> ModProvider for ModioProvider<M> {
         tx: Option<Sender<FetchProgress>>,
     ) -> Result<PathBuf, ProviderError> {
         let url = &res.url;
-        let captures = re_mod()
-            .captures(&res.url.0)
-            .with_context(|| InvalidUrlSnafu {
-                url: url.0.to_string(),
-            })?;
+        let parsed = parse_url(&res.url.0)?;
 
-        if let (Some(_name_id), Some(mod_id), Some(modfile_id)) = (
-            captures.name("name_id"),
-            captures.name("mod_id"),
-            captures.name("modfile_id"),
-        ) {
-            let mod_id = mod_id.as_str().parse::<u32>().unwrap();
-            let modfile_id = modfile_id.as_str().parse::<u32>().unwrap();
-
+        if let ModIoModUrl {
+            name_id: _,
+            mod_id: Some(mod_id),
+            modfile_id: Some(modfile_id),
+        } = parsed
+        {
             Ok(
                 if let Some(path) = {
                     let path = cache
@@ -902,24 +911,22 @@ impl<M: DrgModio + Send + Sync> ModProvider for ModioProvider<M> {
 
     fn get_mod_info(&self, spec: &ModSpecification, cache: ProviderCache) -> Option<ModInfo> {
         let url = &spec.url;
-        let captures = re_mod().captures(url)?;
+        let parsed = parse_url(url).ok()?;
 
         let cache = cache.read().unwrap();
         let prov = cache.get::<ModioCache>(MODIO_PROVIDER_ID)?;
 
-        let mod_id = if let Some(mod_id) = captures.name("mod_id") {
-            mod_id.as_str().parse::<u32>().ok()
-        } else if let Some(name_id) = captures.name("name_id") {
-            prov.mod_id_map.get(name_id.as_str()).cloned()
+        let mod_id = if let Some(mod_id) = parsed.mod_id {
+            mod_id
         } else {
-            None
-        }?;
+            prov.mod_id_map.get(parsed.name_id).cloned()?
+        };
         let mod_ = prov.mods.get(&mod_id)?;
-        let modfile_id = if let Some(modfile_id) = captures.name("modfile_id") {
-            modfile_id.as_str().parse::<u32>().ok()
+        let modfile_id = if let Some(modfile_id) = parsed.modfile_id {
+            modfile_id
         } else {
-            mod_.modfiles.last().map(|f| f.id)
-        }?;
+            mod_.modfiles.last().map(|f| f.id)?
+        };
 
         let deps = prov
             .dependencies
@@ -954,48 +961,37 @@ impl<M: DrgModio + Send + Sync> ModProvider for ModioProvider<M> {
     }
 
     fn is_pinned(&self, spec: &ModSpecification, _cache: ProviderCache) -> bool {
-        let url = &spec.url;
-        let captures = re_mod().captures(url).unwrap();
-
-        captures.name("modfile_id").is_some()
+        parse_url(&spec.url)
+            .ok()
+            .is_some_and(|p| p.modfile_id.is_some())
     }
 
     fn get_version_name(&self, spec: &ModSpecification, cache: ProviderCache) -> Option<String> {
-        let url = &spec.url;
-        let captures = re_mod().captures(url).unwrap();
+        let parsed = parse_url(&spec.url).ok()?;
 
         let cache = cache.read().unwrap();
         let prov = cache.get::<ModioCache>(MODIO_PROVIDER_ID);
 
-        let mod_id = if let Some(mod_id) = captures.name("mod_id") {
-            mod_id.as_str().parse::<u32>().ok()
-        } else if let Some(name_id) = captures.name("name_id") {
-            prov.and_then(|c| c.mod_id_map.get(name_id.as_str()).cloned())
+        let mod_id = if let Some(mod_id) = parsed.mod_id {
+            mod_id
         } else {
-            None
+            prov.and_then(|c| c.mod_id_map.get(parsed.name_id).cloned())?
         };
 
-        if let Some(mod_id) = mod_id {
-            if let Some(mod_) = prov.and_then(|c| c.mods.get(&mod_id).cloned()) {
-                if let Some(file_id_str) = captures.name("modfile_id") {
-                    let file_id = file_id_str.as_str().parse::<u32>().unwrap();
-                    if let Some(file) = mod_.modfiles.iter().find(|f| f.id == file_id) {
-                        if let Some(version) = &file.version {
-                            Some(format!("{} - {}", file.id, version))
-                        } else {
-                            Some(file_id_str.as_str().to_string())
-                        }
-                    } else {
-                        Some(file_id_str.as_str().to_string())
-                    }
+        let mod_ = prov.and_then(|c| c.mods.get(&mod_id).cloned())?;
+
+        if let Some(file_id) = parsed.modfile_id {
+            if let Some(file) = mod_.modfiles.iter().find(|f| f.id == file_id) {
+                if let Some(version) = &file.version {
+                    Some(format!("{} - {}", file.id, version))
                 } else {
-                    Some("latest".to_string())
+                    Some(file_id.to_string())
                 }
             } else {
-                None
+                Some(file_id.to_string())
             }
         } else {
-            None
+            Some("latest".to_string())
         }
     }
 }
@@ -1039,12 +1035,64 @@ fn process_modio_tags(set: &HashSet<String>) -> ModioTags {
 
 #[cfg(test)]
 mod test {
-    use super::{
-        Arc, DrgModioError, HashMap, HashSet, MockDrgModio, ModProvider, ModResponse,
-        ModSpecification, ModioCache, ModioFile, ModioMod, ModioModResponse, ModioProvider,
-        OnceLock, RwLock, VersionAnnotatedCache, MODIO_PROVIDER_ID,
-    };
+    use super::*;
     use crate::state::config::ConfigWrapper;
+
+    #[test]
+    fn test_modio_url() {
+        let valid_mod = ModIoModUrl {
+            name_id: "build-inspector",
+            mod_id: None,
+            modfile_id: None,
+        };
+        assert_eq!(
+            parse_url("https://mod.io/g/drg/m/build-inspector").ok(),
+            Some(valid_mod)
+        );
+        assert_eq!(
+            parse_url("https://mod.io/g/drg/m/build-inspector/").ok(),
+            Some(valid_mod)
+        );
+        assert_eq!(
+            parse_url("https://mod.io/g/drg/m/build-inspector#discussion").ok(),
+            Some(valid_mod)
+        );
+        assert_eq!(
+            parse_url("https://mod.io/g/drg/m/build-inspector/#discussion").ok(),
+            Some(valid_mod)
+        );
+
+        let valid_mod = ModIoModUrl {
+            name_id: "build-inspector",
+            mod_id: Some(2101319),
+            modfile_id: None,
+        };
+        assert_eq!(
+            parse_url("https://mod.io/g/drg/m/build-inspector#2101319").ok(),
+            Some(valid_mod)
+        );
+        assert_eq!(
+            parse_url("https://mod.io/g/drg/m/build-inspector/#2101319").ok(),
+            Some(valid_mod)
+        );
+
+        let valid_mod = ModIoModUrl {
+            name_id: "build-inspector",
+            mod_id: Some(2101319),
+            modfile_id: Some(3169221),
+        };
+        assert_eq!(
+            parse_url("https://mod.io/g/drg/m/build-inspector#2101319/3169221").ok(),
+            Some(valid_mod)
+        );
+        assert_eq!(
+            parse_url("https://mod.io/g/drg/m/build-inspector/#2101319/3169221").ok(),
+            Some(valid_mod)
+        );
+
+        // should no panic
+        parse_url("https://mod.io/g/drg/m/build-inspector#12345678912456789123456789").ok();
+    }
 
     #[tokio::test]
     async fn test_check_pass() {
