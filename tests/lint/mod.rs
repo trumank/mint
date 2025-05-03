@@ -25,7 +25,7 @@ pub fn test_lint_conflicting_files() {
         conflicting_mods, ..
     } = mint::mod_lints::run_lints(&[LintId::CONFLICTING].into(), mods.into(), None).unwrap();
 
-    println!("{:#?}", conflicting_mods);
+    println!("{conflicting_mods:#?}");
 
     assert_eq!(
         conflicting_mods.unwrap().get("fsd/content/a.uexp"),
@@ -53,7 +53,7 @@ pub fn test_lint_shader() {
         shader_file_mods, ..
     } = mint::mod_lints::run_lints(&[LintId::SHADER_FILES].into(), mods.into(), None).unwrap();
 
-    println!("{:#?}", shader_file_mods);
+    println!("{shader_file_mods:#?}");
 
     assert_eq!(
         shader_file_mods.unwrap().get(&a_spec),
@@ -83,7 +83,7 @@ pub fn test_lint_asset_registry_bin() {
     } = mint::mod_lints::run_lints(&[LintId::ASSET_REGISTRY_BIN].into(), mods.into(), None)
         .unwrap();
 
-    println!("{:#?}", asset_register_bin_mods);
+    println!("{asset_register_bin_mods:#?}");
 
     assert_eq!(
         asset_register_bin_mods.unwrap().get(&a_spec),
@@ -108,7 +108,7 @@ pub fn test_lint_outdated_pak_version() {
     } = mint::mod_lints::run_lints(&[LintId::OUTDATED_PAK_VERSION].into(), mods.into(), None)
         .unwrap();
 
-    println!("{:#?}", outdated_pak_version_mods);
+    println!("{outdated_pak_version_mods:#?}");
 
     assert_eq!(
         outdated_pak_version_mods.unwrap().get(&outdated_spec),
@@ -131,7 +131,7 @@ pub fn test_lint_empty_archive() {
         empty_archive_mods, ..
     } = mint::mod_lints::run_lints(&[LintId::EMPTY_ARCHIVE].into(), mods.into(), None).unwrap();
 
-    println!("{:#?}", empty_archive_mods);
+    println!("{empty_archive_mods:#?}");
 
     assert!(empty_archive_mods.unwrap().contains(&empty_archive_spec));
 }
@@ -165,7 +165,7 @@ pub fn test_lint_only_non_pak_files() {
     )
     .unwrap();
 
-    println!("{:#?}", archive_with_only_non_pak_files_mods);
+    println!("{archive_with_only_non_pak_files_mods:#?}");
 
     assert!(archive_with_only_non_pak_files_mods
         .unwrap()
@@ -193,7 +193,7 @@ pub fn test_lint_multi_pak_archive() {
     )
     .unwrap();
 
-    println!("{:#?}", archive_with_multiple_paks_mods);
+    println!("{archive_with_multiple_paks_mods:#?}");
 
     assert!(archive_with_multiple_paks_mods
         .unwrap()
@@ -216,7 +216,7 @@ pub fn test_lint_non_asset_files() {
         ..
     } = mint::mod_lints::run_lints(&[LintId::NON_ASSET_FILES].into(), mods.into(), None).unwrap();
 
-    println!("{:#?}", non_asset_file_mods);
+    println!("{non_asset_file_mods:#?}");
 
     assert_eq!(
         non_asset_file_mods.unwrap().get(&non_asset_files_spec),
@@ -240,7 +240,7 @@ pub fn test_lint_split_asset_pairs() {
         ..
     } = mint::mod_lints::run_lints(&[LintId::SPLIT_ASSET_PAIRS].into(), mods.into(), None).unwrap();
 
-    println!("{:#?}", split_asset_pairs_mods);
+    println!("{split_asset_pairs_mods:#?}");
 
     assert_eq!(
         split_asset_pairs_mods.unwrap().get(&split_asset_pairs_spec),
@@ -286,7 +286,7 @@ pub fn test_lint_unmodified_game_assets() {
     )
     .unwrap();
 
-    println!("{:#?}", unmodified_game_assets_mods);
+    println!("{unmodified_game_assets_mods:#?}");
 
     assert_eq!(
         unmodified_game_assets_mods

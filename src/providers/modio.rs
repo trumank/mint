@@ -41,9 +41,9 @@ inventory::submit! {
 
 fn format_spec(name_id: &str, mod_id: u32, file_id: Option<u32>) -> ModSpecification {
     ModSpecification::new(if let Some(file_id) = file_id {
-        format!("https://mod.io/g/drg/m/{}#{}/{}", name_id, mod_id, file_id)
+        format!("https://mod.io/g/drg/m/{name_id}#{mod_id}/{file_id}")
     } else {
-        format!("https://mod.io/g/drg/m/{}#{}", name_id, mod_id)
+        format!("https://mod.io/g/drg/m/{name_id}#{mod_id}")
     })
 }
 
@@ -167,8 +167,8 @@ impl Middleware for LoggingMiddleware {
                 req.url().path()
             );
             let res = next.clone().run(req.try_clone().unwrap(), extensions).await;
-            if let Ok(res) = &res {
-                if let Some(retry) = res.headers().get("retry-after") {
+            if let Ok(res) = &res
+                && let Some(retry) = res.headers().get("retry-after") {
                     info!("retrying after: {}...", retry.to_str().unwrap());
                     tokio::time::sleep(tokio::time::Duration::from_secs(
                         retry.to_str().unwrap().parse::<u64>().unwrap(),
@@ -176,7 +176,6 @@ impl Middleware for LoggingMiddleware {
                     .await;
                     continue;
                 }
-            }
             return res;
         }
     }

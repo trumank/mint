@@ -106,11 +106,10 @@ impl LintCtxt {
                 })
                 .collect::<Vec<_>>();
 
-            if individual_pak_readers.len() > 1 {
-                if let Some(ref mut handler) = multiple_pak_files_handler {
+            if individual_pak_readers.len() > 1
+                && let Some(ref mut handler) = multiple_pak_files_handler {
                     handler(mod_spec.clone());
                 }
-            }
 
             let mut first_pak_read_seek = individual_pak_readers.remove(0);
             let pak_reader = repak::PakBuilder::new().reader(&mut first_pak_read_seek)?;
@@ -173,8 +172,8 @@ pub(crate) fn lint_get_all_files_from_data(
                 .by_index(i)
                 .map_err(|_| LintError::ZipArchiveError)?;
 
-            if let Some(p) = file.enclosed_name().as_deref().map(Path::to_path_buf) {
-                if file.is_file() {
+            if let Some(p) = file.enclosed_name().as_deref().map(Path::to_path_buf)
+                && file.is_file() {
                     if p.extension().filter(|e| e == &"pak").is_some() {
                         let mut buf = vec![];
                         file.read_to_end(&mut buf)?;
@@ -188,7 +187,6 @@ pub(crate) fn lint_get_all_files_from_data(
                         files.push((p.to_path_buf(), PakOrNotPak::NotPak));
                     }
                 }
-            }
         }
 
         if files
