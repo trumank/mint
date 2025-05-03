@@ -262,6 +262,6 @@ async fn action_lint(dirs: Dirs, action: ActionLint) -> Result<()> {
         )
     })
     .await??;
-    println!("{:#?}", report);
+    println!("{report:#?}");
     Ok(())
 }

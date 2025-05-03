@@ -14,8 +14,8 @@ impl Lint for AssetRegisterBinLint {
         let mut asset_register_bin_mods = BTreeMap::new();
 
         lcx.for_each_mod_file(|mod_spec, _, _, raw_path, normalized_path| {
-            if let Some(filename) = raw_path.file_name() {
-                if filename == "AssetRegistry.bin" {
+            if let Some(filename) = raw_path.file_name()
+                && filename == "AssetRegistry.bin" {
                     asset_register_bin_mods
                         .entry(mod_spec.clone())
                         .and_modify(|paths: &mut BTreeSet<String>| {
@@ -23,7 +23,6 @@ impl Lint for AssetRegisterBinLint {
                         })
                         .or_insert_with(|| [normalized_path.clone()].into());
                 }
-            }
 
             Ok(())
         })?;

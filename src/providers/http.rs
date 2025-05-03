@@ -171,8 +171,8 @@ impl ModProvider for HttpProvider {
                         .with_context(|_| BufferIoSnafu {
                             url: url.0.to_string(),
                         })?;
-                    if let Some(size) = size {
-                        if let Some(tx) = &tx {
+                    if let Some(size) = size
+                        && let Some(tx) = &tx {
                             tx.send(FetchProgress::Progress {
                                 resolution: res.clone(),
                                 progress: cursor.get_ref().len() as u64,
@@ -181,7 +181,6 @@ impl ModProvider for HttpProvider {
                             .await
                             .unwrap();
                         }
-                    }
                 }
 
                 let blob = blob_cache.write(&cursor.into_inner())?;
