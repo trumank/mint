@@ -12,7 +12,7 @@ use patternsleuth::resolvers::unreal::save_game::{
 use patternsleuth::resolvers::unreal::*;
 use patternsleuth::resolvers::*;
 use patternsleuth::scanner::Pattern;
-use patternsleuth::MemoryAccessorTrait;
+use patternsleuth::MemoryTrait;
 
 #[cfg(feature = "serde-resolvers")]
 use serde::{Deserialize, Serialize};

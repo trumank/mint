@@ -4051,9 +4051,9 @@ dependencies = [
 
 [[package]]
 name = "paste"
-version = "1.0.14"
+version = "1.0.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "de3145af08024dea9fa9914f381a17b8fc6034dfb00f3a84013f7ff43f29ed4c"
+checksum = "57c0d7b74b563b49d38dae00a0c37d4d6de9b432382b2892f0574ddcae73fd0a"
 
 [[package]]
 name = "path-slash"
@@ -4064,7 +4064,7 @@ checksum = "1e91099d4268b0e11973f036e885d652fb0b21fedcf69738c627f94db6a44f42"
 [[package]]
 name = "patternsleuth"
 version = "0.1.0"
-source = "git+https://github.com/trumank/patternsleuth#0dd42ebc378c02984eefcd21ff782ca92a48f941"
+source = "git+https://github.com/trumank/patternsleuth#5786164189604fd55f647aa38ef0bfd6f23f7d58"
 dependencies = [
  "anyhow",
  "futures",
@@ -4075,6 +4075,7 @@ dependencies = [
  "libc",
  "memchr",
  "object",
+ "paste",
  "patternsleuth_scanner",
  "rayon",
  "strum 0.25.0",
@@ -4085,7 +4086,7 @@ dependencies = [
 [[package]]
 name = "patternsleuth_scanner"
 version = "0.1.0"
-source = "git+https://github.com/trumank/patternsleuth#0dd42ebc378c02984eefcd21ff782ca92a48f941"
+source = "git+https://github.com/trumank/patternsleuth#5786164189604fd55f647aa38ef0bfd6f23f7d58"
 dependencies = [
  "anyhow",
  "memchr",
