@@ -59,80 +59,82 @@ pub unsafe fn initialize() -> Result<()> {
     .cloned()
     .collect::<std::collections::HashMap<_, ExecFn>>();
 
-    WinMain.initialize(
-        std::mem::transmute(globals().resolution.core.as_ref().unwrap().main.0),
-        detour_main,
-    )?;
-    WinMain.enable()?;
+    unsafe {
+        WinMain.initialize(
+            std::mem::transmute(globals().resolution.core.as_ref().unwrap().main.0),
+            detour_main,
+        )?;
+        WinMain.enable()?;
 
-    HookUFunctionBind.initialize(
-        std::mem::transmute(globals().resolution.core.as_ref().unwrap().ufunction_bind.0),
-        move |function| {
-            HookUFunctionBind.call(function);
-            if let Some(function) = function.as_mut() {
-                let path = function
-                    .ustruct
-                    .ufield
-                    .uobject
-                    .uobject_base_utility
-                    .uobject_base
-                    .get_path_name(None);
-                if let Some(hook) = hooks.get(path.as_str()) {
-                    function
-                        .function_flags
-                        .insert(ue::EFunctionFlags::FUNC_Native);
-                    function.func = *hook;
+        HookUFunctionBind.initialize(
+            std::mem::transmute(globals().resolution.core.as_ref().unwrap().ufunction_bind.0),
+            move |function| {
+                HookUFunctionBind.call(function);
+                if let Some(function) = function.as_mut() {
+                    let path = function
+                        .ustruct
+                        .ufield
+                        .uobject
+                        .uobject_base_utility
+                        .uobject_base
+                        .get_path_name(None);
+                    if let Some(hook) = hooks.get(path.as_str()) {
+                        function
+                            .function_flags
+                            .insert(ue::EFunctionFlags::FUNC_Native);
+                        function.func = *hook;
+                    }
+                }
+            },
+        )?;
+        HookUFunctionBind.enable()?;
+
+        server_list::init_hooks()?;
+
+        let installation_type = DRGInstallationType::from_exe_path()?;
+
+        match installation_type {
+            DRGInstallationType::Steam => {
+                if let Ok(address) = &globals().resolution.disable {
+                    patch_mem(
+                        (address.0 as *mut u8).add(29),
+                        [0xB8, 0x01, 0x00, 0x00, 0x00],
+                    )?;
                 }
             }
-        },
-    )?;
-    HookUFunctionBind.enable()?;
+            DRGInstallationType::Xbox => {
+                let saves_dir = std::env::current_exe()
+                    .ok()
+                    .as_deref()
+                    .and_then(Path::parent)
+                    .and_then(Path::parent)
+                    .and_then(Path::parent)
+                    .context("could not determine save location")?
+                    .join("Saved")
+                    .join("SaveGames");
+                SAVES_DIR.get_or_init(|| saves_dir);
 
-    server_list::init_hooks()?;
+                if let Ok(save_game) = &globals().resolution.save_game {
+                    SaveGameToSlot
+                        .initialize(
+                            std::mem::transmute(save_game.save_game_to_slot.0),
+                            save_game_to_slot_detour,
+                        )?
+                        .enable()?;
+                    LoadGameFromSlot
+                        .initialize(
+                            std::mem::transmute(save_game.load_game_from_slot.0),
+                            load_game_from_slot_detour,
+                        )?
+                        .enable()?;
 
-    let installation_type = DRGInstallationType::from_exe_path()?;
-
-    match installation_type {
-        DRGInstallationType::Steam => {
-            if let Ok(address) = &globals().resolution.disable {
-                patch_mem(
-                    (address.0 as *mut u8).add(29),
-                    [0xB8, 0x01, 0x00, 0x00, 0x00],
-                )?;
-            }
-        }
-        DRGInstallationType::Xbox => {
-            let saves_dir = std::env::current_exe()
-                .ok()
-                .as_deref()
-                .and_then(Path::parent)
-                .and_then(Path::parent)
-                .and_then(Path::parent)
-                .context("could not determine save location")?
-                .join("Saved")
-                .join("SaveGames");
-            SAVES_DIR.get_or_init(|| saves_dir);
-
-            if let Ok(save_game) = &globals().resolution.save_game {
-                SaveGameToSlot
-                    .initialize(
-                        std::mem::transmute(save_game.save_game_to_slot.0),
-                        save_game_to_slot_detour,
-                    )?
-                    .enable()?;
-                LoadGameFromSlot
-                    .initialize(
-                        std::mem::transmute(save_game.load_game_from_slot.0),
-                        load_game_from_slot_detour,
-                    )?
-                    .enable()?;
-
-                DoesSaveGameExist
-                    .initialize(
-                        std::mem::transmute(save_game.does_save_game_exist.0),
-                        does_save_game_exist_detour,
-                    )?
-                    .enable()?;
+                    DoesSaveGameExist
+                        .initialize(
+                            std::mem::transmute(save_game.does_save_game_exist.0),
+                            does_save_game_exist_detour,
+                        )?
+                        .enable()?;
+                }
             }
         }
     }
@@ -140,25 +142,27 @@ pub unsafe fn initialize() -> Result<()> {
 }
 
 unsafe fn patch_mem(address: *mut u8, patch: impl AsRef<[u8]>) -> Result<()> {
-    let patch = patch.as_ref();
-    let patch_mem = std::slice::from_raw_parts_mut(address, patch.len());
+    unsafe {
+        let patch = patch.as_ref();
+        let patch_mem = std::slice::from_raw_parts_mut(address, patch.len());
 
-    let mut old = Default::default();
-    VirtualProtect(
-        patch_mem.as_ptr() as *const c_void,
-        patch_mem.len(),
-        PAGE_EXECUTE_READWRITE,
-        &mut old,
-    )?;
+        let mut old = Default::default();
+        VirtualProtect(
+            patch_mem.as_ptr() as *const c_void,
+            patch_mem.len(),
+            PAGE_EXECUTE_READWRITE,
+            &mut old,
+        )?;
 
-    patch_mem.copy_from_slice(patch);
+        patch_mem.copy_from_slice(patch);
 
-    VirtualProtect(
-        patch_mem.as_ptr() as *const c_void,
-        patch_mem.len(),
-        old,
-        &mut old,
-    )?;
+        VirtualProtect(
+            patch_mem.as_ptr() as *const c_void,
+            patch_mem.len(),
+            old,
+            &mut old,
+        )?;
+    }
 
     Ok(())
 }
@@ -205,8 +209,7 @@ fn save_game_to_slot_detour(
                 fs::create_dir_all(parent).ok();
             }
 
-            let res = fs::write(path, data.as_slice()).is_ok();
-            res
+            fs::write(path, data.as_slice()).is_ok()
         }
     }
 }
@@ -266,25 +269,27 @@ unsafe extern "system" fn exec_get_mod_json(
     stack: *mut ue::kismet::FFrame,
     _result: *mut c_void,
 ) {
-    let stack = stack.as_mut().unwrap();
+    unsafe {
+        let stack = stack.as_mut().unwrap();
 
-    let _ctx: Option<&ue::UObject> = stack.arg();
+        let _ctx: Option<&ue::UObject> = stack.arg();
 
-    stack.most_recent_property_address = std::ptr::null();
-    let ret: Option<ue::FString> = stack.arg();
-    let ret_address = (stack.most_recent_property_address as *mut ue::FString)
-        .as_mut()
-        .unwrap();
+        stack.most_recent_property_address = std::ptr::null();
+        let ret: Option<ue::FString> = stack.arg();
+        let ret_address = (stack.most_recent_property_address as *mut ue::FString)
+            .as_mut()
+            .unwrap();
 
-    let json = serde_json::to_string(&globals().meta).unwrap();
+        let json = serde_json::to_string(&globals().meta).unwrap();
 
-    ret_address.clear();
-    ret_address.extend_from_slice(&json.encode_utf16().chain([0]).collect::<Vec<_>>());
+        ret_address.clear();
+        ret_address.extend_from_slice(&json.encode_utf16().chain([0]).collect::<Vec<_>>());
 
-    std::mem::forget(ret);
+        std::mem::forget(ret);
 
-    if !stack.code.is_null() {
-        stack.code = stack.code.add(1);
+        if !stack.code.is_null() {
+            stack.code = stack.code.add(1);
+        }
     }
 }
 
@@ -293,24 +298,26 @@ unsafe extern "system" fn exec_get_update_available(
     stack: *mut ue::kismet::FFrame,
     _result: *mut c_void,
 ) {
-    let stack = stack.as_mut().unwrap();
+    unsafe {
+        let stack = stack.as_mut().unwrap();
 
-    let _ctx: Option<&ue::UObject> = stack.arg();
+        let _ctx: Option<&ue::UObject> = stack.arg();
 
-    stack.arg::<bool>();
-    let done_checking = &mut *(stack.most_recent_property_address as *mut bool);
-    *done_checking = true;
+        stack.arg::<bool>();
+        let done_checking = &mut *(stack.most_recent_property_address as *mut bool);
+        *done_checking = true;
 
-    stack.arg::<bool>();
-    let available = &mut *(stack.most_recent_property_address as *mut bool);
-    *available = false;
+        stack.arg::<bool>();
+        let available = &mut *(stack.most_recent_property_address as *mut bool);
+        *available = false;
 
-    std::mem::forget(stack.arg::<ue::FString>());
-    let version = &mut *(stack.most_recent_property_address as *mut ue::FString);
-    *version = ue::FString::new();
+        std::mem::forget(stack.arg::<ue::FString>());
+        let version = &mut *(stack.most_recent_property_address as *mut ue::FString);
+        *version = ue::FString::new();
 
-    if !stack.code.is_null() {
-        stack.code = stack.code.add(1);
+        if !stack.code.is_null() {
+            stack.code = stack.code.add(1);
+        }
     }
 }
 
@@ -319,18 +326,20 @@ unsafe extern "system" fn exec_print_string(
     stack: *mut ue::kismet::FFrame,
     _result: *mut c_void,
 ) {
-    let stack = stack.as_mut().unwrap();
+    unsafe {
+        let stack = stack.as_mut().unwrap();
 
-    let _ctx: Option<NonNull<UObject>> = stack.arg();
-    let string: ue::FString = stack.arg();
-    let _print_to_screen: bool = stack.arg();
-    let _print_to_log: bool = stack.arg();
-    let _color: FLinearColor = stack.arg();
-    let _duration: f32 = stack.arg();
+        let _ctx: Option<NonNull<UObject>> = stack.arg();
+        let string: ue::FString = stack.arg();
+        let _print_to_screen: bool = stack.arg();
+        let _print_to_log: bool = stack.arg();
+        let _color: FLinearColor = stack.arg();
+        let _duration: f32 = stack.arg();
 
-    println!("PrintString({string})");
+        println!("PrintString({string})");
 
-    if !stack.code.is_null() {
-        stack.code = stack.code.add(1);
+        if !stack.code.is_null() {
+            stack.code = stack.code.add(1);
+        }
     }
 }

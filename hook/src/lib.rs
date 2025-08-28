@@ -125,10 +125,12 @@ unsafe fn patch() -> Result<()> {
     let resolution = image.resolve(hook_resolvers::HookResolution::resolver())?;
     info!("PS scan: {:#x?}", resolution);
 
-    GLOBALS = Some(Globals { resolution, meta });
-    LOG_GUARD.with_borrow_mut(|g| *g = guard);
+    unsafe {
+        GLOBALS = Some(Globals { resolution, meta });
+        LOG_GUARD.with_borrow_mut(|g| *g = guard);
 
-    hooks::initialize()?;
+        hooks::initialize()?;
+    }
 
     info!("hook initialized");
 

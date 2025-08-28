@@ -44,6 +44,12 @@ pub struct HttpProvider {
     client: reqwest::Client,
 }
 
+impl Default for HttpProvider {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl HttpProvider {
     pub fn new_provider(
         _parameters: &HashMap<String, String>,

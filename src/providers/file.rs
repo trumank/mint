@@ -21,6 +21,12 @@ inventory::submit! {
 #[derive(Debug)]
 pub struct FileProvider {}
 
+impl Default for FileProvider {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl FileProvider {
     pub fn new_provider(
         _parameters: &HashMap<String, String>,

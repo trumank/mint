@@ -21,21 +21,25 @@ pub fn kismet_hooks() -> &'static [(&'static str, ExecFn)] {
 
 pub unsafe fn init_hooks() -> Result<()> {
     if let Ok(server_name) = &globals().resolution.server_name {
-        GetServerName
-            .initialize(
-                std::mem::transmute(server_name.get_server_name.0),
-                detour_get_server_name,
-            )?
-            .enable()?;
+        unsafe {
+            GetServerName
+                .initialize(
+                    std::mem::transmute(server_name.get_server_name.0),
+                    detour_get_server_name,
+                )?
+                .enable()?;
+        }
     }
 
     if let Ok(server_mods) = &globals().resolution.server_mods {
-        USessionHandlingFSDFillSessionSetting
-            .initialize(
-                std::mem::transmute(server_mods.fill_session_setting.0),
-                detour_fill_session_setting,
-            )?
-            .enable()?;
+        unsafe {
+            USessionHandlingFSDFillSessionSetting
+                .initialize(
+                    std::mem::transmute(server_mods.fill_session_setting.0),
+                    detour_fill_session_setting,
+                )?
+                .enable()?;
+        }
     }
 
     Ok(())
@@ -255,37 +259,36 @@ unsafe extern "system" fn exec_get_mods_installed(
     stack: *mut ue::kismet::FFrame,
     result: *mut c_void,
 ) {
-    let stack = stack.as_mut().unwrap();
+    unsafe {
+        let stack = stack.as_mut().unwrap();
 
-    let session: FBlueprintSessionResult = stack.arg();
-    let _exclude_verified_mods: bool = stack.arg();
+        let session: FBlueprintSessionResult = stack.arg();
+        let _exclude_verified_mods: bool = stack.arg();
 
-    let result = &mut *(result as *mut TArray<FString>);
-    result.clear();
+        let result = &mut *(result as *mut TArray<FString>);
+        result.clear();
 
-    let settings = &session.online_result.session.session_settings.settings;
+        let settings = &session.online_result.session.session_settings.settings;
 
-    let mods = settings.find(FName::new(&"Mods".into()));
-    if let Some(mods) = mods {
-        if let FVariantData {
-            type_: EOnlineKeyValuePairDataType::String,
-            value: FVariantDataValue { as_tchar },
-        } = mods.data
+        let mods = settings.find(FName::new(&"Mods".into()));
+        if let Some(mods) = mods
+            && let FVariantData {
+                type_: EOnlineKeyValuePairDataType::String,
+                value: FVariantDataValue { as_tchar },
+            } = mods.data
+            && let Ok(string) = widestring::U16CStr::from_ptr_str(as_tchar).to_string()
+            && let Ok(mods) = serde_json::from_str::<Vec<JsonMod>>(&string)
         {
-            if let Ok(string) = widestring::U16CStr::from_ptr_str(as_tchar).to_string() {
-                if let Ok(mods) = serde_json::from_str::<Vec<JsonMod>>(&string) {
-                    for m in mods {
-                        result.push(m.name.as_str().into());
-                    }
-                }
+            for m in mods {
+                result.push(m.name.as_str().into());
             }
         }
-    }
 
-    // TODO figure out lifetimes of structs from kismet params
-    std::mem::forget(session);
+        // TODO figure out lifetimes of structs from kismet params
+        std::mem::forget(session);
 
-    if !stack.code.is_null() {
-        stack.code = stack.code.add(1);
+        if !stack.code.is_null() {
+            stack.code = stack.code.add(1);
+        }
     }
 }

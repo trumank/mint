@@ -32,14 +32,6 @@ pub type FnUObjectBaseUtilityGetPathName =
 
 #[derive(Debug, Default)]
 #[repr(C)]
-pub struct FVector {
-    pub x: f32,
-    pub y: f32,
-    pub z: f32,
-}
-
-#[derive(Debug, Default)]
-#[repr(C)]
 pub struct FLinearColor {
     pub r: f32,
     pub g: f32,

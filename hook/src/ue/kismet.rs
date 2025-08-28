@@ -25,14 +25,16 @@ impl FFrame {
         let mut value: MaybeUninit<T> = MaybeUninit::zeroed();
         let ptr = value.as_mut_ptr() as *mut _;
 
-        if self.code.is_null() {
-            let cur = self.property_chain_for_compiled_in;
-            self.property_chain_for_compiled_in = (*cur).next;
-            (globals().fframe_step_explicit_property())(self, ptr, cur as *const FProperty);
-        } else {
-            (globals().fframe_step())(self, self.object, ptr);
-        }
+        unsafe {
+            if self.code.is_null() {
+                let cur = self.property_chain_for_compiled_in;
+                self.property_chain_for_compiled_in = (*cur).next;
+                (globals().fframe_step_explicit_property())(self, ptr, cur as *const FProperty);
+            } else {
+                (globals().fframe_step())(self, self.object, ptr);
+            }
 
-        value.assume_init()
+            value.assume_init()
+        }
     }
 }
