@@ -1,17 +1,17 @@
 use std::collections::BTreeSet;
 use std::path::PathBuf;
 
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result, anyhow};
 use clap::{Parser, Subcommand};
 use tracing::{debug, info};
 
-use mint::mod_lints::{run_lints, LintId};
+use mint::mod_lints::{LintId, run_lints};
 use mint::providers::ProviderFactory;
-use mint::{gui::gui, providers::ModSpecification, state::State};
 use mint::{
-    resolve_ordered_with_provider_init, resolve_unordered_and_integrate_with_provider_init, Dirs,
-    MintError,
+    Dirs, MintError, resolve_ordered_with_provider_init,
+    resolve_unordered_and_integrate_with_provider_init,
 };
+use mint::{gui::gui, providers::ModSpecification, state::State};
 
 /// Command line integration tool.
 #[derive(Parser, Debug)]
@@ -110,7 +110,7 @@ fn main() -> Result<()> {
         .map(Dirs::from_path)
         .unwrap_or_else(Dirs::default_xdg)?;
 
-    std::env::set_var("RUST_BACKTRACE", "1");
+    unsafe { std::env::set_var("RUST_BACKTRACE", "1") };
 
     let _guard = mint_lib::setup_logging(dirs.data_dir.join("mint.log"), "mint")?;
     debug!("logging setup complete");

@@ -12,12 +12,11 @@ use std::{
 use anyhow::{Context, Result};
 use fs_err as fs;
 use mint_lib::DRGInstallationType;
-use windows::Win32::System::Memory::{VirtualProtect, PAGE_EXECUTE_READWRITE};
+use windows::Win32::System::Memory::{PAGE_EXECUTE_READWRITE, VirtualProtect};
 
 use crate::{
-    globals,
+    LOG_GUARD, globals,
     ue::{self, FLinearColor, UObject},
-    LOG_GUARD,
 };
 
 retour::static_detour! {

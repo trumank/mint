@@ -1,4 +1,4 @@
-use egui::{text::LayoutJob, Color32, TextFormat};
+use egui::{Color32, TextFormat, text::LayoutJob};
 
 pub(crate) struct FindString<'data> {
     pub(crate) string: &'data str,

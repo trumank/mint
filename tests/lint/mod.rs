@@ -167,9 +167,11 @@ pub fn test_lint_only_non_pak_files() {
 
     println!("{archive_with_only_non_pak_files_mods:#?}");
 
-    assert!(archive_with_only_non_pak_files_mods
-        .unwrap()
-        .contains(&only_non_pak_spec));
+    assert!(
+        archive_with_only_non_pak_files_mods
+            .unwrap()
+            .contains(&only_non_pak_spec)
+    );
 }
 
 #[test]
@@ -195,9 +197,11 @@ pub fn test_lint_multi_pak_archive() {
 
     println!("{archive_with_multiple_paks_mods:#?}");
 
-    assert!(archive_with_multiple_paks_mods
-        .unwrap()
-        .contains(&multiple_paks_spec));
+    assert!(
+        archive_with_multiple_paks_mods
+            .unwrap()
+            .contains(&multiple_paks_spec)
+    );
 }
 
 #[test]

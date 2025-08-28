@@ -1,3 +1,4 @@
+use patternsleuth::MemoryTrait;
 use patternsleuth::resolvers::futures::future::join_all;
 use patternsleuth::resolvers::unreal::blueprint_library::UFunctionBind;
 use patternsleuth::resolvers::unreal::fname::{FNameCtorWchar, FNameToString};
@@ -12,7 +13,6 @@ use patternsleuth::resolvers::unreal::save_game::{
 use patternsleuth::resolvers::unreal::*;
 use patternsleuth::resolvers::*;
 use patternsleuth::scanner::Pattern;
-use patternsleuth::MemoryTrait;
 
 #[cfg(feature = "serde-resolvers")]
 use serde::{Deserialize, Serialize};
@@ -23,7 +23,7 @@ pub struct GetServerName(pub usize);
 impl_resolver_singleton!(collect, GetServerName);
 impl_resolver_singleton!(PEImage, GetServerName, |ctx| async {
     let patterns = [
-        "48 89 5C 24 10 48 89 6C 24 18 48 89 74 24 20 57 41 56 41 57 48 83 EC 30 45 33 FF 4C 8B F2 48 8B D9 44 89 7C 24 50 41 8B FF"
+        "48 89 5C 24 10 48 89 6C 24 18 48 89 74 24 20 57 41 56 41 57 48 83 EC 30 45 33 FF 4C 8B F2 48 8B D9 44 89 7C 24 50 41 8B FF",
     ];
 
     let res = join_all(patterns.iter().map(|p| ctx.scan(Pattern::new(p).unwrap()))).await;

@@ -6,22 +6,23 @@ use fs_err as fs;
 
 use repak::PakWriter;
 use serde::Deserialize;
-use snafu::{prelude::*, Whatever};
+use snafu::{Whatever, prelude::*};
 use tracing::{info, warn};
 use uasset_utils::asset_registry::{AssetRegistry, Readable as _, Writable as _};
 use uasset_utils::paths::{PakPath, PakPathBuf, PakPathComponentTrait};
 use uasset_utils::splice::{
-    extract_tracked_statements, inject_tracked_statements, walk, AssetVersion, TrackedStatement,
+    AssetVersion, TrackedStatement, extract_tracked_statements, inject_tracked_statements, walk,
 };
-use unreal_asset::engine_version::EngineVersion;
 use unreal_asset::AssetBuilder;
+use unreal_asset::engine_version::EngineVersion;
 
 use crate::mod_lints::LintError;
 use crate::providers::{ModInfo, ProviderError, ReadSeek};
-use mint_lib::mod_info::{ApprovalStatus, Meta, MetaConfig, MetaMod};
 use mint_lib::DRGInstallation;
+use mint_lib::mod_info::{ApprovalStatus, Meta, MetaConfig, MetaMod};
 
 use unreal_asset::{
+    Asset,
     exports::ExportBaseTrait,
     flags::EObjectFlags,
     kismet::{
@@ -29,9 +30,8 @@ use unreal_asset::{
         ExSelf, ExSoftObjectConst, ExStringConst, ExVectorConst, FieldPath, KismetPropertyPointer,
     },
     kismet::{ExFalse, KismetExpression},
-    types::vector::Vector,
     types::PackageIndex,
-    Asset,
+    types::vector::Vector,
 };
 
 /// Why does the uninstall function require a list of Modio mod IDs?

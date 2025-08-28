@@ -7,7 +7,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use fs_err as fs;
 use tracing::*;
 use tracing_subscriber::fmt::format::FmtSpan;
@@ -162,14 +162,13 @@ pub fn setup_logging<P: AsRef<Path>>(
     use tracing::metadata::LevelFilter;
     use tracing_subscriber::prelude::*;
     use tracing_subscriber::{
+        EnvFilter,
         field::RecordFields,
         filter,
         fmt::{
-            self,
+            self, FormatFields,
             format::{Pretty, Writer},
-            FormatFields,
         },
-        EnvFilter,
     };
 
     /// Workaround for <https://github.com/tokio-rs/tracing/issues/1817>.

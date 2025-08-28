@@ -129,7 +129,7 @@ pub(crate) fn read_cache_metadata_or_default(
                     return Err(CacheError::DeserializeJsonFailed {
                         source: Some(e),
                         reason: "malformed JSON",
-                    })
+                    });
                 }
             };
             let Some(obj_map) = dyn_value.as_object_mut() else {

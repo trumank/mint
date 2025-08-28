@@ -21,7 +21,7 @@ use eframe::epaint::{Pos2, Vec2};
 use eframe::{
     egui::{FontSelection, Layout, TextFormat, Ui},
     emath::{Align, Align2},
-    epaint::{text::LayoutJob, Color32, Stroke},
+    epaint::{Color32, Stroke, text::LayoutJob},
 };
 use egui_commonmark::{CommonMarkCache, CommonMarkViewer};
 use itertools::Itertools as _;
@@ -35,19 +35,19 @@ use tokio::{
 };
 use tracing::{debug, trace};
 
+use crate::Dirs;
 use crate::gui::find_string::searchable_text;
 use crate::mod_lints::{LintId, LintReport, SplitAssetPair};
 use crate::providers::ProviderError;
 use crate::state::SortingConfig;
-use crate::Dirs;
 use crate::{
+    MintError,
     integrate::uninstall,
     is_drg_pak,
     providers::{
         ApprovalStatus, FetchProgress, ModInfo, ModSpecification, ModStore, ProviderFactory,
     },
     state::{ModConfig, ModData_v0_1_0 as ModData, ModOrGroup, ModProfile, State},
-    MintError,
 };
 use message::MessageHandle;
 use request_counter::{RequestCounter, RequestID};
@@ -374,7 +374,14 @@ impl App {
                             );
                         }
                         ApprovalStatus::Sandbox => {
-                            mk_searchable_modio_tag("Sandbox", ui, Some(egui::Color32::LIGHT_YELLOW), Some("Contains significant, possibly progression breaking, changes to gameplay"));
+                            mk_searchable_modio_tag(
+                                "Sandbox",
+                                ui,
+                                Some(egui::Color32::LIGHT_YELLOW),
+                                Some(
+                                    "Contains significant, possibly progression breaking, changes to gameplay",
+                                ),
+                            );
                         }
                     }
 
@@ -684,7 +691,7 @@ impl App {
                             ui_mod(ctx, ui, None, row_index, mc);
                         }
                         ModOrGroup::Group {
-                            ref group_name,
+                            group_name,
                             enabled,
                         } => {
                             if ui
@@ -694,7 +701,7 @@ impl App {
                             {
                                 ctx.needs_save = true;
                             }
-                            ui.collapsing(group_name, |ui| {
+                            ui.collapsing(group_name.as_str(), |ui| {
                                 for (index, m) in groups
                                     .get_mut(group_name)
                                     .unwrap()
@@ -723,7 +730,7 @@ impl App {
                         (m, info)
                     })
                     .enumerate()
-                    .sorted_by(|a, b| comp((a.1 .0, a.1 .1.as_ref()), (b.1 .0, b.1 .1.as_ref())))
+                    .sorted_by(|a, b| comp((a.1.0, a.1.1.as_ref()), (b.1.0, b.1.1.as_ref())))
                     .enumerate()
                     .for_each(|(visual_index, (store_index, item))| {
                         let mut frame = egui::Frame::NONE;

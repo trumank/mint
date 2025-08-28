@@ -112,7 +112,9 @@ pub enum ProviderError {
     FetchError { source: reqwest::Error, url: String },
     #[snafu(display("error processing <{url}> while writing to local buffer"))]
     BufferIoError { source: std::io::Error, url: String },
-    #[snafu(display("preview mod links cannot be added directly, please subscribe to the mod on mod.io and and then use the non-preview link"))]
+    #[snafu(display(
+        "preview mod links cannot be added directly, please subscribe to the mod on mod.io and and then use the non-preview link"
+    ))]
     PreviewLink { url: String },
     #[snafu(display("mod <{url}> does not have an associated modfile"))]
     NoAssociatedModfile { url: String },

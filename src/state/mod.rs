@@ -13,12 +13,12 @@ use snafu::prelude::*;
 
 use self::config::ConfigWrapper;
 use crate::{
+    Dirs,
     gui::GuiTheme,
     providers::{ModSpecification, ModStore},
-    Dirs,
 };
 use crate::{gui::SortBy, providers::ProviderError};
-use mint_lib::{mod_info::MetaConfig, DRGInstallation};
+use mint_lib::{DRGInstallation, mod_info::MetaConfig};
 
 /// Mod configuration, holds ModSpecification as well as other metadata
 #[derive(Debug, Clone, Hash, Serialize, Deserialize)]
@@ -175,7 +175,7 @@ impl ModData!["0.1.0"] {
         self.profiles.get(profile).unwrap().mods.iter().any(|m| {
             let f = &mut f;
             match m {
-                ModOrGroup::Individual(ref mc) => f(mc, None),
+                ModOrGroup::Individual(mc) => f(mc, None),
                 ModOrGroup::Group {
                     group_name,
                     enabled,
@@ -205,10 +205,10 @@ impl ModData!["0.1.0"] {
             .any(|m| {
                 let f = &mut f;
                 match m {
-                    ModOrGroup::Individual(ref mut mc) => f(mc, None),
+                    ModOrGroup::Individual(mc) => f(mc, None),
                     ModOrGroup::Group {
                         group_name,
-                        ref mut enabled,
+                        enabled,
                     } => self
                         .groups
                         .get_mut(group_name)

@@ -12,8 +12,8 @@ use tracing::*;
 
 use super::SelfUpdateProgress;
 use super::{
-    request_counter::{RequestCounter, RequestID},
     App, SpecFetchProgress, WindowProviderParameters,
+    request_counter::{RequestCounter, RequestID},
 };
 use crate::gui::LastAction;
 use crate::integrate::*;
@@ -215,7 +215,7 @@ impl Integrate {
                     app.last_action = Some(LastAction::success("integration complete".to_string()));
                 }
                 Err(ref e)
-                    if let IntegrationError::ProviderError { ref source } = e
+                    if let IntegrationError::ProviderError { source } = e
                         && let ProviderError::NoProvider { url: _, factory } = source =>
                 {
                     app.window_provider_parameters =
@@ -476,7 +476,7 @@ impl LintMods {
                         Some(LastAction::success("lint mod report complete".to_string()));
                 }
                 Err(ref e)
-                    if let IntegrationError::ProviderError { ref source } = e
+                    if let IntegrationError::ProviderError { source } = e
                         && let ProviderError::NoProvider { url: _, factory } = source =>
                 {
                     app.window_provider_parameters =

@@ -11,7 +11,7 @@ repository = "https://github.com/trumank/mint"
 authors = ["trumank", "jieyouxu"]
 license = "MIT OR Apache-2.0"
 version = "0.2.10"
-edition = "2021"
+edition = "2024"
 
 [workspace.dependencies]
 anyhow = { version = "1.0.97", features = ["backtrace"] }

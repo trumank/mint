@@ -1,4 +1,3 @@
-#![feature(let_chains)]
 #![feature(if_let_guard)]
 
 pub mod gui;
@@ -213,8 +212,8 @@ where
         match resolve_unordered_and_integrate(&game_path, state, mod_specs, update).await {
             Ok(()) => return Ok(()),
             Err(ref e)
-                if let IntegrationError::ProviderError { ref source } = e
-                    && let ProviderError::NoProvider { ref url, factory } = source =>
+                if let IntegrationError::ProviderError { source } = e
+                    && let ProviderError::NoProvider { url, factory } = source =>
             {
                 init(state, url.clone(), factory)?
             }
@@ -236,9 +235,9 @@ where
         match resolve_ordered(state, mod_specs).await {
             Ok(mod_paths) => return Ok(mod_paths),
             Err(ref e)
-                if let MintError::IntegrationError { ref source } = e
-                    && let IntegrationError::ProviderError { ref source } = source
-                    && let ProviderError::NoProvider { ref url, factory } = source =>
+                if let MintError::IntegrationError { source } = e
+                    && let IntegrationError::ProviderError { source } = source
+                    && let ProviderError::NoProvider { url, factory } = source =>
             {
                 init(state, url.clone(), factory)?
             }
