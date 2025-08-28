@@ -99,7 +99,10 @@ impl_resolver_singleton!(PEImage, ModsFName, |ctx| async {
 pub struct Disable(pub usize);
 impl_resolver_singleton!(collect, Disable);
 impl_resolver_singleton!(PEImage, Disable, |ctx| async {
-    let patterns = ["4C 8B B4 24 48 01 00 00 0F 84"];
+    let patterns = [
+        "4C 8B B4 24 48 01 00 00 0F 84",
+        "4C 8B B4 24 D8 01 00 00 0F 84",
+    ];
 
     let res = join_all(patterns.iter().map(|p| ctx.scan(Pattern::new(p).unwrap()))).await;
 
