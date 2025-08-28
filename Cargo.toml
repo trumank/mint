@@ -3,7 +3,6 @@ members = [
   "mint_lib",
   "hook",
   "hook_resolvers",
-  "workspace_hack",
 ]
 
 [workspace.package]
@@ -39,14 +38,11 @@ version.workspace = true
 edition.workspace = true
 
 [features]
-default = ["hook", "oodle_platform_dependent"]
+default = ["hook"]
 hook = ["dep:hook"]
-oodle = ["repak/oodle_implicit_dynamic"]
-oodle_platform_dependent = ["workspace_hack/oodle_platform_dependent"]
 debug = ["egui/deadlock_detection"]
 
 [dependencies]
-workspace_hack = { path = "workspace_hack" }
 ansi_term = "0.12.1"
 anyhow.workspace = true
 async-trait = "0.1.89"
