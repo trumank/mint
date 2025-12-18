@@ -1758,7 +1758,9 @@ impl eframe::App for App {
                         }
 
                         ui.add_enabled_ui(self.state.config.drg_pak_path.is_some(), |ui| {
-                            let mut button = ui.button("Install mods");
+                            let mut button = ui.button("Apply changes").on_hover_text(
+                                "Install the hook dll to game folder and regenerate mod bundle",
+                            );
                             if self.state.config.drg_pak_path.is_none() {
                                 button = button.on_disabled_hover_text(
                                     "DRG install not found. Configure it in the settings menu.",
@@ -1796,7 +1798,9 @@ impl eframe::App for App {
                         });
 
                         ui.add_enabled_ui(self.state.config.drg_pak_path.is_some(), |ui| {
-                            let mut button = ui.button("Uninstall mods");
+                            let mut button = ui.button("Uninstall hook and mods").on_hover_text(
+                                "Remove the hook dll and mod bundle from game folder",
+                            );
                             if self.state.config.drg_pak_path.is_none() {
                                 button = button.on_disabled_hover_text(
                                     "DRG install not found. Configure it in the settings menu.",
